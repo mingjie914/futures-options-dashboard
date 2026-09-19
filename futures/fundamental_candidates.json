@@ -1,0 +1,352 @@
+{
+  "version": 1,
+  "evidence_source": "用户粘贴的Alice/RAG回复（2026-09-07）；本文未独立获得原文，全部为待核验声明",
+  "production_enabled": false,
+  "raw_probe": "runtime/fundamental_lab/20260907T153709Z_edb99420c4f2453baf2b89fd78e3f32d.json",
+  "audit": "runtime/fundamental_lab/20260907_probe_review.json",
+  "indicators": [
+    {
+      "id": "NEW-01",
+      "code": "S0033227",
+      "claimed_name": "价格:螺纹钢:HRB400 20mm:上海",
+      "claimed_frequency": "D",
+      "claimed_unit": "元/吨",
+      "claimed_region": "上海",
+      "claimed_specification": "HRB400、20mm、中天、理计",
+      "role": "reference_price",
+      "blocker": "非HRB400E；含税/提货未明",
+      "claimed_document": "螺纹钢现货（上海）S0033227，数据取自哪里？算法是什么？",
+      "identity_status": "unverified",
+      "production_ready": false
+    },
+    {
+      "id": "NEW-01备选",
+      "code": "S5707798",
+      "claimed_name": "价格:螺纹钢:HRB400 20mm:全国",
+      "claimed_frequency": "D",
+      "claimed_unit": "元/吨",
+      "claimed_region": "全国",
+      "claimed_specification": "HRB400、20mm",
+      "role": "reference_price",
+      "blocker": "非上海HRB400E，计重税价未知",
+      "claimed_document": "S5707798更新时间",
+      "identity_status": "unverified",
+      "production_ready": false
+    },
+    {
+      "id": "NEW-02",
+      "code": "S0181750",
+      "claimed_name": "库存:螺纹钢(含上海全部仓库)",
+      "claimed_frequency": "W",
+      "claimed_unit": "万吨",
+      "claimed_region": null,
+      "claimed_specification": "社会库存",
+      "role": "inventory_candidate",
+      "blocker": "地区范围未确认，不能标全国或与厂库相加",
+      "claimed_document": "S0181750具体口径是不是炼钢厂；更新规律",
+      "identity_status": "unverified",
+      "production_ready": false
+    },
+    {
+      "id": "NEW-03",
+      "code": "S5713337",
+      "claimed_name": "主要建筑钢材生产企业库存:螺纹钢",
+      "claimed_frequency": "W",
+      "claimed_unit": "万吨",
+      "claimed_region": "全国",
+      "claimed_specification": "139家建材钢厂，华东64/南方46/北方29",
+      "role": "inventory_candidate",
+      "blocker": "仍需原文证据和发布时间；2026-09-04同代码159.75已实测",
+      "claimed_document": "S5713337指标的统计样本",
+      "identity_status": "unverified",
+      "production_ready": false
+    },
+    {
+      "id": "NEW-04",
+      "code": "S5801814",
+      "claimed_name": "价格:1#电解铜:Cu_Ag>=99.95%:国产,进口",
+      "claimed_frequency": "D",
+      "claimed_unit": "元/吨",
+      "claimed_region": "全国",
+      "claimed_specification": "1#电解铜、国产进口综合",
+      "role": "reference_price",
+      "blocker": "样本呈周五7天间隔，与Alice日频冲突；非上海现货",
+      "claimed_document": "S5801814口径文档",
+      "identity_status": "unverified",
+      "production_ready": false
+    },
+    {
+      "id": "NEW-04备选",
+      "code": "S5809594",
+      "claimed_name": "现货平均价:阴极铜:Cu-CATH-2:华南",
+      "claimed_frequency": "D",
+      "claimed_unit": "元/吨",
+      "claimed_region": "华南",
+      "claimed_specification": "Cu-CATH-2，含税，贸易商成交价",
+      "role": "reference_price",
+      "blocker": "非上海指定等级现货",
+      "claimed_document": "S5809594口径文档",
+      "identity_status": "unverified",
+      "production_ready": false
+    },
+    {
+      "id": "NEW-06",
+      "code": "S0142909",
+      "claimed_name": "现货价:豆粕",
+      "claimed_frequency": "D",
+      "claimed_unit": "元/吨",
+      "claimed_region": "全国",
+      "claimed_specification": "含增值税，蛋白未明",
+      "role": "reference_price",
+      "blocker": "非张家港43%可比价格",
+      "claimed_document": "S0142909有没有包含增值税",
+      "identity_status": "unverified",
+      "production_ready": false
+    },
+    {
+      "id": "NEW-06佐证",
+      "code": "S5006030",
+      "claimed_name": "豆粕现货价:大连(43%)",
+      "claimed_frequency": "D",
+      "claimed_unit": "元/吨",
+      "claimed_region": "大连",
+      "claimed_specification": "43%蛋白",
+      "role": "reference_price",
+      "blocker": "非张家港；税价提货未明",
+      "claimed_document": "S5006030和S5006031统计口径是43还是46",
+      "identity_status": "unverified",
+      "production_ready": false
+    },
+    {
+      "id": "NEW-06佐证",
+      "code": "S5006031",
+      "claimed_name": "豆粕现货价:北京(43%)",
+      "claimed_frequency": "D",
+      "claimed_unit": "元/吨",
+      "claimed_region": "北京",
+      "claimed_specification": "43%蛋白",
+      "role": "reference_price",
+      "blocker": "非张家港；税价提货未明",
+      "claimed_document": "S5006030和S5006031统计口径是43还是46",
+      "identity_status": "unverified",
+      "production_ready": false
+    },
+    {
+      "id": "NEW-07",
+      "code": "S5041144",
+      "claimed_name": "库存量:豆粕:全国",
+      "claimed_frequency": "W",
+      "claimed_unit": "万吨",
+      "claimed_region": "全国",
+      "claimed_specification": "七区域定点油厂",
+      "role": "inventory_candidate",
+      "blocker": "观测日期周日不等于发布时间；样本最新2026-08-30",
+      "claimed_document": "S5041144统计口径",
+      "identity_status": "unverified",
+      "production_ready": false
+    },
+    {
+      "id": "NEW-08-RB",
+      "code": "S0114170",
+      "claimed_name": "上期所螺纹钢库存（仓单日报口径）",
+      "claimed_frequency": "D",
+      "claimed_unit": null,
+      "claimed_region": "上期所交割库",
+      "claimed_specification": "交易所仓单",
+      "role": "warrant_candidate",
+      "blocker": "Alice单位为手/吨，未确认，禁止换算",
+      "claimed_document": "S0114170上海期货交易所公布的螺纹钢库存数据",
+      "identity_status": "unverified",
+      "production_ready": false
+    },
+    {
+      "id": "NEW-08-CU",
+      "code": "S0049493",
+      "claimed_name": "库存期货:阴极铜",
+      "claimed_frequency": "D",
+      "claimed_unit": "吨",
+      "claimed_region": "上期所交割库",
+      "claimed_specification": "交易所仓单",
+      "role": "warrant_candidate",
+      "blocker": "仍需原文及发布时间确认",
+      "claimed_document": "库存期货:阴极铜",
+      "identity_status": "unverified",
+      "production_ready": false
+    },
+    {
+      "id": "NEW-08-CU补充",
+      "code": "S0049507",
+      "claimed_name": "库存小计:阴极铜:总计",
+      "claimed_frequency": "W",
+      "claimed_unit": "吨",
+      "claimed_region": "上期所各交割库",
+      "claimed_specification": "交易所库存小计（非仓单）",
+      "role": "inventory_candidate",
+      "blocker": "不能与仓单默认相加",
+      "claimed_document": "库存小计:阴极铜:总计",
+      "identity_status": "unverified",
+      "production_ready": false
+    },
+    {
+      "id": "NEW-10",
+      "code": "S5012468",
+      "claimed_name": "豆油:压榨量:中国",
+      "claimed_frequency": "M",
+      "claimed_unit": "吨",
+      "claimed_region": "中国",
+      "claimed_specification": "Alice称USDA大豆压榨量",
+      "role": "quarantine",
+      "blocker": "请求截止2026-09-07却返回2026-12-31；预测/年度所属期和单位需核实，不作已实现月度或周度产量",
+      "claimed_document": "S5012468统计口径",
+      "identity_status": "unverified",
+      "production_ready": false
+    },
+    {
+      "id": "ALR-004",
+      "code": "S5715204",
+      "claimed_name": "到港量:铁矿石:中国",
+      "claimed_frequency": "M",
+      "claimed_unit": "万吨",
+      "product": "I",
+      "role": "trade_flow",
+      "blocker": "原ALR千吨与声明万吨不同，未取得同码原始单位；到港量不能直接等同海关进口量",
+      "evidence_source": "用户2026-09-09四码文档标题与摘录；仅用户转述，未独立读取Wind原文",
+      "claimed_document": null,
+      "identity_status": "user_supplied_rag_code_name_evidence",
+      "production_ready": false,
+      "claimed_documents": [
+        {
+          "title": "请问EDB中\"到港量:铁矿石:中国\"(S5715204)指标的统计口径是什么呢？",
+          "excerpt_summary": "该指标统计的是中国铁矿石到港量即中国进口铁矿石量。",
+          "original_document_independently_verified": false,
+          "document_date": null
+        }
+      ],
+      "metadata_status": "frequency_unit_claimed_from_name_query_not_terminal_attributes",
+      "runtime_verified": false
+    },
+    {
+      "id": "ALR-008",
+      "code": "G8403835",
+      "claimed_name": "实际市场价格:全球:铜",
+      "claimed_frequency": "M",
+      "claimed_unit": "美元/公吨",
+      "product": "CU",
+      "role": "reference_price",
+      "blocker": "仅全球低频参考；实际价格是否不变价、基期及来源口径待核，不能替代上海现货",
+      "evidence_source": "用户2026-09-09四码文档标题与摘录；仅用户转述，未独立读取Wind原文",
+      "claimed_document": null,
+      "identity_status": "user_supplied_rag_code_name_evidence",
+      "production_ready": false,
+      "claimed_documents": [
+        {
+          "title": "请问EDB中\"实际市场价格:全球:铜\"(G8403835)指标的统计口径是什么呢？",
+          "excerpt_summary": "来源于IMF每月披露的商品价格报告，A级铜最低纯度99.9935%，LME现货价格，CIF欧洲港口月度数据。",
+          "original_document_independently_verified": false,
+          "document_date": null
+        }
+      ],
+      "metadata_status": "frequency_unit_claimed_from_name_query_not_terminal_attributes",
+      "runtime_verified": false
+    },
+    {
+      "id": "ALR-016",
+      "code": "S5006415",
+      "claimed_name": "压榨利润:进口大豆:山东",
+      "claimed_frequency": "D",
+      "claimed_unit": "元/吨",
+      "product": "M",
+      "role": "processing_margin",
+      "blocker": "停更RAG与名称查询最新值冲突，停复更状态须同码接口确认；费用适用期和公式未完整核实，不硬编码100元/吨。",
+      "evidence_source": "用户2026-09-09四码文档标题与摘录；仅用户转述，未独立读取Wind原文",
+      "claimed_document": null,
+      "identity_status": "user_supplied_rag_code_name_evidence",
+      "production_ready": false,
+      "claimed_documents": [
+        {
+          "title": "经济数据库中压榨利润：进口大豆：山东S5006415涉及的加工费主要是指什么？",
+          "excerpt_summary": "加工费包括直接和间接成本，在相当长时间内为常值，我国平均100元人民币/吨。",
+          "original_document_independently_verified": false,
+          "document_date": null
+        },
+        {
+          "title": "请问压榨利润:进口大豆:山东(S5006415)近期数据没有更新吗？",
+          "excerpt_summary": "因涉及数据源合作重新洽谈，指标暂无法更新，恢复后会展示。",
+          "original_document_independently_verified": false,
+          "document_date": null
+        }
+      ],
+      "metadata_status": "frequency_unit_claimed_from_name_query_not_terminal_attributes",
+      "runtime_verified": false
+    },
+    {
+      "id": "ALR-025",
+      "code": "S5111903",
+      "claimed_name": "现货价:原油:美国西德克萨斯中级轻质原油(WTI)",
+      "claimed_frequency": "D",
+      "claimed_unit": "美元/桶",
+      "product": "SC",
+      "role": "quarantine",
+      "blocker": "历史客服文档称改用WTI期货连续结算价加工；当前加工方式/适用期未知，不可作为独立现货或基差输入。周四停发不设为固定调度规则。",
+      "evidence_source": "用户2026-09-09四码文档标题与摘录；仅用户转述，未独立读取Wind原文",
+      "claimed_document": null,
+      "identity_status": "user_supplied_rag_code_name_evidence",
+      "production_ready": false,
+      "claimed_documents": [
+        {
+          "title": "WTI原油 期货结算价（连续）M0000005和现货价S5111903数据是一样的。想知道是什么原因？",
+          "excerpt_summary": "之前KPC数据源停止更新，指标数据加工同期货结算价（连续）：WTI原油（M0000005）。",
+          "original_document_independently_verified": false,
+          "document_date": null
+        },
+        {
+          "title": "请问S5111903和S0180938一个是现货一个是期货，为什么数据一样呢？",
+          "excerpt_summary": "按照数据源加工，数据无误。",
+          "original_document_independently_verified": false,
+          "document_date": null
+        },
+        {
+          "title": "\"现货价:原油:美国西德克萨斯中级轻质原油(WTI)\"指标为何缺少每周四的数据？",
+          "excerpt_summary": "指标数据源每周四不公布数据。",
+          "original_document_independently_verified": false,
+          "document_date": null
+        }
+      ],
+      "metadata_status": "frequency_unit_claimed_from_name_query_not_terminal_attributes",
+      "runtime_verified": false,
+      "basis_eligible": false
+    }
+  ],
+  "unresolved": [
+    {
+      "id": "NEW-01",
+      "need": "上海HRB400E 20mm明确EDB编码"
+    },
+    {
+      "id": "NEW-04",
+      "need": "上海指定1#电解铜绝对价格编码"
+    },
+    {
+      "id": "NEW-05",
+      "need": "铜社会库存；Alice未找到不等于EDB全库不存在，CDB路径需官方接口证据",
+      "excluded_code": "S5811269",
+      "exclusion_claim": "截至2020-03-06停更"
+    },
+    {
+      "id": "NEW-06",
+      "need": "张家港43%豆粕即期价格编码"
+    },
+    {
+      "id": "NEW-08-M",
+      "need": "豆粕仓单编码及单位"
+    },
+    {
+      "id": "NEW-09",
+      "need": "螺纹周度产量编码及统计样本"
+    },
+    {
+      "id": "NEW-10",
+      "need": "周度油厂开机率/压榨量，不能由USDA年/月度替代"
+    }
+  ]
+}

@@ -1,0 +1,255 @@
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  color: #182b45;
+  background: #f2f5fa;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  background: #f2f5fa;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.unified-shell {
+  min-height: 100vh;
+  color: #182b45;
+  background: #f2f5fa;
+}
+
+.unified-topbar {
+  position: fixed;
+  z-index: 100;
+  inset: 0 0 auto;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 0 18px;
+  color: #dce9fa;
+  background: #10233e;
+  box-shadow: 0 1px 0 rgb(4 20 39 / 30%);
+}
+
+.unified-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 180px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.unified-brand__mark {
+  color: #8db7f2;
+  font-size: 26px;
+  line-height: 1;
+}
+
+.unified-brand strong {
+  display: block;
+  color: #f1f6ff;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  line-height: 1.1;
+}
+
+.unified-brand small {
+  display: block;
+  margin-top: 2px;
+  color: #94a9c5;
+  font-size: 10px;
+  letter-spacing: 1px;
+  line-height: 1.1;
+}
+
+.unified-switch {
+  display: flex;
+  align-self: stretch;
+  align-items: stretch;
+  gap: 3px;
+}
+
+.unified-switch button {
+  min-width: 92px;
+  padding: 0 16px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: #aabbd2;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.unified-switch button:hover,
+.unified-switch button:focus-visible {
+  color: #fff;
+  background: rgb(255 255 255 / 7%);
+}
+
+.unified-switch button.is-active {
+  border-bottom-color: #82b3f4;
+  color: #fff;
+  background: rgb(255 255 255 / 8%);
+}
+
+.unified-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+}
+
+.unified-status__badge {
+  max-width: 300px;
+  overflow: hidden;
+  padding: 5px 9px;
+  border: 1px solid rgb(156 185 222 / 28%);
+  border-radius: 5px;
+  color: #c5d5ea;
+  background: rgb(255 255 255 / 6%);
+  font-size: 10px;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unified-status__badge--futures {
+  color: #b8d7fa;
+}
+
+.unified-status__badge[data-state="loading"] {
+  color: #d4c795;
+}
+
+.unified-status__badge[data-state="error"] {
+  color: #f3b6ad;
+  border-color: rgb(244 182 175 / 35%);
+}
+
+.unified-shell__content {
+  min-height: 100vh;
+  padding-top: 48px;
+}
+
+.module-frame {
+  min-height: calc(100vh - 48px);
+}
+
+.module-loading,
+.module-error {
+  max-width: 680px;
+  margin: 36px auto;
+  padding: 28px;
+  border: 1px solid #e1e7ef;
+  border-radius: 10px;
+  color: #617087;
+  background: #fff;
+  box-shadow: 0 8px 24px rgb(21 50 88 / 5%);
+  font-size: 13px;
+}
+
+.module-error h2 {
+  margin: 0 0 9px;
+  color: #18395f;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.module-error p {
+  margin: 0 0 18px;
+  overflow-wrap: anywhere;
+}
+
+.module-error button {
+  padding: 8px 13px;
+  border: 1px solid #2563eb;
+  border-radius: 7px;
+  color: #fff;
+  background: #2563eb;
+  cursor: pointer;
+}
+
+.module-error button:hover {
+  background: #1d4ed8;
+}
+
+.futures-module .shell > aside {
+  inset: 48px auto 0 0;
+  z-index: 20;
+}
+
+.futures-module .shell > main {
+  min-height: calc(100vh - 48px);
+}
+
+@media (max-width: 900px) {
+  .unified-topbar {
+    gap: 8px;
+    padding: 0 10px;
+  }
+
+  .unified-brand {
+    min-width: 148px;
+  }
+
+  .unified-status__badge {
+    max-width: 180px;
+  }
+}
+
+@media (max-width: 680px) {
+  .unified-brand {
+    min-width: 0;
+  }
+
+  .unified-brand small,
+  .unified-status__badge--futures {
+    display: none;
+  }
+
+  .unified-brand strong {
+    letter-spacing: 1px;
+  }
+
+  .unified-switch {
+    flex: 1;
+  }
+
+  .unified-switch button {
+    min-width: 0;
+    flex: 1;
+    padding: 0 8px;
+  }
+
+  .unified-status {
+    max-width: 150px;
+  }
+
+  .unified-status__badge {
+    max-width: 150px;
+    padding-inline: 6px;
+  }
+}
