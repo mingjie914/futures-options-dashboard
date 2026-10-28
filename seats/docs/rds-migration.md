@@ -37,3 +37,5 @@ RDS 只有 `raw_seat_position` 时，足以重建部分席位榜和跨期结构�
 独立 `seat_dash_main_contract_coverage` 保留完整品种交易日轴，唯一主力真实收盘不因缺席位而丢失；同品种行情日与P2日期取并集（限P2历史范围），收益5/10交易日及25日隔离期不因空缺缩窗。派生计算版本为 `metrics-v2-reference-p2-calendar-v1`；缺失指标为null，覆盖状态随视图API返回。未取得上游溯源sidecar时 `backfill_status=unknown`，不宣称certified。当前命令离线重建已提供的输入历史，确保同日修订与删除生效；生产由既定消费作业同步变更分区（含最近5交易日/provisional及上游允许的历史修订窗口），不得把“最近5日”当唯一修订范围。
 
 2026-10-29 RDS六日有界样本：443品种日/35,465品种席位，原始数值聚合0差异；RR 10/23与BC 10/26主力缺席位两处仅该层pending，其他层及4类API正常。证据保存在仓库外`audit-20261029/p2-all/result.json`。这不是全历史或生产上线验收。
+
+离线构建与重分类共用独立预算：`SEATS_BUILD_THREADS=1`、`SEATS_BUILD_MEMORY_MB=512`、`SEATS_BUILD_TEMP_MB=512`；不复用 API 缓存限制。临时溢写位于本批 staging 子目录，完成/异常关闭后清理空目录；TEMP_MB=0 可禁用溢写。DuckDB内存限制不是进程RSS硬上限，云端仍由任务cgroup约束，并保留解码及Python开销。

@@ -527,3 +527,24 @@ def test_p2_validation_keeps_missing_days_and_uses_known_main_prices(tmp_path, m
             assert actual[2]==dates[54]
             assert actual[0]==len(values)
             assert actual[1]==pytest.approx(sum(values)/len(values))
+
+
+def test_offline_build_has_separate_bounded_resources(tmp_path, monkeypatch):
+    builder=SnapshotBuilder(ParquetSource(tmp_path,tmp_path),DuckDBPublisher(tmp_path/'runtime'))
+    for key in ('SEATS_BUILD_THREADS','SEATS_BUILD_MEMORY_MB','SEATS_BUILD_TEMP_MB'):
+        monkeypatch.delenv(key,raising=False)
+    config=builder._build_config(1)
+    assert config['threads']==1 and config['memory_limit']=='512MB'
+    assert config['max_temp_directory_size']=='512MB'
+    assert Path(config['temp_directory']).parent==builder.publisher.staging_root
+    with duckdb.connect(config=config) as c:
+        assert c.execute("SELECT current_setting('threads')").fetchone()[0]==1
+        assert c.execute("SELECT current_setting('temp_directory')").fetchone()[0]==config['temp_directory']
+    Path(config['temp_directory']).rmdir()
+    monkeypatch.setenv('SEATS_BUILD_MEMORY_MB','256')
+    monkeypatch.setenv('SEATS_BUILD_TEMP_MB','0')
+    config=builder._build_config(2)
+    assert config['memory_limit']=='256MB' and config['max_temp_directory_size']=='0MB'
+    Path(config['temp_directory']).rmdir()
+    monkeypatch.setenv('SEATS_BUILD_THREADS','0')
+    with pytest.raises(ValueError):builder._build_config(3)

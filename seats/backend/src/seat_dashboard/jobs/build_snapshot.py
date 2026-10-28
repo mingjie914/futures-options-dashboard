@@ -5,6 +5,7 @@ import csv
 import hashlib
 import json
 import logging
+import os
 import re
 import shutil
 from dataclasses import dataclass
@@ -64,6 +65,18 @@ class SnapshotBuilder:
         self.combination_config = Path(combination_config).resolve() if combination_config else None
         self.product_config = Path(product_config).resolve() if product_config else None
 
+    def _build_config(self, batch_id: int) -> dict[str, Any]:
+        threads = int(os.environ.get("SEATS_BUILD_THREADS", "1"))
+        memory = int(os.environ.get("SEATS_BUILD_MEMORY_MB", "512"))
+        spill = int(os.environ.get("SEATS_BUILD_TEMP_MB", "512"))
+        if threads < 1 or memory < 1 or spill < 0:
+            raise ValueError("build threads/memory must be positive and spill budget nonnegative")
+        folder = (self.publisher.staging_root / f"duckdb-spill-b{batch_id:08d}").resolve()
+        folder.relative_to(self.publisher.staging_root.resolve())
+        folder.mkdir(parents=True, exist_ok=True)
+        return {"threads": threads, "memory_limit": f"{memory}MB",
+                "temp_directory": str(folder), "max_temp_directory_size": f"{spill}MB"}
+
     @property
     def combination_version(self) -> str:
         config = self.combination_config.read_bytes() if self.combination_config and self.combination_config.is_file() else b"[]"
@@ -91,7 +104,8 @@ class SnapshotBuilder:
             if checksum != original["database_sha256"]:
                 temporary.unlink()
                 raise SnapshotValidationError("Source snapshot checksum mismatch")
-        connection = duckdb.connect(str(temporary), config={"threads": 1, "memory_limit": "512MB"})
+        build_config = self._build_config(batch_id)
+        connection = duckdb.connect(str(temporary), config=build_config)
         try:
             connection.execute("BEGIN TRANSACTION")
             connection.execute("DELETE FROM seat_dash_combination_member")
@@ -132,6 +146,8 @@ class SnapshotBuilder:
             raise
         else:
             connection.close()
+        finally:
+            Path(build_config["temp_directory"]).rmdir()
         with temporary.open("rb") as stream:
             metadata["database_sha256"] = hashlib.file_digest(stream, "sha256").hexdigest()
         self.publisher.publish(temporary, metadata)
@@ -177,7 +193,8 @@ class SnapshotBuilder:
                 "sha256": hashlib.sha256(self.product_config.read_bytes()).hexdigest(),
             }
         started = datetime.now(timezone.utc)
-        connection = duckdb.connect(str(target_path))
+        build_config = self._build_config(batch_id)
+        connection = duckdb.connect(str(target_path), config=build_config)
         try:
             connection.execute(self._schema_path().read_text(encoding="utf-8"))
             if self.source.p2_only:
@@ -247,6 +264,8 @@ class SnapshotBuilder:
             raise
         else:
             connection.close()
+        finally:
+            Path(build_config["temp_directory"]).rmdir()
         if request.dry_run:
             return metadata
         final_path = self.publisher.final_snapshot_path(batch_id)
