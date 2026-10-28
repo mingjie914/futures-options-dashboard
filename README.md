@@ -47,3 +47,6 @@ cd ..
 - 统一入口验证三模块切换、筛选恢复、图表与窄屏；不能只验证独立开发页。
 
 本地默认绑定 loopback。生产认证、Caddy/DNS、数据增量发布与云端资源验收独立推进，合并不代表已部署。旧日期文档只保留历史设计与证据，不代表当前页面或数据状态。
+
+
+统一前端回归在 `frontend` 中先执行 `pnpm build`、`pnpm typecheck`，再执行 `pnpm test`，只安装该目录依赖。旧独立 Sites 打包测试不属于 SG 发布验收；仅主动维护旧 Sites 产物时，在 `futures/frontend` 单独执行原 `build` 与 `test:sites`，正常研究看板无需安装第二套前端依赖。

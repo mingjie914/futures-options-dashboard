@@ -116,7 +116,10 @@ def create_app(store=None):
         paths=['/api/'+name for name in ('products','contracts','dashboard','spread-history',
             'seasonal-position','contract-position','contract-history','basis-reference','radar','position-peaks',
             'fundamentals/analysis','fundamentals/review','fundamentals/candidates','data/futures_daily/rows')])
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=['127.0.0.1', 'localhost', '[::1]', 'testserver'])
+    public_hosts = [h.strip().lower() for h in os.environ.get('DASHBOARD_ALLOWED_HOSTS', '').split(',') if h.strip()]
+    if any(any(c in h for c in '*:/') for h in public_hosts):
+        raise ValueError('DASHBOARD_ALLOWED_HOSTS must contain explicit hostnames, without scheme, port or wildcard')
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=['127.0.0.1', 'localhost', '[::1]', 'testserver', *public_hosts])
 
     @app.middleware('http')
     async def local_origin(request: Request, call_next):

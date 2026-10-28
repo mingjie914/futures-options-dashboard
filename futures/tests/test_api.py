@@ -1092,3 +1092,20 @@ def test_catalog_does_not_compute_charts_and_rejects_unknown_view(setup, monkeyp
         monkeypatch.setattr(analytics, name, unexpected)
     assert client.get('/api/dashboard?product=RB&view=catalog').status_code == 200
     assert client.get('/api/dashboard?product=RB&view=unknown').status_code == 422
+
+
+def test_configured_public_host_preserves_origin_guard(setup, monkeypatch):
+    _, store, _ = setup
+    headers = {'Host': 'mingjiec.com', 'Origin': 'https://mingjiec.com'}
+    monkeypatch.delenv('DASHBOARD_ALLOWED_HOSTS', raising=False)
+    with TestClient(create_app(store)) as local:
+        assert local.get('/api/health', headers=headers).status_code == 400
+    monkeypatch.setenv('DASHBOARD_ALLOWED_HOSTS', 'mingjiec.com,www.mingjiec.com')
+    with TestClient(create_app(store)) as public:
+        assert public.get('/api/health', headers=headers).status_code == 200
+        assert public.get('/api/health', headers={**headers, 'Origin': 'https://other.example'}).status_code == 403
+        assert public.get('/api/health', headers={**headers, 'Sec-Fetch-Site': 'cross-site'}).status_code == 403
+        assert public.get('/api/health', headers={'Host':'other.example'}).status_code == 400
+    monkeypatch.setenv('DASHBOARD_ALLOWED_HOSTS', '*')
+    with pytest.raises(ValueError, match='explicit hostnames'):
+        create_app(store)

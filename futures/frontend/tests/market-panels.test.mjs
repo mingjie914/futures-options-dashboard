@@ -2,13 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
-import {transformWithEsbuild} from 'vite';
 import {linkZoom} from '../../../frontend/src/charts.js';
 const sharedRequire=createRequire(new URL('../../../frontend/package.json',import.meta.url));
 const React=sharedRequire('react'), {renderToStaticMarkup}=sharedRequire('react-dom/server');
 
 const source=await readFile(new URL('../src/MarketPanels.jsx',import.meta.url),'utf8');
-const {code}=await transformWithEsbuild(source,'MarketPanels.jsx',{jsx:'automatic',format:'cjs'});
+const ts=sharedRequire('typescript');
+const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const module={exports:{}};
 new Function('module','exports','require',code)(module,module.exports,id=>id.startsWith('react')?sharedRequire(id):createRequire(import.meta.url)(id));
 const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel}=module.exports;

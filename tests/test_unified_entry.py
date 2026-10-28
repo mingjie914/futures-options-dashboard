@@ -22,6 +22,8 @@ def test_gateway_keeps_old_lazy_assets_and_independent_seat_contract(tmp_path,mo
     seen=[]
     def upstream(request):
         seen.append(str(request.url))
+        if request.headers.get('host') == 'mingjiec.com':
+            assert request.headers['origin'] == 'https://mingjiec.com'
         if request.url.path=='/api/seats/v1/views/unavailable':
             raise httpx.ConnectError('seat API offline',request=request)
         return httpx.Response(200,json={'batch':16},headers={'x-data-version':'seat16','etag':'"seat16"'})
@@ -39,6 +41,8 @@ def test_gateway_keeps_old_lazy_assets_and_independent_seat_contract(tmp_path,mo
         result=client.get('/api/seats/v1/meta/options?product_code=RB.SHFE')
         assert result.json()=={'batch':16} and result.headers['x-data-version']=='seat16'
         assert seen==['http://127.0.0.1:8796/api/seats/v1/meta/options?product_code=RB.SHFE']
+        assert client.get('/api/futures/v1/health',headers={'Host':'mingjiec.com','Origin':'https://mingjiec.com'}).status_code==200
+        assert client.get('/api/futures/v1/health',headers={'Host':'mingjiec.com','Origin':'https://other.example'}).status_code==403
         assert client.post('/api/seats/v1/meta/options').status_code==403
         assert client.get('/api/seats/v1/meta/options',headers={'origin':'https://other.test'}).status_code==403
         assert client.get('/api/seats/v1/views/unavailable').status_code==503
