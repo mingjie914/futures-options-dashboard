@@ -457,6 +457,132 @@ def _p2_source(tmp_path):
     return ParquetSource(seat_root, market_root, p2_only=True)
 
 
+def _input_manifest(source, path, batch, changes=(), parent=None):
+    manifest = {"batch": batch, "files": {}, "changed_months": list(changes)}
+    for dataset, prefix in (("raw_seat", "seats/raw_seat_position"), ("market_1d", "market/futureshistoryprices1d")):
+        root = source.dataset_path(dataset)
+        for file in root.rglob("*.parquet"):
+            dates = pq.ParquetFile(file).read(columns=["trade_date"]).column(0).to_pylist()
+            manifest["files"][f"{prefix}/{file.relative_to(root).as_posix()}"] = {
+                "sha256": hashlib.sha256(file.read_bytes()).hexdigest(), "rows": len(dates),
+                "date_max": str(max(dates)) if dates else None,
+            }
+    if parent:
+        manifest.update(base_batch=json.loads(parent.read_bytes())["batch"], base_manifest_sha256=hashlib.sha256(parent.read_bytes()).hexdigest())
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    return path
+
+
+def _assert_business_tables_equal(left, right):
+    with duckdb.connect() as db:
+        db.execute(f"ATTACH '{Path(left).as_posix()}' AS inc (READ_ONLY); ATTACH '{Path(right).as_posix()}' AS full_build (READ_ONLY)")
+        tables = db.execute("SELECT table_name FROM information_schema.tables WHERE table_catalog='inc' AND table_name NOT IN ('seat_dash_etl_run','seat_dash_publish_state')").fetchall()
+        for (table,) in tables:
+            columns = [r[0] for r in db.execute(f'DESCRIBE inc.{table}').fetchall() if r[0] != 'batch_id']
+            projection = ','.join(f'"{name}"' for name in columns)
+            a, b = f'SELECT {projection} FROM inc.{table}', f'SELECT {projection} FROM full_build.{table}'
+            assert db.execute(f'SELECT count(*) FROM (({a} EXCEPT ALL {b}) UNION ALL ({b} EXCEPT ALL {a}))').fetchone()[0] == 0, table
+
+
+@pytest.mark.parametrize('change', ['append', 'revision', 'delete_month', 'delete_latest', 'market_only', 'gap_extension'])
+def test_p2_incremental_equals_full_with_month_boundaries_and_deletes(tmp_path, change):
+    source = _p2_source(tmp_path)
+    for dataset in source.datasets:
+        seed = next(source.dataset_path(dataset).rglob('*.parquet'))
+        template = [r for r in pq.ParquetFile(seed).read().to_pylist() if r['trade_date'] == date(2026, 7, 27)]
+        seed.unlink()
+        for month in (5, 6, 7):
+            rows = []
+            for day in range(1, 29):
+                stamp = date(2026, month, day)
+                if stamp.weekday() >= 5:
+                    continue
+                for index, row in enumerate(template):
+                    item = {**row, 'trade_date': stamp}
+                    if dataset == 'raw_seat':
+                        item.update(long_position=row['long_position'] + day * (index + 1), long_change=day - 14)
+                    else:
+                        item['close'] += month * day
+                    rows.append(item)
+            path = source.dataset_path(dataset) / f'year_month=2026-{month:02}' / 'part.parquet'
+            path.parent.mkdir(exist_ok=True)
+            pq.write_table(pa.Table.from_pylist(rows), path)
+    old_manifest = _input_manifest(source, tmp_path/'old.json', 'old')
+    baseline = SnapshotBuilder(source, DuckDBPublisher(tmp_path/'base')).build(BuildRequest(full=True))
+    old_hash = hashlib.sha256(Path(baseline['database_path']).read_bytes()).hexdigest()
+    changed = []
+    for dataset, table in (('raw_seat', 'futuresseatraw'), ('market_1d', 'futureshistoryprices1d')):
+        if change == 'market_only' and dataset == 'raw_seat':
+            continue
+        month = 7 if change == 'delete_latest' else 6
+        path = source.dataset_path(dataset) / f'year_month=2026-{month:02}' / 'part.parquet'
+        rows = pq.ParquetFile(path).read().to_pylist()
+        if change in ('append', 'gap_extension'):
+            # A market-only August gap becomes part of the main calendar when seats extend into September.
+            month = 9 if change == 'gap_extension' and dataset == 'raw_seat' else 8
+            rows = [{**r, 'trade_date': r['trade_date'].replace(month=month)} for r in rows]
+            path = source.dataset_path(dataset) / f'year_month=2026-{month:02}' / 'part.parquet'
+            path.parent.mkdir(exist_ok=True)
+        elif change in ('delete_month', 'delete_latest'):
+            path.unlink()
+            rows = []
+        elif dataset == 'raw_seat':
+            # Remove a whole product-day, change a month-end position, and add a new identity.
+            rows = [r for r in rows if r['trade_date'].day != 26]
+            rows[-1]['long_position'] += 1000
+            rows.append({**rows[-1], 'seat_name': '新增席位'})
+        else:
+            rows[-1].update(close=3555.0, position=50000)
+        if rows:
+            pq.write_table(pa.Table.from_pylist(rows), path)
+        changed.append({'table': table, 'month': f'2026-{month:02}', 'rows': len(rows)})
+    new_manifest = _input_manifest(source, tmp_path/'new.json', 'new', changed, old_manifest)
+    inc = SnapshotBuilder(source, DuckDBPublisher(tmp_path/'inc')).build(BuildRequest(incremental_from=tmp_path/'base', base_input_manifest=old_manifest, input_manifest=new_manifest))
+    full = SnapshotBuilder(source, DuckDBPublisher(tmp_path/'full')).build(BuildRequest(full=True))
+    _assert_business_tables_equal(inc['database_path'], full['database_path'])
+    assert inc['mode'] == 'incremental' and inc['base_batch_id'] == baseline['batch_id']
+    assert '2026-05' not in inc['rebuilt_months']
+    assert hashlib.sha256(Path(baseline['database_path']).read_bytes()).hexdigest() == old_hash
+    with duckdb.connect(inc['database_path'], read_only=True) as db:
+        assert not db.execute("SELECT table_name FROM duckdb_tables() WHERE starts_with(table_name,'_base_') OR starts_with(table_name,'_p2_')").fetchall()
+
+
+@pytest.mark.parametrize('failure', ['parent', 'unannounced', 'current_hash', 'baseline_hash', 'empty_changes', 'conflicting_input'])
+def test_incremental_rejects_invalid_lineage_without_publication(tmp_path, failure):
+    source = _p2_source(tmp_path)
+    baseline = tmp_path/'base'
+    SnapshotBuilder(source, DuckDBPublisher(baseline)).build(BuildRequest(full=True))
+    old = _input_manifest(source, tmp_path/'old.json', 'old')
+    rows = [{'table': 'futuresseatraw', 'month': '2026-07', 'rows': 1}]
+    if failure == 'conflicting_input':
+        file = next(source.dataset_path('raw_seat').rglob('*.parquet'))
+        facts = pq.ParquetFile(file).read().to_pylist()
+        facts.append({**facts[0], 'long_position': facts[0]['long_position'] + 1})
+        pq.write_table(pa.Table.from_pylist(facts), file)
+    new = _input_manifest(source, tmp_path/'new.json', 'new', rows, old)
+    payload = json.loads(new.read_bytes())
+    file = next(iter(payload['files']))
+    if failure == 'parent':
+        payload.pop('base_manifest_sha256')
+    elif failure == 'empty_changes':
+        payload['changed_months'] = []
+    elif failure == 'baseline_hash':
+        altered = json.loads(old.read_bytes())
+        altered['files'][file]['sha256'] = '00' * 32
+        old.write_text(json.dumps(altered))
+        payload['base_manifest_sha256'] = hashlib.sha256(old.read_bytes()).hexdigest()
+    elif failure != 'conflicting_input':
+        payload['files'][file]['sha256'] = '00' * 32
+        if failure == 'unannounced':
+            payload['changed_months'][0]['month'] = '2026-06'
+    new.write_text(json.dumps(payload))
+    publisher = DuckDBPublisher(tmp_path/'candidate')
+    with pytest.raises(SnapshotValidationError):
+        SnapshotBuilder(source, publisher).build(BuildRequest(incremental_from=baseline, base_input_manifest=old, input_manifest=new))
+    assert publisher.current_metadata() is None
+    assert not list(publisher.staging_root.glob('*.tmp'))
+
+
 def test_p2_only_builds_from_contract_rows_and_rebuilds_same_day_revision(tmp_path, monkeypatch):
     source = _p2_source(tmp_path)
     runtime = tmp_path / 'runtime'

@@ -87,7 +87,7 @@ class ParquetSource(SeatSourcePort):
             raise FileNotFoundError("Local source dataset contains no Parquet files: " + "; ".join(empty))
 
 
-    def prepare(self, connection, end=None) -> None:
+    def prepare(self, connection, end=None, months=()) -> None:
         """Derive P3 in the build connection; never create a second source on disk."""
         from seat_dashboard.core.errors import SnapshotValidationError
 
@@ -111,6 +111,11 @@ class ParquetSource(SeatSourcePort):
             )
         """)
         cutoff = f"AND CAST(trade_date AS DATE) <= DATE '{end.isoformat()}'" if end else ""
+        month_sql = ",".join(f"'{month}'" for month in months)
+        changed = f"strftime(CAST(trade_date AS DATE), '%Y-%m') IN ({month_sql})" if months else "TRUE"
+        if months:
+            cutoff += f" AND year_month IN ({month_sql}) AND {changed}"
+            logger.info("P2 rebuilding months: %s", ",".join(months))
         for dataset in self.datasets:
             # Preserve unresolved zero compatibility rows as supplied; never guess a decade.
             scope = "AND is_aggregated=0 AND (long_position=0 AND long_change=0 AND short_position=0 AND short_change=0) IS NOT TRUE" if dataset == "raw_seat" else ""
@@ -151,7 +156,18 @@ class ParquetSource(SeatSourcePort):
         """)
         reject("""SELECT trade_date, exchange, symbol FROM _p2_market_1d
             GROUP BY ALL HAVING count(*) > 1""", "conflicting latest market rows")
-        for statement in """
+        if months:
+            connection.execute(f"""INSERT INTO _p2_market_1d BY NAME
+                SELECT trade_date, exchange, symbol, close, open_interest AS position, volume, sequence
+                FROM seat_dash_market_daily WHERE NOT ({changed})""")
+        product_dates = "SELECT trade_date, product_code FROM _p2_product_daily"
+        old_seats = ""
+        if months:
+            product_dates += f" UNION ALL SELECT trade_date, product_code FROM seat_dash_product_daily WHERE NOT ({changed})"
+            old_seats = f"""OR EXISTS (SELECT 1 FROM seat_dash_main_contract_coverage c
+                WHERE c.trade_date=d.trade_date AND c.product_code=d.product_code AND c.symbol=m.symbol
+                    AND c.seat_status='ready' AND NOT ({changed.replace('trade_date', 'c.trade_date')}))"""
+        for statement in f"""
             CREATE OR REPLACE TEMP TABLE _p2_product_seat AS
             -- Raw contract keys are already unique and non-null, so no second DISTINCT hash is needed.
             SELECT trade_date, exchange, root, product_code, seat_name,
@@ -168,11 +184,11 @@ class ParquetSource(SeatSourcePort):
             CREATE OR REPLACE TEMP TABLE _p2_market_contracts AS
             WITH products AS (
                 SELECT product_code, min(trade_date) AS first_day, max(trade_date) AS last_day
-                FROM _p2_product_daily GROUP BY product_code
+                FROM ({product_dates}) GROUP BY product_code
             ), contracts AS (
                 SELECT *, regexp_extract(symbol, '^([A-Z]+)', 1) || '.' || exchange AS product_code
                 FROM _p2_market_1d
-                WHERE regexp_full_match(symbol, '[A-Z]+[0-9]{4}')
+                WHERE regexp_full_match(symbol, '[A-Z]+[0-9]{{4}}')
                   AND try_cast(right(symbol,2) AS INTEGER) BETWEEN 1 AND 12
             )
             SELECT m.* FROM contracts m JOIN products d USING (product_code)
@@ -189,7 +205,7 @@ class ParquetSource(SeatSourcePort):
             QUALIFY count(*) OVER (PARTITION BY trade_date, product_code)=1;
             CREATE OR REPLACE TEMP TABLE _p2_main_price AS
             WITH calendar AS (
-                SELECT trade_date, product_code FROM _p2_product_daily
+                {product_dates}
                 UNION SELECT trade_date, product_code FROM _p2_market_contracts
             )
             SELECT d.trade_date, d.product_code, m.symbol, m.position AS open_interest,
@@ -198,7 +214,7 @@ class ParquetSource(SeatSourcePort):
                      WHEN m.close IS NULL OR m.close <= 0 THEN 'missing_close' ELSE 'ready' END AS price_status,
                 CASE WHEN m.symbol IS NULL THEN 'main_unresolved'
                      WHEN EXISTS (SELECT 1 FROM (SELECT DISTINCT trade_date, product_code, symbol FROM _p2_raw_seat) r WHERE r.trade_date=d.trade_date
-                         AND r.product_code=d.product_code AND r.symbol=m.symbol)
+                         AND r.product_code=d.product_code AND r.symbol=m.symbol) {old_seats}
                      THEN 'ready' ELSE 'missing_seat' END AS seat_status
             FROM calendar d LEFT JOIN _p2_main m USING (trade_date,product_code);
             CREATE OR REPLACE TEMP TABLE _p2_main_contract_seat AS

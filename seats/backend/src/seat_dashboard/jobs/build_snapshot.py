@@ -8,7 +8,7 @@ import logging
 import os
 import re
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -29,9 +29,15 @@ class BuildRequest:
     full: bool = False
     trade_date: date | None = None
     dry_run: bool = False
+    incremental_from: Path | None = None
+    base_input_manifest: Path | None = None
+    input_manifest: Path | None = None
+    changed_months: tuple[str, ...] = ()
 
     @property
     def mode(self) -> str:
+        if self.incremental_from:
+            return "incremental"
         if self.trade_date:
             return "date"
         return "full"
@@ -166,7 +172,90 @@ class SnapshotBuilder:
         prefix = f"{alias}." if alias else ""
         if request.trade_date:
             return f"{prefix}trade_date = DATE '{request.trade_date.isoformat()}'"
+        if request.changed_months:
+            months = ",".join(f"'{month}'" for month in request.changed_months)
+            return f"strftime({prefix}trade_date, '%Y-%m') IN ({months})"
         return "TRUE"
+
+    def _incremental_base(self, request: BuildRequest, source_manifest: dict):
+        if not self.source.p2_only or request.trade_date or request.dry_run:
+            raise SnapshotValidationError("Incremental requires P2-only full-date disk build")
+        if not request.base_input_manifest or not request.input_manifest:
+            raise SnapshotValidationError("Incremental requires both input manifests")
+        old_bytes = request.base_input_manifest.read_bytes()
+        old, new = json.loads(old_bytes), json.loads(request.input_manifest.read_bytes())
+        if not old.get("batch") or new.get("base_batch") != old["batch"] or new.get("base_manifest_sha256") != hashlib.sha256(old_bytes).hexdigest():
+            raise SnapshotValidationError("Input manifest parent mismatch")
+        prefixes = {"raw_seat": "seats/raw_seat_position/", "market_1d": "market/futureshistoryprices1d/"}
+        tables = {"futuresseatraw": "raw_seat", "futureshistoryprices1d": "market_1d"}
+        changes = set()
+        for row in new.get("changed_months", []):
+            if row.get("table") not in tables or not re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", row.get("month", "")):
+                raise SnapshotValidationError("Invalid changed month")
+            changes.add((tables[row["table"]], row["month"]))
+        if not changes:
+            raise SnapshotValidationError("No changed months; skip publication")
+        original = DuckDBPublisher(request.incremental_from).current_metadata()
+        if not original or not original.get("complete"):
+            raise SnapshotValidationError("Incremental requires a complete baseline")
+        base_path = (request.incremental_from / original["database_path"]).resolve(strict=True)
+        if original.get("database_sha256"):
+            with base_path.open("rb") as stream:
+                if hashlib.file_digest(stream, "sha256").hexdigest() != original["database_sha256"]:
+                    raise SnapshotValidationError("Baseline database checksum mismatch")
+        with duckdb.connect(str(base_path), read_only=True) as db:
+            baseline = json.loads(db.execute("SELECT metadata_json FROM seat_dash_publish_state WHERE batch_id=?", [original["batch_id"]]).fetchone()[0])
+            if baseline.get("input_mode") != "p2-only-v1" or baseline.get("metric_version") != self.METRIC_VERSION + "-p2-calendar-v2" or baseline.get("mode") not in ("full", "incremental"):
+                raise SnapshotValidationError("Baseline metric/input mode mismatch; full build required")
+            for dataset, prefix in prefixes.items():
+                entries = [{path[len(prefix):]: item["sha256"] for path, item in manifest["files"].items() if path.startswith(prefix)} for manifest in (old, new)]
+                for path in entries[0].keys() | entries[1].keys():
+                    month = re.search(r"(?:^|/)year_month=([0-9]{4}-[0-9]{2})/", path)
+                    if not month or (entries[0].get(path) != entries[1].get(path) and (dataset, month[1]) not in changes):
+                        raise SnapshotValidationError("Unannounced partition change")
+                for files, saved in zip(entries, (baseline["source_manifest"]["datasets"][dataset], source_manifest["datasets"][dataset])):
+                    digest = hashlib.sha256()
+                    for path, sha in sorted(files.items()):
+                        digest.update(path.encode())
+                        digest.update(bytes.fromhex(sha))
+                    if digest.hexdigest() != saved["sha256"]:
+                        raise SnapshotValidationError("Input manifest does not match baseline/current source")
+            months = {month for _, month in changes}
+            # Latest-only contract views also need rebuilding after a historical correction.
+            latest = max(item["date_max"] for path, item in new["files"].items() if path.startswith(prefixes["raw_seat"]) and item["rows"])
+            months.add(date.fromisoformat(latest).strftime("%Y-%m"))
+        return base_path, baseline, tuple(sorted(months))
+
+    def _merge_source_marts(self, connection, request):
+        where = self._date_where(request)
+        for name in ("product_seat", "main_contract_seat", "product", "market"):
+            table = f"seat_dash_{name}_daily"
+            connection.execute(f"DELETE FROM _base_{table} WHERE {where}; INSERT INTO _base_{table} SELECT * FROM {table}; DROP TABLE {table}; ALTER TABLE _base_{table} RENAME TO {table}")
+        if connection.execute("SELECT (SELECT max(trade_date) FROM seat_dash_product_daily) IS DISTINCT FROM (SELECT max(trade_date) FROM _p2_product_daily)").fetchone()[0]:
+            raise SnapshotValidationError("Input latest date does not cover current product snapshot; full build required")
+        # Repaired/deleted months change the first surviving successor date as well.
+        months = ",".join(f"(DATE '{month}-01')" for month in request.changed_months)
+        connection.execute(f"""
+            CREATE TEMP TABLE _p2_previous AS
+            WITH dates AS (
+                SELECT product_code, trade_date, lag(trade_date) OVER (PARTITION BY product_code ORDER BY trade_date) AS previous_date
+                FROM seat_dash_product_daily
+            ), successors AS (
+                SELECT product_code, min(trade_date) AS trade_date FROM dates, (VALUES {months}) m(month)
+                WHERE trade_date >= month + INTERVAL 1 MONTH GROUP BY product_code, month
+            )
+            SELECT t.product_code, t.trade_date, t.seat_id, p.net_position AS previous_net_position,
+                t.net_position - coalesce(p.net_position, 0) AS net_position_change,
+                CASE WHEN p.seat_id IS NULL AND t.net_position<>0 THEN 'new'
+                     WHEN p.net_position<>0 AND t.net_position=0 THEN 'exit' ELSE 'continuing' END AS entry_state
+            FROM seat_dash_product_seat_daily t JOIN dates d USING (product_code,trade_date)
+            LEFT JOIN seat_dash_product_seat_daily p ON p.product_code=t.product_code AND p.trade_date=d.previous_date AND p.seat_id=t.seat_id
+            WHERE {self._date_where(request, 't')} OR (t.product_code,t.trade_date) IN (SELECT * FROM successors);
+            UPDATE seat_dash_product_seat_daily t SET previous_net_position=p.previous_net_position,
+                net_position_change=p.net_position_change, entry_state=p.entry_state
+            FROM _p2_previous p WHERE t.product_code=p.product_code AND t.trade_date=p.trade_date AND t.seat_id=p.seat_id;
+            DROP TABLE _p2_previous
+        """)
 
     def build(self, request: BuildRequest) -> dict[str, Any]:
         self.source.validate()
@@ -174,9 +263,18 @@ class SnapshotBuilder:
         batch_id = self.publisher.next_batch_id()
         temporary_path = self.publisher.temporary_snapshot_path(batch_id)
         if temporary_path.exists():
-            temporary_path.unlink()
+            raise FileExistsError(temporary_path)
         target_path = Path(":memory:") if request.dry_run else temporary_path
         source_manifest = self.source.source_manifest()
+        baseline = None
+        if request.incremental_from:
+            base_path, baseline, months = self._incremental_base(request, source_manifest)
+            request = replace(request, changed_months=months)
+            batch_id = max(batch_id, int(baseline["batch_id"]) + 1)
+            temporary_path = self.publisher.temporary_snapshot_path(batch_id)
+            if temporary_path.exists():
+                raise FileExistsError(temporary_path)
+            target_path = temporary_path
         if self.seat_tag_config and self.seat_tag_config.is_file():
             source_manifest["seat_tag_config"] = {
                 "path": str(self.seat_tag_config),
@@ -194,15 +292,26 @@ class SnapshotBuilder:
             }
         started = datetime.now(timezone.utc)
         build_config = self._build_config(batch_id)
-        connection = duckdb.connect(str(target_path), config=build_config)
+        connection = None
         try:
+            if baseline:
+                shutil.copy2(base_path, temporary_path)
+            connection = duckdb.connect(str(target_path), config=build_config)
             connection.execute(self._schema_path().read_text(encoding="utf-8"))
+            if baseline:
+                connection.execute("DELETE FROM seat_dash_etl_run; DELETE FROM seat_dash_publish_state")
             if self.source.p2_only:
-                self.source.prepare(connection, request.trade_date)
+                self.source.prepare(connection, request.trade_date, request.changed_months)
                 connection.execute("CREATE OR REPLACE TABLE seat_dash_main_contract_coverage AS SELECT * FROM _p2_main_price")
                 connection.execute("DROP TABLE _p2_main_price")
-            self._build_dimensions(connection, request, batch_id)
+            if baseline:
+                for name in ("product_seat", "main_contract_seat", "product", "market"):
+                    table = f"seat_dash_{name}_daily"
+                    connection.execute(f"ALTER TABLE {table} RENAME TO _base_{table}")
             self._build_source_marts(connection, request, batch_id)
+            if baseline:
+                self._merge_source_marts(connection, request)
+            self._build_dimensions(connection, BuildRequest() if baseline else request, batch_id)
             if self.source.p2_only:
                 for name in ("raw_seat", "market_1d", "product_seat", "product_daily", "main_contract_seat"):
                     connection.execute(f"DROP TABLE _p2_{name}")
@@ -232,6 +341,7 @@ class SnapshotBuilder:
                 "started_at": started.isoformat(),
                 "dry_run": request.dry_run,
                 "is_demo": False,
+                **({"base_batch_id": baseline["batch_id"], "rebuilt_months": request.changed_months} if baseline else {}),
             }
             connection.execute(
                 "INSERT INTO seat_dash_etl_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)",
@@ -262,7 +372,8 @@ class SnapshotBuilder:
             )
             connection.commit()
         except Exception:
-            connection.close()
+            if connection is not None:
+                connection.close()
             if not request.dry_run and temporary_path.exists():
                 temporary_path.unlink(missing_ok=True)
             raise
@@ -278,7 +389,7 @@ class SnapshotBuilder:
         return metadata
 
     def _build_dimensions(self, connection: duckdb.DuckDBPyConnection, request: BuildRequest, batch_id: int) -> None:
-        product = self.source.relation_sql("product_daily")
+        product = "seat_dash_product_daily" if self.source.p2_only else self.source.relation_sql("product_daily")
         raw = self.source.relation_sql("raw_seat")
         product_where = self._date_where(request)
         raw_where = self._date_where(request, "r")
@@ -308,8 +419,8 @@ class SnapshotBuilder:
             """
         )
         self._load_product_names(connection)
-        product_seat = self.source.relation_sql("product_seat")
-        main_seat = self.source.relation_sql("main_contract_seat")
+        product_seat = "seat_dash_product_seat_daily" if self.source.p2_only else self.source.relation_sql("product_seat")
+        main_seat = "seat_dash_main_contract_seat_daily" if self.source.p2_only else self.source.relation_sql("main_contract_seat")
         connection.execute(
             f"""
             CREATE OR REPLACE TABLE seat_dash_seat_dim AS
@@ -1368,9 +1479,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build a versioned local DuckDB dashboard snapshot")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--reclassify-from", type=Path, help="Rebuild group signals from a published runtime without source access")
+    mode.add_argument("--incremental-from", type=Path, help="Reuse a published P2 snapshot and replace changed input months")
     mode.add_argument("--full", action="store_true", help="build every available date")
     mode.add_argument("--date", type=date.fromisoformat, help="build one trade date")
     parser.add_argument("--p2-only", action="store_true", help="derive source relations from raw seats and daily market data; ignore legacy P3")
+    parser.add_argument("--base-input-manifest", type=Path)
+    parser.add_argument("--input-manifest", type=Path)
     parser.add_argument("--dry-run", action="store_true", help="build and validate in memory without publishing")
     parser.add_argument("--runtime-root", type=Path)
     parser.add_argument("--seat-root", type=Path)
@@ -1423,7 +1537,8 @@ def main(argv: list[str] | None = None) -> int:
             )
         source = ParquetSource(settings.seat_data_root, settings.market_1d_root, p2_only=args.p2_only)
         publisher = DuckDBPublisher(settings.runtime_root)
-        request = BuildRequest(full=bool(args.full), trade_date=args.date, dry_run=bool(args.dry_run))
+        request = BuildRequest(full=bool(args.full), trade_date=args.date, dry_run=bool(args.dry_run),
+                               incremental_from=args.incremental_from, base_input_manifest=args.base_input_manifest, input_manifest=args.input_manifest)
         builder = SnapshotBuilder(
             source,
             publisher,
