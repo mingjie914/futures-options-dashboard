@@ -46,7 +46,7 @@ cd ..
 - `frontend/`：`pnpm typecheck`、`pnpm test`、`pnpm build`
 - 统一入口验证三模块切换、筛选恢复、图表与窄屏；不能只验证独立开发页。
 
-本地默认绑定 loopback。生产认证、Caddy/DNS、数据增量发布与云端资源验收独立推进，合并不代表已部署。旧日期文档只保留历史设计与证据，不代表当前页面或数据状态。
+截至 2026-10-29，[期货](https://mingjiec.com/futures/)与[席位](https://mingjiec.com/seats/)已通过 SG Caddy/systemd 上线，主页入口已接入；期权页面暂未接入数据。生产使用 RDS 数据，主力历史缺口与修订溯源缺失仍明确展示。日常流程为窗口刷新、分区差量交付、无变更跳过；席位离线衍生仍为全量。当前部署与环境复用见[维护入口](docs/部署与统一维护入口.md)，旧日期验收记录仅作历史证据。
 
 
 统一前端回归在 `frontend` 中先执行 `pnpm build`、`pnpm typecheck`，再执行 `pnpm test`，只安装该目录依赖。旧独立 Sites 打包测试不属于 SG 发布验收；仅主动维护旧 Sites 产物时，在 `futures/frontend` 单独执行原 `build` 与 `test:sites`，正常研究看板无需安装第二套前端依赖。
