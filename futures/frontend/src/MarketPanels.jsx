@@ -1,33 +1,37 @@
+import { conditionalFetch as fetch } from '../../../frontend/src/transport.js';
 import {Metric,usePreference} from '../../../frontend/src/charts.js';
-import {useEffect,useState} from 'react';
+import {useEffect,useMemo,useState} from 'react';
 const fmt=v=>v==null?'—':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:2});
 const weak=(p,k)=>p?.['near_'+k]==null||p?.['far_'+k]==null?null:Math.min(p['near_'+k],p['far_'+k]);
 export const passesScan=(o,minHistory=0,minVolume=0)=>(minHistory<=0||(o.latest?.history_n??-1)>=minHistory)&&(minVolume<=0||(weak(o.latest,'volume')??-1)>=minVolume);
 // Object grouping, family filtering and direction are owned by the API.
 export const radarRows=data=>data?.objects||[];
 
-export function ContractTerms({terms}) {
- if(!terms)return null;
- return <div className="sub"><span>乘数 {fmt(terms.multiplier)} · 最小跳动 {fmt(terms.tick_size)} 点 · 单腿每手一跳 {fmt(terms.tick_value)} 元 · <a href={terms.source_url} target="_blank" rel="noreferrer">合约规则 ↗</a></span><div title="按交易日历推算，非逐合约最终公告">{terms.contracts.map(c=><span key={c.symbol}>{c.symbol} 预计到期 {c.expected_last_trade_date||'未知（该年交易日历未核验）'}{c.calendar_days_remaining!=null?` · ${c.calendar_days_remaining<0?'已过':'尚余'} ${Math.abs(c.calendar_days_remaining)} 自然日`:''}　</span>)}</div></div>;
-
+export function ObservationDate({latest,value,...props}) {
+ const day=value||latest||'';
+ return <label className="observation-date"><input aria-label="观察日" title="观察日；清空恢复最新" type="date" {...props} value={day} onClick={e=>e.currentTarget.showPicker?.()}/></label>;
 }
 
-export function BasisPanel({product,start,end,priceType,revision,Chart,onProduct}) {
+export function BasisPanel({product,end,priceType,revision,Chart,onProduct,controls}) {
  const [symbol,setSymbol]=usePreference('futures.basis.'+product+'.symbol',''),[data,setData]=useState(null),[error,setError]=useState('');
- useEffect(()=>{const c=new AbortController();setData(null);setError('');const q=new URLSearchParams({product,price_type:priceType});for(const [k,v] of Object.entries({start,end,symbol}))if(v)q.set(k,v);
- fetch('/api/basis-reference?'+q,{signal:c.signal}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail));return d;}).then(d=>{if(!c.signal.aborted)setData(d);}).catch(e=>{if(e.name!=='AbortError')setError(e.message);});return()=>c.abort();},[product,start,end,symbol,priceType,revision]);
- const last=data?.latest,isIndex=data?.status==='index_close_basis',unit=isIndex?'指数点':'元每吨',label=isIndex?'日收盘基差':'周频参考价差';
- return <section className="panel"><h2>现货与期货价差</h2><p className="sub">股指：指数 − 期货 · CU：周频参考价差</p>
- {error?<><p role="alert">{error}</p>{symbol&&<button onClick={()=>setSymbol('')}>重选当前活跃合约</button>}</>:!data?<p role="status">读取基差…</p>:data.status==='unavailable'?<><h3>{product} 当前条件不可用</h3><p>{data.reason}</p><div className="scan-controls">{['IM','IF','IC','IH','CU'].map(p=><button key={p} onClick={()=>onProduct(p)}>{p} {p==='CU'?'周频参考':'指数基差'}</button>)}</div></>:<>
- <label>期货合约<select value={symbol||data.symbol} onChange={e=>setSymbol(e.target.value)}>{data.contracts.map(s=><option key={s}>{s}</option>)}</select></label>
- <p>{data.reference.name} · {data.reference.code} · {isIndex?'日':'周'} / {data.reference.unit} · {data.reference.source||'已保存参考价'}</p><p className="sub">期货源截止 {data.meta.as_of}{data.meta.stale?' · 缓存降级':''} · {isIndex?'指数':'参考价'}序列 {data.reference.first} — {data.reference.last}</p>
- <ContractTerms terms={data.contract_terms}/>
- <div className="metrics"><Metric label={label+' / '+unit} value={fmt(last?.reference_spread)} hint={(isIndex?'指数收盘 − 期货收盘；正值：期货贴水；负值：期货升水':'同日参考价 − 期货收盘价')+'；配对日 '+(last?.trade_date||'无')}/><Metric label={(isIndex?'指数':'参考价')+' / '+unit} value={fmt(last?.reference_price)} hint={data.reference.name+'；配对日 '+(last?.trade_date||'无')}/><Metric label={'期货价 / '+unit} value={fmt(last?.futures_price)} hint={data.symbol+' · '+(priceType==='close'?'收盘':'结算')}/><Metric label="有效 / 未配对" value={data.matched+' / '+data.unmatched} hint="同日有效配对数 / 未能配对的观测数"/></div>
- {last&&last.trade_date!==data.meta.as_of&&<p className="sub">配对日期 {last.trade_date} · 源截止 {data.meta.as_of}</p>}
- {data.series.length?<><h3>{isIndex?'指数收盘 S − 期货收盘 F':'同日参考价 − 期货收盘价'}</h3><Chart rows={data.series} lines={[["reference_spread",label+' / '+unit]]}/>{isIndex&&<details><summary>基差率 / (S−F) ÷ S，非年化</summary><Chart rows={data.series} lines={[["basis_ratio","基差率"]]} percent/></details>}<details><summary>价格对比</summary><Chart rows={data.series} lines={[["reference_price",isIndex?data.reference.name+' 收盘':'参考价'],["futures_price",data.symbol]]}/></details></>:<p>当前日期窗口无有效观测。</p>}
- <details><summary>历史数据</summary><div className="table-wrap"><table><thead><tr><th>观测日</th><th className="num">{isIndex?'指数收盘':'参考价'}</th><th className="num">期货价</th><th className="num">{label}</th>{isIndex&&<th className="num">基差率</th>}</tr></thead><tbody>{data.series.map(p=><tr key={p.trade_date}><td>{p.trade_date}</td><td className="num">{fmt(p.reference_price)}</td><td className="num">{fmt(p.futures_price)}</td><td className="num">{fmt(p.reference_spread)}</td>{isIndex&&<td className="num">{p.basis_ratio==null?'—':fmt(p.basis_ratio*100)+'%'}</td>}</tr>)}</tbody></table></div></details>
+ useEffect(()=>{const c=new AbortController();setData(null);setError('');const q=new URLSearchParams({product,price_type:priceType});for(const [k,v] of Object.entries({end,symbol}))if(v)q.set(k,v);
+ fetch('/api/basis-reference?'+q,{signal:c.signal}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail));return d;}).then(d=>{if(!c.signal.aborted)setData(d);}).catch(e=>{if(e.name!=='AbortError')setError(e.message);});return()=>c.abort();},[product,end,symbol,priceType,revision]);
+ const zoomGroup=useMemo(()=>new Set(),[data]);
+ const last=data?.latest,isIndex=data?.status==='index_close_basis',unit=isIndex?'点':'元/吨',label=isIndex?'基差':'周频参考价差';
+ const contract=data?.contracts?.length?<select aria-label="期货合约" value={symbol||data.symbol} onChange={e=>setSymbol(e.target.value)}>{data.contracts.map(s=><option key={s}>{s}</option>)}</select>:null;
+ return <><div className="filters page-filters">{controls?.(contract,data?.meta?.as_of)}</div>
+ {error?<><p role="alert">{error}</p>{symbol&&<button onClick={()=>setSymbol('')}>重选活跃合约</button>}</>:!data?<p role="status">读取基差…</p>:data.status==='unavailable'?<section className="panel"><p className="sub">{product} 暂无基差数据</p><div className="scan-controls">{['IM','IF','IC','IH','CU'].map(p=><button key={p} onClick={()=>onProduct(p)}>{p}</button>)}</div></section>:<>
+ <section className="panel">
+ <div className="stats-heading"><h2>{label} / {unit}</h2><span>{last?.trade_date||'无有效配对'} · {data.matched} 个观测{data.unmatched?' · '+data.unmatched+' 个未配对':''}{data.meta.stale?' · 缓存降级':''}{data.reference.source?.includes('测试')?' · 测试样本':''}</span></div>
+ <div className="metrics"><Metric label={label} value={fmt(last?.reference_spread)} hint={(isIndex?'指数 − 期货；正值贴水，负值升水':'同日参考价 − 期货收盘价')+'，单位：'+unit}/><Metric label={isIndex?'指数':'参考价'} value={fmt(last?.reference_price)} hint={data.reference.name+' · '+data.reference.code+'；'+(data.reference.source||'已保存参考价')}/><Metric label="期货价" value={fmt(last?.futures_price)} hint={data.symbol+' 收盘；单位：'+unit}/>{isIndex&&<Metric label="基差率" value={last?.basis_ratio==null?'—':fmt(last.basis_ratio*100)+'%'} hint="（指数 − 期货）÷ 指数，非年化"/>}</div>
+ {data.series.length?<Chart zoomGroup={zoomGroup} rows={data.series} lines={[["reference_spread",label+' / '+unit]]}/>:<p className="empty">暂无配对数据</p>}
+ </section>
+ {!!data.series.length&&<div className={isIndex?'grid':undefined}>
+ {isIndex&&<section className="panel"><h2>基差率 / %</h2><Chart zoomGroup={zoomGroup} rows={data.series} lines={[["basis_ratio","基差率"]]} percent/></section>}
+ <section className="panel"><h2>价格对比 / {unit}</h2><Chart zoomGroup={zoomGroup} rows={data.series} lines={[["reference_price",data.reference.name],["futures_price",data.symbol]]}/></section>
+ </div>}
  </>}
- </section>;
+ </>;
 }
 
 export function SpreadDirection({direction}) {
@@ -61,10 +65,11 @@ export function RadarPanel({onSelect}) {
  const items=radarRows(data).filter(r=>r.product.includes(search.trim().toUpperCase())&&(filter==='all'||filter==='signals'&&r.events.length>0&&r.bucket!=='数据待检查'||filter==='priority'&&r.bucket==='优先核查'||filter==='watch'&&r.bucket==='观察名单'||filter==='quality'&&(r.quality.length>0||r.bucket==='数据待检查')));
  const limits=r=>r.limits.filter(v=>!['均值回归假设；到期、成本与可成交性待核验','仅凭量仓或价差突变不判断多空','短样本'].includes(v));
  const hasLimits=items.some(r=>limits(r).length);
+ const change=e=>setDraft(p=>({...p,[e.target.name]:e.target.value}));
  function open(r){const e=r.events.find(e=>e.family==='spread')||r.events[0];onSelect(r.product,e?{...e,direction_code:r.direction_code,rationale:r.events.map(e=>e.label).join('；')}:null,data,e?e.far?'跨期分析':e.family==='position'?'持仓换月':'机会扫描':'机会扫描');}
  return <section className="panel radar-panel">
- <form className="filters" onChange={e=>setDraft(p=>({...p,[e.target.name]:e.target.value}))} onSubmit={e=>{e.preventDefault();const v=Object.fromEntries(new FormData(e.currentTarget));if(!v.end)delete v.end;setQuery(v);setRevision(revision+1);}}>
- <label>截止日期<input type="date" name="end" defaultValue={draft.end}/></label><label>成交 ≥<input aria-label="每腿最低成交 / 手" type="number" name="min_volume" min="0" max="10000000" step="1" defaultValue={draft.min_volume} required/></label><label>持仓 ≥<input aria-label="每腿最低持仓 / 手" type="number" name="min_position" min="0" max="10000000" step="1" defaultValue={draft.min_position} required/></label><button disabled={busy}>{busy?'正在扫描…':'扫描全部品种'}</button></form>
+ <form className="filters" onSubmit={e=>{e.preventDefault();const v={...Object.fromEntries(new FormData(e.currentTarget)),end:draft.end};if(!v.end)delete v.end;setQuery(v);setRevision(revision+1);}}>
+ <ObservationDate name="end" value={draft.end} onChange={change} latest={data?.as_of}/><label>成交 ≥<input aria-label="每腿最低成交 / 手" type="number" name="min_volume" min="0" max="10000000" step="1" defaultValue={draft.min_volume} onChange={change} required/></label><label>持仓 ≥<input aria-label="每腿最低持仓 / 手" type="number" name="min_position" min="0" max="10000000" step="1" defaultValue={draft.min_position} onChange={change} required/></label><button disabled={busy}>{busy?'正在扫描…':'扫描全部品种'}</button></form>
  <PositionPeaks minVolume={query.min_volume} minPosition={query.min_position} end={query.end} revision={revision} priceType="close" onSelect={onSelect}/>{error&&<p role="alert">扫描失败：{error}</p>}
  {data&&<>
  <h2>量价异常</h2><div className="scan-controls"><label>异常类型<select value={family} onChange={e=>setFamily(e.target.value)}><option value="all">全部类型</option><option value="position">持仓异常</option><option value="spread">价差异常</option><option value="volume">成交异常</option></select></label><label>显示<select value={filter} onChange={e=>setFilter(e.target.value)}><option value="priority">优先核查</option><option value="watch">观察名单</option><option value="signals">全部异常</option><option value="quality">数据待检查</option><option value="all">全部已扫描</option></select></label><label>品种<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="如 IM、CU"/></label><span>{items.length} 项 · {new Set(items.map(r=>r.product)).size} 品种</span><span className="radar-date" title={`已扫描 ${data.scanned} / ${data.expected} 品种；查询截止 ${data.requested_end}`}>{data.as_of||'无观测'}{data.scanned<data.expected?` · 已扫描 ${data.scanned}/${data.expected}`:''}</span></div>
@@ -101,11 +106,13 @@ export function ScanPanel({data,onPair}) {
  <div className="table-wrap"><table><thead><tr>{['组合 / 配对日期','价差','前次变动','走势 / 60观测','历史分位','分位样本 / 配对总数','较弱腿成交 / 手','较弱腿持仓 / 手','备注'].map((h,i)=><th className={[1,2,4,5,6,7].includes(i)?'num':undefined} key={h}>{i===4?<Metric label={h} hint="此前最多252个有效价差的分位，不含当日。"/>:h}</th>)}</tr></thead><tbody>{rows.map(o=>{const p=o.latest;const flags=[!p?'无配对数据':p.trade_date!==data.meta.as_of?'配对日期落后':null,p?.historical_percentile==null?'分位不足':null,weak(p,'volume')==null||weak(p,'position')==null?'量仓缺失':null,data.meta.stale?'缓存降级':null].filter(Boolean);return <tr key={o.near+o.far}><td><button className="link" onClick={()=>onPair(o.near,o.far)}>{o.near} / {o.far}</button><small>{p?.trade_date||'—'}</small></td><td className="num">{fmt(p?.spread)}</td><td className="num">{fmt(p?.change)}</td><td><Trend points={o.trend}/></td><td className="num">{p?.historical_percentile==null?'—':fmt(p.historical_percentile)+'%'}</td><td className="num">{fmt(p?.history_n)} / {fmt(o.sample_count)}</td><td className="num">{fmt(weak(p,'volume'))}</td><td className="num">{fmt(weak(p,'position'))}</td><td>{flags.join(' · ')||'—'}</td></tr>;})}</tbody></table></div>{!rows.length&&<p className="empty">当前筛选无组合；可取消分位筛选。</p>}</section>;
 }
 
-export function CurvePanel({data,onPair,Chart}) {
- const [near,setNear]=usePreference('futures.curve.'+data.product+'.near',''),[far,setFar]=usePreference('futures.curve.'+data.product+'.far','');
+export function CurvePanel({data,onPair,Chart,controls}) {
  const curve=data.curve, comparisons=curve.comparisons||[];
  const rows=curve.nodes.map((n,i)=>({...n,...Object.fromEntries(comparisons.map(c=>['lag'+c.lag,c.nodes[i]?.price??null]))}));
- return <><section className="panel"><h2>期限曲线</h2><Chart rows={rows} x="symbol" lines={[["price",'当日 '+data.meta.as_of],...comparisons.filter(c=>c.as_of).map(c=>['lag'+c.lag,`前${c.lag}个观测日 ${c.as_of}`])]}/><p className="sub">{comparisons.map(c=>`前${c.lag}日：${c.as_of||'窗口内观测不足'}`).join(' · ')}</p></section>
- <section className="panel"><h2>相邻价差</h2><div className="curve-pairs">{curve.adjacent.map(p=><button key={p.near+p.far} onClick={()=>onPair(p.near,p.far)}>{p.near} − {p.far}<strong>{fmt(p.spread)}</strong></button>)}</div><div className="scan-controls"><label>选取近月<select value={near} onChange={e=>setNear(e.target.value)}><option value="">请选择</option>{curve.nodes.map(n=><option key={n.symbol}>{n.symbol}</option>)}</select></label><label>选取远月<select value={far} onChange={e=>setFar(e.target.value)}><option value="">请选择</option>{curve.nodes.map(n=><option key={n.symbol}>{n.symbol}</option>)}</select></label><button disabled={!near||!far||near>=far} onClick={()=>onPair(near,far)}>分析所选两腿</button></div></section>
- <details className="panel"><summary>成交持仓与合约明细</summary><div className="grid"><Chart rows={rows} x="symbol" lines={[["volume","成交量 / 手"]]} integer bar/><Chart rows={rows} x="symbol" lines={[["position","持仓量 / 手"]]} integer bar/></div><div className="table-wrap"><table><thead><tr><th>合约</th><th className="num">当日价格</th>{comparisons.map(c=><th className="num" key={c.lag}>较前{c.lag}观测日变化</th>)}<th className="num">成交 / 手</th><th className="num">持仓 / 手</th></tr></thead><tbody>{curve.nodes.map((n,i)=><tr key={n.symbol}><td>{n.symbol}</td><td className="num">{fmt(n.price)}</td>{comparisons.map(c=><td className="num" key={c.lag}>{fmt(c.nodes[i]?.change)}</td>)}<td className="num">{fmt(n.volume)}</td><td className="num">{fmt(n.position)}</td></tr>)}</tbody></table></div></details></>;
+ const tooltip=params=>{const row=rows[params[0]?.dataIndex];return row?[row.symbol,...params.map(p=>`${p.marker} ${p.seriesName}：${fmt(p.value)}`),`成交 ${fmt(row.volume)} 手 · 持仓 ${fmt(row.position)} 手`].join('<br/>'):'';};
+ return <section className="panel curve-panel"><div className="filters">{controls}</div>
+ {rows.length?<Chart rows={rows} x="symbol" selected={[data.near,data.far]} tooltip={tooltip} lines={[["price",'当日 '+data.meta.as_of],...comparisons.filter(c=>c.as_of).map(c=>['lag'+c.lag,`前${c.lag}个观测日 ${c.as_of}`])]}/>:<p className="empty">当前日期暂无期限曲线数据</p>}
+ {comparisons.filter(c=>!c.as_of).map(c=><p className="sub" key={c.lag}>前{c.lag}个观测日：窗口内观测不足</p>)}
+ {!!curve.adjacent.length&&<div className="curve-pairs"><h2>相邻价差</h2>{curve.adjacent.map(p=><button className={p.near===data.near&&p.far===data.far?'selected':''} key={p.near+p.far} onClick={()=>onPair(p.near,p.far)} aria-label={`${p.near} − ${p.far}，价差 ${fmt(p.spread)}，查看价差季节性`}>{p.near} − {p.far}<strong>{fmt(p.spread)}</strong></button>)}</div>}
+ </section>;
 }

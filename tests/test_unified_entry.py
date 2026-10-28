@@ -8,6 +8,68 @@ import pytest
 ROOT=Path(__file__).resolve().parents[1]
 
 
+def test_gateway_keeps_old_lazy_assets_and_independent_seat_contract(tmp_path,monkeypatch):
+    import httpx
+    from fastapi.testclient import TestClient
+    for version in ['old','new']:
+        folder=tmp_path/f'releases/web-{version}';(folder/'assets').mkdir(parents=True)
+        (folder/'index.html').write_text(version)
+        (folder/'assets'/f'{version}.js').write_text(version+' module')
+    (tmp_path/'frontend-release.json').write_text(json.dumps({'release':'releases/web-new'}))
+    monkeypatch.setenv('DASHBOARD_RUNTIME_ROOT',str(tmp_path))
+    monkeypatch.setenv('DASHBOARD_PUBLIC_READONLY','1')
+    gateway=load_script('merged_gateway_test',ROOT/'backend/gateway.py')
+    seen=[]
+    def upstream(request):
+        seen.append(str(request.url))
+        if request.url.path=='/api/seats/v1/views/unavailable':
+            raise httpx.ConnectError('seat API offline',request=request)
+        return httpx.Response(200,json={'batch':16},headers={'x-data-version':'seat16','etag':'"seat16"'})
+    with TestClient(gateway.app) as client:
+        gateway.app.state.client=httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+        for module in ['seats','futures','options']:
+            assert client.get('/'+module+'/').text=='new'
+        # A pointer swap does not alter this running gateway's pinned HTML.
+        (tmp_path/'frontend-release.json').write_text(json.dumps({'release':'releases/web-old'}))
+        assert client.get('/seats/').text=='new'
+        assert client.get('/assets/old.js').text=='old module'
+        assert client.get('/assets/new.js').text=='new module'
+        for path in ['/assets/missing.js','/seats/missing.js','/seatsbad','/api/unknown/v1/meta']:
+            assert client.get(path).status_code==404
+        result=client.get('/api/seats/v1/meta/options?product_code=RB.SHFE')
+        assert result.json()=={'batch':16} and result.headers['x-data-version']=='seat16'
+        assert seen==['http://127.0.0.1:8796/api/seats/v1/meta/options?product_code=RB.SHFE']
+        assert client.post('/api/seats/v1/meta/options').status_code==403
+        assert client.get('/api/seats/v1/meta/options',headers={'origin':'https://other.test'}).status_code==403
+        assert client.get('/api/seats/v1/views/unavailable').status_code==503
+        assert client.get('/api/options/v1/snapshot').status_code==200
+        assert client.get('/api/futures/v1/products').status_code==200
+
+
+def test_frontend_release_rolls_back_all_modules_without_data_changes(tmp_path,monkeypatch):
+    publish=load_script('frontend_release_test',ROOT/'tools/freeze_backend.py')
+    runtime=tmp_path/'runtime';source=tmp_path/'dist';source.mkdir()
+    monkeypatch.setattr(publish,'runtime_root',lambda:runtime)
+    (source/'index.html').write_text('old shell')
+    (source/'modules.js').write_text('old seats futures options')
+    first=publish.publish_frontend(source)
+    (source/'index.html').write_text('new shell')
+    (source/'modules.js').write_text('new seats futures options')
+    second=publish.publish_frontend(source)
+    assert first['release']!=second['release'] and second['previous']==first['release']
+    assert (runtime/first['release']/'modules.js').read_text()=='old seats futures options'
+    rolled=publish.publish_frontend(rollback=True)
+    assert rolled['release']==first['release'] and rolled['previous']==second['release']
+    assert publish.publish_frontend(rollback=True)['release']==second['release']
+    assert list(runtime.glob('*release.json'))==[runtime/'frontend-release.json']
+    # A failed copy/verification cannot switch the live pointer.
+    (source/'modules.js').write_text('incomplete')
+    original=publish.review_hashes
+    monkeypatch.setattr(publish,'review_hashes',lambda folder: {'broken':'value'} if 'web-stage-' in str(folder) else original(folder))
+    with pytest.raises(RuntimeError):publish.publish_frontend(source)
+    assert json.loads((runtime/'frontend-release.json').read_text())['release']==second['release']
+
+
 def load_script(name,path):
     spec=importlib.util.spec_from_file_location(name,path)
     module=importlib.util.module_from_spec(spec)
@@ -18,7 +80,7 @@ def load_script(name,path):
 def test_repeat_launch_reuses_service_without_starting_children(monkeypatch,capsys):
     launch=load_script('unified_start',ROOT/'start.py')
     monkeypatch.setattr(launch,'entry_ready',lambda:True)
-    monkeypatch.setattr(launch.sys,'argv',['start.py','--module','futures'])
+    monkeypatch.setattr(sys,'argv',['start.py','--module','futures'])
     def forbidden(*args,**kwargs):
         pytest.fail('重复启动不应创建进程')
     monkeypatch.setattr(launch.subprocess,'Popen',forbidden)

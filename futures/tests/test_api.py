@@ -228,20 +228,84 @@ def test_dashboard_real_fixture_and_no_source_write(setup):
     assert list((store.runtime / 'snapshots').glob('*.json'))
 
 
+def test_source_hash_reused_across_products_and_invalidated_on_replace(setup, monkeypatch):
+    import hashlib
+    from backend import data
+    _, store, path = setup
+    calls = []
+    original = data.file_digest
+    def digest(source, algorithm):
+        calls.append(source.name)
+        return original(source, algorithm)
+    monkeypatch.setattr(data, 'file_digest', digest)
+    first = store.read('RB', '2026-09-01', '2026-09-02')
+    other = store.read('CU', '2026-09-01', '2026-09-02')
+    assert len(calls) == 1 and first['files'] == other['files']
+    updated = path.with_suffix('.next')
+    with duckdb.connect() as con:
+        con.execute('CREATE TABLE corrected AS SELECT * REPLACE(close+10 AS close) FROM read_parquet(?)', [str(path)])
+        con.execute('COPY corrected TO ? (FORMAT PARQUET)', [str(updated)])
+    updated.replace(path)
+    corrected = store.read('RB', '2026-09-01', '2026-09-02')
+    assert len(calls) == 2
+    assert corrected['files'][0]['sha256'] == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert corrected['files'] != first['files']
+    assert corrected['rows'][0]['close'] == first['rows'][0]['close'] + 10
+
+
 def test_radar_bounded_read_cache_and_source_safety(setup):
     client, store, path = setup
     before=path.read_bytes()
     result=client.get('/api/radar?end=2026-09-02').json()
     assert result['expected']==result['scanned']==2
     assert result['as_of']=='2026-09-02' and result['failures']==[]
-    assert result['cached'] is False
-    assert client.get('/api/radar?end=2026-09-02').json()['cached'] is True
-    assert client.get('/api/radar?end=2026-09-02&price_type=settle').json()['cached'] is False
+    again=client.get('/api/radar?end=2026-09-02')
+    assert again.json()==result
+    assert client.get('/api/radar?end=2026-09-02',headers={'If-None-Match':again.headers['etag']}).status_code==304
+    assert client.get('/api/radar?end=2026-09-02&price_type=settle').headers['etag']!=again.headers['etag']
     assert path.read_bytes()==before
     assert not store.runtime.exists()
     assert client.get('/api/radar?end=2026-09-01').json()['as_of']=='2026-09-01'
     for query in ('price_type=bad','min_volume=-1','min_position=1.5','end=bad'):
         assert client.get('/api/radar?'+query).status_code==422
+
+
+def test_http_same_day_revision_deletion_and_public_no_snapshot_writes(setup, monkeypatch):
+    client, store, path = setup
+    store.persist_queries = False
+    url='/api/dashboard?product=RB&start=2026-09-01&end=2026-09-02'
+    original=client.get(url)
+    assert original.status_code==200
+    query=store._query
+    monkeypatch.setattr(store,'_query',lambda *a,**kw:pytest.fail('304 must not query DuckDB'))
+    store.cache.clear()
+    assert client.get(url,headers={'If-None-Match':original.headers['etag']}).status_code==304
+    monkeypatch.setattr(store,'_query',query)
+    replacement=path.with_name('replacement.tmp')
+    with duckdb.connect() as con:
+        con.execute('CREATE TABLE corrected AS SELECT * FROM read_parquet(?)',[str(path)])
+        con.execute("UPDATE corrected SET close=close+10 WHERE symbol='RB2610'")
+        con.execute("DELETE FROM corrected WHERE symbol='RB2701' AND trade_date=DATE '2026-09-01'")
+        con.execute('COPY corrected TO ? (FORMAT PARQUET)',[str(replacement)])
+    replacement.replace(path)
+    corrected=client.get(url,headers={'If-None-Match':original.headers['etag']})
+    assert corrected.status_code==200 and corrected.headers['etag']!=original.headers['etag']
+    assert corrected.json()['meta']['row_count']==3
+    assert corrected.json()['meta']['as_of']==original.json()['meta']['as_of']
+    assert corrected.json()['spread']!=original.json()['spread']
+    assert not store.runtime.exists()
+    # Security remains outside the response cache.
+    assert client.get(url,headers={'Origin':'https://evil.example','If-None-Match':corrected.headers['etag']}).status_code==403
+
+
+def test_duckdb_resource_limits_and_cache_default(setup):
+    from backend.data import query_connection
+    _, store, _=setup
+    assert store.cache.limit==96*1024**2
+    with query_connection() as con:
+        assert con.execute("SELECT current_setting('threads')").fetchone()[0]==1
+        assert con.execute("SELECT current_setting('memory_limit')").fetchone()[0]=='244.1 MiB'
+        assert con.execute("SELECT current_setting('max_temp_directory_size')").fetchone()[0]=='0 bytes'
 
 
 def test_radar_partial_duplicate_failure_and_source_loss(setup,monkeypatch):
@@ -428,7 +492,6 @@ def test_radar_family_endpoint_reuses_scan_and_exposes_object_counts(setup):
     client, _, _ = setup
     all_data=client.get('/api/radar?end=2026-09-02&min_volume=0&min_position=0').json()
     filtered=client.get('/api/radar?end=2026-09-02&min_volume=0&min_position=0&family=position').json()
-    assert filtered['cached'] is True
     assert filtered['family']=='position'
     assert filtered['object_counts']==all_data['object_counts']
     assert all(e['family']=='position' for o in filtered['objects'] for e in o['events'])
@@ -905,7 +968,7 @@ def test_read_change_returns_previous_snapshot(setup, monkeypatch):
     calls = []
     def changing(files):
         calls.append(1)
-        return original(files) + ([] if len(calls) == 1 else [('changed', 1, 1)])
+        return original(files) + ('' if len(calls) == 1 else 'changed')
     monkeypatch.setattr(store, '_fingerprints', changing)
     after = store.read('RB', '2026-09-01', '2026-09-02')
     assert after['meta']['snapshot_id'] == before['meta']['snapshot_id']
@@ -952,7 +1015,7 @@ def test_snapshot_rejects_source_change(setup, monkeypatch):
     def changed(files):
         result = original(files)
         calls.append(1)
-        return result if len(calls) == 1 else result + [('changed', 1, 1)]
+        return result if len(calls) == 1 else result + 'changed'
     monkeypatch.setattr(store, '_fingerprints', changed)
     with pytest.raises(OSError):
         store.read('RB', '2026-09-01', '2026-09-02')

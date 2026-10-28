@@ -5,6 +5,8 @@ from contextlib import contextmanager
 from datetime import date
 import json
 import math
+import os
+from hashlib import sha256
 from pathlib import Path
 import sqlite3
 import duckdb
@@ -20,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from .transport import ResearchHTTP, fingerprint
 from . import analytics
 from .data import PRODUCT_NAMES, CONTRACT, FIELDS, INDEX_SERIES, DailyStore, clean, validate_product, fundamental_review, fundamental_analysis, fundamental_update_status, fundamental_candidates, index_daily, contract_terms
 
@@ -98,7 +101,21 @@ def create_app(store=None):
     store = store or DailyStore()
     app = FastAPI(title='期货量价工作台', version='0.1.0')
     app.state.store = store
-    radar_lock, radar_cache = Lock(), {}
+    radar_lock = Lock()
+    def source_version(path):
+        files = store._files()
+        if not files:
+            files = list((store.runtime/'snapshots').glob('*.json'))
+        if path.startswith('/api/fundamentals') or path == '/api/basis-reference':
+            files += [p for name in ('fundamental_lab', 'ceic_lab')
+                      for p in (store.runtime/name).rglob('*') if p.is_file()]
+        return [date.today().isoformat(), fingerprint(files)]
+    code_version = sha256(b''.join(p.read_bytes() for p in sorted(Path(__file__).parent.glob('*.py')))).hexdigest()
+    app.add_middleware(ResearchHTTP, version=source_version, cache=store.cache, code_version=code_version,
+        concurrency=int(os.environ.get('FUTURES_HTTP_CONCURRENCY', '1')),
+        paths=['/api/'+name for name in ('products','contracts','dashboard','spread-history',
+            'seasonal-position','contract-position','contract-history','basis-reference','radar','position-peaks',
+            'fundamentals/analysis','fundamentals/review','fundamentals/candidates','data/futures_daily/rows')])
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=['127.0.0.1', 'localhost', '[::1]', 'testserver'])
 
     @app.middleware('http')
@@ -177,11 +194,11 @@ def create_app(store=None):
               min_position: int = Query(1000, ge=0, le=10000000)):
         if price_type not in ('close','settle'):
             raise ValueError('价格口径只允许 close 或 settle')
-        def response(result, cached):
+        def response(result):
             objects = [o for item in result['items'] for o in radar_objects(item, family)]
             rank = {'优先核查':0,'观察名单':1,'数据待检查':2,'未命中':3}
             objects.sort(key=lambda o:(rank[o['bucket']],o['key']))
-            return {**result, 'objects':objects, 'family':family, 'cached':cached}
+            return {**result, 'objects':objects, 'family':family}
         with radar_lock:
             started = perf_counter()
             try:
@@ -189,8 +206,9 @@ def create_app(store=None):
             except (OSError, RuntimeError, duckdb.Error) as exc:
                 raise HTTPException(503, '全市场源读取失败，不将旧扫描冒充当前结果') from exc
             key = (snapshot['snapshot_id'], price_type, min_volume, min_position)
-            if radar_cache.get('key') == key:
-                return response(radar_cache['result'], True)
+            cached = store.cache.get('radar-result')
+            if cached and cached[0] == key:
+                return response(cached[1])
             groups = {}
             for row in snapshot['rows']:
                 product = row['symbol'][:-4]
@@ -218,8 +236,8 @@ def create_app(store=None):
                     '分位和变动同属价差类，不重复计为多类共振；不提供胜率或买卖建议',
                     '成交比基准20期中位数；持仓绝对变动至少1000手且总量3%/活跃合约5%；远月占比变动至少3个百分点',
                     '仅本地量价初筛，不调用Wind、基本面、生产入口或RDS；无扫描历史状态比较']))
-            radar_cache.update(key=key,result=result)
-            return response(result, False)
+            store.cache['radar-result'] = (key, result)
+            return response(result)
 
     @app.get('/api/position-peaks')
     def position_peaks(end: Optional[date] = None,

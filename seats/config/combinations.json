@@ -1,0 +1,69 @@
+[
+  {
+    "id": "industrial_major",
+    "name": "产业大户",
+    "scope": "main",
+    "isSystem": true,
+    "active": true,
+    "members": [
+      "中信期货",
+      "国泰君安",
+      "永安期货",
+      "中粮期货",
+      "五矿期货",
+      "华泰期货"
+    ]
+  },
+  {
+    "id": "brokerage_proprietary",
+    "name": "券商自营",
+    "scope": "main",
+    "isSystem": true,
+    "active": true,
+    "members": [
+      "招商期货",
+      "平安期货",
+      "华泰期货",
+      "国投安信",
+      "宏源期货",
+      "银河期货"
+    ]
+  },
+  {
+    "id": "capital_strike",
+    "name": "投机交易",
+    "scope": "main",
+    "isSystem": true,
+    "active": true,
+    "members": [
+      "东证期货",
+      "国泰君安",
+      "中信期货"
+    ]
+  },
+  {
+    "id": "foreign_seats",
+    "name": "外资席位",
+    "scope": "main",
+    "isSystem": true,
+    "active": true,
+    "members": [
+      "高盛期货",
+      "摩根大通",
+      "瑞银期货"
+    ]
+  },
+  {
+    "id": "wolong_fengchu",
+    "name": "家人席位",
+    "scope": "retail",
+    "isSystem": true,
+    "active": true,
+    "members": [
+      "东方财富",
+      "徽商期货",
+      "平安期货",
+      "方正中期"
+    ]
+  }
+]

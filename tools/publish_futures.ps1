@@ -3,7 +3,7 @@ param([switch]$CodeOnly)
 $ErrorActionPreference = 'Stop'
 $terminalRoot = Split-Path -Parent $PSScriptRoot
 $terminalPython = if ($env:OPTIONS_PYTHON) { $env:OPTIONS_PYTHON } else { Join-Path $terminalRoot '.venv/Scripts/python.exe' }
-$occupied = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in 8790,8794,8795 })
+$occupied = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in 8790,8794,8795,8796 })
 if ($occupied.Count) { throw '请先正常停止统一终端，再发布期货版本；不会停止现有进程。' }
 Push-Location (Join-Path $terminalRoot 'frontend')
 try {
@@ -13,7 +13,7 @@ try {
     & node node_modules/vite/bin/vite.js build
     if ($LASTEXITCODE -ne 0) { throw '期货前端发布失败；未继续更新后端和数据。' }
 } finally { Pop-Location }
-$freezeArguments = @()
+$freezeArguments = @('--frontend')
 if (-not $CodeOnly) { $freezeArguments += '--refresh-data' }
 & $terminalPython -X utf8 (Join-Path $PSScriptRoot 'freeze_backend.py') @freezeArguments
 if ($LASTEXITCODE -ne 0) { throw '期货后端或数据发布失败；请查看输出后再启动。' }

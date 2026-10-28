@@ -1,3 +1,4 @@
+import { conditionalFetch as fetch } from './transport.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChart, Metric, usePreference } from './charts.js';
 import './options.css';
@@ -389,7 +390,7 @@ function HoldingTab({ snapshot, rows, month, months, spot, metric, onMetric, onO
     return () => controller.abort();
   }, [snapshot.snapshot_id]);
   const comparable = previous?.trade_date === snapshot.trade_date && Date.parse(previous.asof) < Date.parse(snapshot.asof) && previous.rows.some(row => Number.isFinite(row.oi) || Number.isFinite(row.volume));
-  const basisLabel = basis === 'snapshot' && comparable ? `较上一截面 ${formatDateTime(previous.asof)}` : '较前一交易日持仓';
+  const basisLabel = basis === 'snapshot' ? (comparable ? `较上一截面 ${formatDateTime(previous.asof)}` : '同日上一截面') : '较前一交易日持仓';
   const monthRows = useMemo(() => holdingRows(getMonthRows(rows, month?.id), comparable ? previous : null, basis), [rows, month?.id, previous, basis, comparable]);
   const rankings = [
     ['增仓最多', monthRows.filter(r => toNumber(r.oi_change) > 0).sort((a,b) => b.oi_change-a.oi_change).slice(0,3), 'oi_change'],
@@ -424,16 +425,16 @@ function HoldingTab({ snapshot, rows, month, months, spot, metric, onMetric, onO
         </div>
       </div>
       <div className="options-pcr" aria-label="所选月份 PCR">{pcr.map((value,index)=><Metric key={index} label={(index?'成交':'持仓')+' PCR'+(snapshot.test_only?' · 样本':'')} value={formatNumber(value.ratio,2)} hint={'所选月份 Put合计 ÷ Call合计；覆盖 '+value.covered+'/'+value.total+' 合约'+(value.reason?'；'+value.reason:'')}/>)}</div>
-      <div className="options-analysis-tools"><label>变化基准<select value={basis} onChange={e => setBasis(e.target.value)}><option value="daily">前一交易日</option><option value="snapshot" disabled={!comparable}>同日上一截面</option></select></label><span className="options-muted">{basisLabel}{previousMessage ? ` · ${previousMessage}` : ''}</span></div>
+      <div className="options-analysis-tools"><label>变化基准<select value={basis} onChange={e => setBasis(e.target.value)}><option value="daily">前一交易日</option><option value="snapshot" disabled={!comparable}>同日上一截面</option></select></label><span className="options-muted">{basis === 'snapshot' ? (previousMessage || basisLabel) : ''}</span></div>
 
       <div className="options-holding-layout">
         <section className="options-surface">
           <div className="options-heading options-heading-tight">
             <div>
               <h3>执行价分布 <span className="options-muted options-small">单位：手</span></h3>
-              <p className="options-holding-explain">{metric === 'oi' ? `实心总长 = 当前持仓；红段包含在内，绿色虚线段位于外侧。${basisLabel}。` : (basis === 'snapshot' ? '成交量为两次截面之间的增量；负修订或缺失值显示为—。' : '成交量为该行情截面的当日累计值；缺失值保持为—。')}</p>
+              <p className="options-holding-explain">{metric === 'oi' ? `实心为持仓，红段为增仓，外侧虚线为减仓。${basisLabel}。` : (basis === 'snapshot' ? '成交量为两次截面之间的增量；负修订或缺失值显示为—。' : '当日累计成交量（手）')}</p>
             </div>
-            <div className="options-legend"><span><i className="options-dot options-dot-blue" />存量</span><span><i className="options-dot options-dot-red" />增仓</span><span><i className="options-dot options-dot-green" />减仓</span></div>
+            {metric === 'oi' && <div className="options-legend"><span><i className="options-dot options-dot-blue" />存量</span><span><i className="options-dot options-dot-red" />增仓</span><span><i className="options-dot options-dot-green" />减仓</span></div>}
           </div>
           <div className="options-chart-head"><span>看涨期权 Call</span><span>执行价</span><span>看跌期权 Put</span></div>
           {strikes.length ? strikes.map((strike) => {
@@ -446,7 +447,7 @@ function HoldingTab({ snapshot, rows, month, months, spot, metric, onMetric, onO
               </div>
             );
           }) : <EmptyState title="当前月份没有执行价数据" />}
-          <div className="options-spot-line">── 现货 {formatPrice(spot)} · 平值附近仅用于视觉定位 ──</div>
+          <div className="options-spot-line">── 现货 {formatPrice(spot)} ──</div>
         </section>
 
       </div>
@@ -462,7 +463,7 @@ function ChainCell({ value, formatter, className = '', title }) {
   return <td className={className} title={title}>{formatter ? formatter(value) : formatNumber(value)}</td>;
 }
 
-function ChainTab({ rows, month, months, spot, onSelectMonth }) {
+function ChainTab({ rows, month, months, spot }) {
   const [search, setSearch] = usePreference('options.chain.search','');
   const [filter, setFilter] = usePreference('options.chain.filter','all');
   const monthRows = useMemo(() => getMonthRows(rows, month?.id), [rows, month?.id]);
@@ -485,11 +486,7 @@ function ChainTab({ rows, month, months, spot, onSelectMonth }) {
           <h2>期权链</h2>
           <p className="options-muted"><ColoredCode code={code} color={color} /></p>
         </div>
-        <label className="options-month-select">链月份
-          <select value={month?.id || ''} onChange={(event) => onSelectMonth(event.target.value)}>
-            {months.map((item, index) => <option key={item.id || index} value={item.id}>{item.code || item.id}</option>)}
-          </select>
-        </label>
+
       </div>
       <div className="options-chain-tools">
         <input aria-label="搜索执行价或合约" onChange={(event) => setSearch(event.target.value)} placeholder="搜索执行价，如 7700" type="search" value={search} />
@@ -545,7 +542,13 @@ function shanghaiDate(now = Date.now()) {
   return new Intl.DateTimeFormat('sv-SE', {timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'}).format(now);
 }
 
-function SnapshotMeta({ snapshot, now }) {
+function SnapshotMeta({ snapshot }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (snapshot?.mode !== 'live') return undefined;
+    const timer = window.setInterval(() => setNow(Date.now()), 30000);
+    return () => window.clearInterval(timer);
+  }, [snapshot?.mode]);
   const historical = snapshot?.trade_date !== shanghaiDate(now) || snapshot?.mode !== 'live';
   return (
     <div className="options-meta-line">
@@ -568,7 +571,6 @@ export default function Options() {
     return TAB_ITEMS.some(item => item.id === tab) ? tab : 'volatility';
   });
   const [holdingMetric, setHoldingMetric] = usePreference('options.holding.metric','oi');
-  const [now, setNow] = useState(() => Date.now());
 
   const fetchSnapshotData = useCallback(async (signal) => {
     const response = await fetch(SNAPSHOT_ENDPOINT, { headers: { Accept: 'application/json' }, signal });
@@ -611,12 +613,6 @@ export default function Options() {
     return () => controller.abort();
   }, [loadSnapshot]);
 
-  useEffect(() => {
-    if (snapshot?.mode !== 'live') return undefined;
-    const timer = window.setInterval(() => setNow(Date.now()), 30000);
-    return () => window.clearInterval(timer);
-  }, [snapshot?.mode]);
-
   const months = snapshot?.months || [];
   const selectedMonth = months.find((month) => String(month.id) === String(selectedMonthId)) || months[0] || null;
   const content = snapshotStatus === 'loading' && !snapshot ? (
@@ -642,21 +638,21 @@ export default function Options() {
       </div>
       {activeTab === 'volatility' ? <VolatilityTab months={months} rows={snapshot.rows} month={selectedMonth} spot={snapshot.spot} snapshot={snapshot}/> : null}
       {activeTab === 'holding' ? <HoldingTab snapshot={snapshot} metric={holdingMetric} months={months} onMetric={setHoldingMetric} onOpenChain={() => setActiveTab('chain')} rows={snapshot.rows} month={selectedMonth} spot={snapshot.spot} /> : null}
-      {activeTab === 'chain' ? <ChainTab months={months} onSelectMonth={setSelectedMonthId} rows={snapshot.rows} month={selectedMonth} spot={snapshot.spot} /> : null}
+      {activeTab === 'chain' ? <ChainTab months={months} rows={snapshot.rows} month={selectedMonth} spot={snapshot.spot} /> : null}
     </>
   );
 
   return (
-    <div className="options-module">
-      <div className="options-tab-nav" role="tablist" aria-label="期权分析页签">
-        {TAB_ITEMS.map((tab) => <button aria-selected={activeTab === tab.id} className={activeTab === tab.id ? 'options-tab-active' : ''} key={tab.id} onClick={() => setActiveTab(tab.id)} role="tab" type="button">{tab.label}</button>)}
+    <div className="options-module board-content">
+      <div className="board-tabs" role="tablist" aria-label="期权分析页签">
+        {TAB_ITEMS.map((tab) => <button aria-selected={activeTab === tab.id} key={tab.id} onClick={() => setActiveTab(tab.id)} role="tab" type="button">{tab.label}</button>)}
       </div>
       <header className="options-topbar">
         <div className="options-brand-block">
           <h1 className="options-brand">期权研究</h1>
 
         </div>
-        {snapshot ? <SnapshotMeta now={now} snapshot={snapshot} /> : <span className="options-meta-line">等待数据</span>}
+        {snapshot ? <SnapshotMeta snapshot={snapshot} /> : <span className="options-meta-line">等待数据</span>}
         <div className="options-top-actions">
           <button className="options-refresh-button" disabled={snapshotStatus === 'loading'} onClick={() => loadSnapshot()} type="button">{snapshotStatus === 'loading' ? '读取中…' : '刷新数据'}</button>
         </div>

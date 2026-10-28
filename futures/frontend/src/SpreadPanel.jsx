@@ -1,16 +1,17 @@
+import { conditionalFetch as fetch } from '../../../frontend/src/transport.js';
 import { useChart, usePreference } from '../../../frontend/src/charts.js';
 import {useEffect,useRef,useState} from 'react';
 const fmt=v=>v==null?'—':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:2});
 
-export default function SpreadPanel({data,start,revision,controls}) {
- const [span,setSpan]=usePreference('futures.spread.span.'+(start||'default'),start?'custom':'3m'),[ma,setMa]=usePreference('futures.spread.ma',false),[legs,setLegs]=usePreference('futures.spread.legs',false),[rank,setRank]=usePreference('futures.spread.rank',false),[result,setResult]=useState(null),[error,setError]=useState('');
+export default function SpreadPanel({data,revision,controls}) {
+ const [span,setSpan]=usePreference('futures.spread.span.default','3m'),[ma,setMa]=usePreference('futures.spread.ma',false),[legs,setLegs]=usePreference('futures.spread.legs',false),[rank,setRank]=usePreference('futures.spread.rank',false),[result,setResult]=useState(null),[error,setError]=useState('');
  const ref=useRef();
  useEffect(()=>{
   const abort=new AbortController();setResult(null);setError('');
-  const qs=new URLSearchParams({product:data.product,near:data.near,far:data.far,price_type:data.price_type,end:data.meta.as_of,span,...(span==='custom'&&start?{start}:{})});
+  const qs=new URLSearchParams({product:data.product,near:data.near,far:data.far,price_type:data.price_type,end:data.meta.as_of,span});
   fetch('/api/spread-history?'+qs,{signal:abort.signal}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.detail||'价差历史读取失败');return d;}).then(setResult).catch(e=>{if(e.name!=='AbortError')setError(e.message);});
   return()=>abort.abort();
- },[data.product,data.near,data.far,data.price_type,data.meta.as_of,start,span,revision]);
+ },[data.product,data.near,data.far,data.price_type,data.meta.as_of,span,revision]);
  useChart(ref,c=>{
   const rows=result.series, dates=rows.map(r=>r.trade_date);
   const panels=[{title:'价差 / 原始报价单位',keys:[['spread',`${data.near} − ${data.far}`],...(ma?[['ma20','20期均线']]:[])]},
@@ -34,8 +35,8 @@ export default function SpreadPanel({data,start,revision,controls}) {
    dataZoom:[{type:'inside',xAxisIndex:panels.map((_,i)=>i)},{type:'slider',xAxisIndex:panels.map((_,i)=>i),bottom:8,height:17}],series});
 
  },[result,ma,legs,rank,data.near,data.far]);
- return <section className="panel" id="spread-history"><div className="filters">{controls}</div>
-  <div className="scan-controls">{[['1m','近1月'],['3m','近3月'],['1y','近1年'],['all','共同有效历史'],...(start?[['custom','顶部日期窗口']]:[])].map(([v,label])=><button key={v} aria-pressed={span===v} className={span===v?'primary':''} onClick={()=>setSpan(v)}>{label}</button>)}
+ const spanControl=<label>历史跨度<select value={span} onChange={e=>setSpan(e.target.value)}>{[['1m','近1月'],['3m','近3月'],['1y','近1年'],['all','共同有效历史']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>;
+ return <section className="panel" id="spread-history"><div className="filters">{controls(spanControl)}
    {[[ma,setMa,'20期均线'],[legs,setLegs,'两腿价格联动'],[rank,setRank,'历史分位']].map(([v,fn,label])=><label className="check" key={label}><input type="checkbox" checked={v} onChange={e=>fn(e.target.checked)}/>{label}</label>)}
   </div>
   {error?<p role="alert">{error}</p>:!result?<p role="status">读取所选两腿历史…</p>:<><p className="sub">有效配对 {result.first||'无'} 至 {result.last||'无'} · {result.paired_count}个样本</p>

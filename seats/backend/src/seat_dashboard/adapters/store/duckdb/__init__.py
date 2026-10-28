@@ -1,0 +1,1 @@
+"""DuckDB snapshot adapter."""

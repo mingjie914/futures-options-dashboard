@@ -1,18 +1,30 @@
 """Read-only bounded daily Parquet access; all writable state is project-local."""
 from __future__ import annotations
 
-from collections import OrderedDict
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from hashlib import sha256
+from hashlib import file_digest, sha256
 import json
 import math
 import os
 from pathlib import Path
 import re
-from threading import RLock
+from threading import RLock, BoundedSemaphore
 
 import duckdb
+from .transport import ByteCache, fingerprint
+
+QUERY_SLOTS = BoundedSemaphore(int(os.environ.get('FUTURES_QUERY_CONCURRENCY', '1')))
+
+@contextmanager
+def query_connection():
+    with QUERY_SLOTS:
+        with duckdb.connect(config={'threads':int(os.environ.get('FUTURES_DUCKDB_THREADS', '1')),
+                                    'memory_limit':os.environ.get('FUTURES_DUCKDB_MEMORY', '256MB'),
+                                    'max_temp_directory_size':'0B'}) as connection:
+            yield connection
+
 
 FIELDS = ('exchange', 'symbol', 'trade_datetime', 'trade_date', 'open', 'high', 'low', 'close',
           'volume', 'amount', 'position', 'settle_price', 'pre_settle_price')
@@ -111,7 +123,7 @@ def index_daily(folder, product=None, start=None, end=None):
             raise ValueError('指数口径不匹配')
     if product is not None and product not in INDEX_SERIES:
         raise ValueError('未知股指品种')
-    with duckdb.connect() as con:
+    with query_connection() as con:
         rows = con.execute('SELECT code,observation_date,raw_value FROM read_parquet(?) ORDER BY 1,2',[str(path)]).fetchall()
     if (len(rows) != selected['observations'] or len({(c,d) for c,d,v in rows}) != len(rows)
             or any(c not in dict(INDEX_SERIES.values()) or not selected['start'] <= d <= selected['end']
@@ -138,7 +150,7 @@ def fundamental_review(folder, code=None, start=None, end=None, offset=0, limit=
     metadata = json.loads(metadata_bytes)
     if metadata.get('production_enabled') is not False or sha256(path.read_bytes()).hexdigest() != selected['sha256']:
         raise RuntimeError('隔离审阅快照校验失败')
-    with duckdb.connect() as con:
+    with query_connection() as con:
         con.execute('CREATE VIEW review AS SELECT * FROM read_parquet(\'' + str(path).replace("'", "''") + '\')')
         if con.execute('SELECT count(*) FROM review WHERE production_ready IS DISTINCT FROM false OR metadata_sha256 IS DISTINCT FROM ?',
                        [sha256(metadata_bytes).hexdigest()]).fetchone()[0]:
@@ -294,7 +306,7 @@ def fundamental_candidates(folder, code=None, offset=0, limit=1000):
     if code is not None:
         if code not in {r['code'] for r in indicators}:
             raise ValueError('Code is not in candidate snapshot')
-        with duckdb.connect() as con:
+        with query_connection() as con:
             total = con.execute('SELECT count(*) FROM read_parquet(?) WHERE code=?',[str(path),code]).fetchone()[0]
             points = con.execute('SELECT observation_date,raw_value,source_files FROM read_parquet(?) WHERE code=? ORDER BY observation_date LIMIT ? OFFSET ?',
                                  [str(path),code,limit,offset]).fetchall()
@@ -789,7 +801,7 @@ def fundamental_analysis(runtime, product=None, indicator=None, end=None):
         if response['snapshot_sha256'] != item['snapshot_sha256']:
             raise RuntimeError('读取期间基本面版本改变，请刷新')
     else:
-        with duckdb.connect() as con:
+        with query_connection() as con:
             rows = con.execute('SELECT period_date, s_' + item['code'] + ' FROM read_parquet(?) '
                 'WHERE period_date <= ? AND s_' + item['code'] + ' IS NOT NULL ORDER BY period_date',
                 [item['_path'], cutoff]).fetchall()
@@ -831,10 +843,9 @@ class DailyStore:
         self.runtime = Path(runtime or os.environ.get('FUTURES_RUNTIME', str(Path(__file__).resolve().parents[1] / 'runtime')))
         if self.runtime.resolve() == self.root.resolve() or self.root.resolve() in self.runtime.resolve().parents:
             raise ValueError('运行目录不能位于生产日线源内')
-        self.cache = OrderedDict()
+        self.cache = ByteCache(int(os.environ.get('FUTURES_CACHE_MB', '96')) * 1024**2)
         self.lock = RLock()
-        self.radar_cache = None
-        self.position_peak_cache = None
+        self.persist_queries = os.environ.get('DASHBOARD_PUBLIC_READONLY') != '1'
 
     def market_snapshot(self, end=None):
         """One bounded, read-only scan for the radar; never write source or snapshots."""
@@ -846,8 +857,9 @@ class DailyStore:
             if not files:
                 raise FileNotFoundError('全市场日线源不可用')
             key = (start, end, before)
-            if self.radar_cache and self.radar_cache[0] == key:
-                return self.radar_cache[1]
+            cached = self.cache.get('market')
+            if cached and cached[0] == key:
+                return cached[1]
             rows = self._query(files, """SELECT exchange,upper(symbol) symbol,trade_date,
                 close,settle_price,volume,position FROM read_parquet(?, union_by_name=true)
                 WHERE regexp_full_match(symbol, '[A-Za-z]{1,3}[0-9]{4}')
@@ -860,7 +872,7 @@ class DailyStore:
                 raise OSError('扫描期间源文件变化，请重试')
             result = {'rows':rows, 'requested_end':end, 'start':start,
                 'snapshot_id':sha256(json.dumps([key, rows], sort_keys=True).encode()).hexdigest()[:24]}
-            self.radar_cache = (key, result)
+            self.cache['market'] = (key, result)
             return result
 
     def position_peaks(self, end):
@@ -871,8 +883,9 @@ class DailyStore:
                 raise FileNotFoundError('历史持仓源不可用')
             before = self._fingerprints(files)
             key = (end, before)
-            if self.position_peak_cache and self.position_peak_cache[0] == key:
-                return self.position_peak_cache[1]
+            cached = self.cache.get('peaks')
+            if cached and cached[0] == key:
+                return cached[1]
             rows = self._query(files, """SELECT upper(symbol) symbol, max(position) peak
                 FROM read_parquet(?, union_by_name=true)
                 WHERE regexp_full_match(symbol, '[A-Za-z]{1,3}[0-9]{4}')
@@ -881,7 +894,7 @@ class DailyStore:
                 GROUP BY upper(symbol)""", (end,))
             if before != self._fingerprints(files):
                 raise OSError('历史持仓源已变化，请重试')
-            self.position_peak_cache = (key, rows)
+            self.cache['peaks'] = (key, rows)
             return rows
 
     def _files(self, start=None, end=None):
@@ -892,11 +905,11 @@ class DailyStore:
 
     @staticmethod
     def _fingerprints(files):
-        return [(str(p), p.stat().st_size, p.stat().st_mtime_ns) for p in files]
+        return fingerprint(files)
 
     @staticmethod
     def _query(files, sql, params=()):
-        with duckdb.connect(config={'threads': 2, 'memory_limit': '512MB'}) as con:
+        with query_connection() as con:
             cursor = con.execute(sql, [[str(p) for p in files], *params])
             names = [d[0] for d in cursor.description]
             return clean([dict(zip(names, row)) for row in cursor.fetchall()])
@@ -946,7 +959,7 @@ class DailyStore:
             raise ValueError(f'日期范围须按先后顺序，且不超过{max_years}年')
         key = sha256(f'{product}|{start}|{end}'.encode()).hexdigest()[:24]
         def remember_end():
-            if default_end:
+            if default_end and self.persist_queries:
                 end_pointer.parent.mkdir(parents=True, exist_ok=True)
                 tmp = end_pointer.with_suffix('.tmp')
                 tmp.write_text(json.dumps({'end': end}), encoding='utf-8')
@@ -962,7 +975,6 @@ class DailyStore:
                     raise FileNotFoundError('请求范围内没有日线文件')
                 cached = self.cache.get(key)
                 if cached and cached[0] == before:
-                    self.cache.move_to_end(key)
                     remember_end()
                     return cached[1]
                 rows = self._query(files, f"""SELECT {','.join(FIELDS)} FROM read_parquet(?, union_by_name=true)
@@ -976,7 +988,15 @@ class DailyStore:
                 keys = [(r['exchange'], r['symbol'], r['trade_date']) for r in rows]
                 if len(keys) != len(set(keys)):
                     raise ValueError('日线逻辑键重复，拒绝发布')
-                hashes = [{'file': str(p.relative_to(self.root)), 'sha256': sha256(p.read_bytes()).hexdigest()} for p in files]
+                hashes = []
+                for p in files:
+                    hash_key, stamp = ('sha256', str(p)), fingerprint([p])
+                    cached_hash = self.cache.get(hash_key)
+                    if not cached_hash or cached_hash[0] != stamp:
+                        with p.open('rb') as source:
+                            cached_hash = (stamp, file_digest(source, 'sha256').hexdigest())
+                        self.cache[hash_key] = cached_hash
+                    hashes.append({'file': str(p.relative_to(self.root)), 'sha256': cached_hash[1]})
                 if before != self._fingerprints(files):
                     raise OSError('读取期间源文件变化，拒绝发布')
                 body = {'product': product, 'start': start, 'end': end, 'rows': rows, 'files': hashes}
@@ -987,16 +1007,17 @@ class DailyStore:
                     'requested_end': end, 'row_count': len(rows), 'quality_flags': [],
                     'formula_version': 'daily-v1', 'realtime': False, 'stale': False,
                     'contract_catalog': 'observed_daily_only', 'available_at': datetime.now().astimezone().isoformat()}
-                pointer.parent.mkdir(parents=True, exist_ok=True)
-                immutable = pointer.parent / f'{snapshot_id}.json'
-                payload = json.dumps(body, ensure_ascii=False, allow_nan=False).encode('utf-8')
-                if not immutable.exists():
-                    tmp = immutable.with_suffix('.tmp')
+                if self.persist_queries:
+                    pointer.parent.mkdir(parents=True, exist_ok=True)
+                    immutable = pointer.parent / f'{snapshot_id}.json'
+                    payload = json.dumps(body, ensure_ascii=False, allow_nan=False).encode('utf-8')
+                    if not immutable.exists():
+                        tmp = immutable.with_suffix('.tmp')
+                        tmp.write_bytes(payload)
+                        os.replace(tmp, immutable)
+                    tmp = pointer.with_suffix('.tmp')
                     tmp.write_bytes(payload)
-                    os.replace(tmp, immutable)
-                tmp = pointer.with_suffix('.tmp')
-                tmp.write_bytes(payload)
-                os.replace(tmp, pointer)
+                    os.replace(tmp, pointer)
                 remember_end()
             except (OSError, duckdb.Error):
                 if not pointer.exists():
@@ -1006,6 +1027,4 @@ class DailyStore:
                 body['meta']['stale'] = True
                 return body
             self.cache[key] = (before, body)
-            while len(self.cache) > 8:
-                self.cache.popitem(last=False)
             return body

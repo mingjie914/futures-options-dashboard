@@ -15,6 +15,40 @@ def review_hashes(folder):
             for p in sorted(folder.rglob('*')) if p.is_file()}
 
 
+def publish_frontend(source=None, *, rollback=False):
+    """Publish one immutable web build; API code and data pointers stay independent."""
+    runtime=runtime_root()
+    pointer=runtime/'frontend-release.json'
+    previous=json.loads(pointer.read_text('utf-8')) if pointer.exists() else {}
+    if rollback:
+        release=previous.get('previous')
+        if not release:raise RuntimeError('没有可回滚的前端版本')
+        (runtime/release).resolve().relative_to(runtime.resolve())
+        if not (runtime/release/'index.html').is_file():raise RuntimeError('前端回滚版本不完整')
+    else:
+        source=Path(source or ROOT/'frontend/dist')
+        if not (source/'index.html').is_file():raise RuntimeError('请先构建完整前端')
+        hashes=review_hashes(source)
+        version=hashlib.sha256(json.dumps(hashes,sort_keys=True).encode()).hexdigest()[:16]
+        release='releases/web-'+version
+        target=runtime/release
+        if not target.exists():
+            stage=runtime/'releases'/('web-stage-'+uuid.uuid4().hex)
+            stage.parent.mkdir(parents=True,exist_ok=True)
+            shutil.copytree(source,stage)
+            if review_hashes(stage)!=hashes or review_hashes(source)!=hashes:
+                raise RuntimeError('构建产物复制期间变化，未切换前端')
+            stage.rename(target)
+        elif review_hashes(target)!=hashes:
+            raise RuntimeError('已有不可变前端版本校验失败')
+    if release==previous.get('release'):return previous
+    result={'release':release,'previous':previous.get('release')}
+    temporary=pointer.with_suffix('.tmp')
+    temporary.write_text(json.dumps(result,indent=2),encoding='utf-8')
+    temporary.replace(pointer)
+    return result
+
+
 def refresh_reviews(target):
     # Stage both collections first; retain the previous data for rollback.
     stage=runtime_root()/'releases'/('futures-data-'+uuid.uuid4().hex[:12])
@@ -55,11 +89,16 @@ def refresh_reviews(target):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--refresh-data',action='store_true',help='同步已保存的期货审阅数据，备份旧版本，不覆盖自选数据库')
+    parser.add_argument('--frontend',action='store_true',help='同时冻结完整前端并原子切换指针')
+    parser.add_argument('--rollback-frontend',action='store_true',help='只回滚完整前端，不改变 API 或数据')
     args=parser.parse_args()
-    for port in [8790,8794,8795]:
+    for port in [8790,8794,8795,8796]:
         with socket.socket() as sock:
             if sock.connect_ex(('127.0.0.1',port))==0:
                 raise SystemExit('请先正常停止统一终端，再发布期货版本；不会停止现有进程')
+    if args.rollback_frontend:
+        print(json.dumps(publish_frontend(rollback=True)))
+        return
     sources=sorted((SOURCE/'backend').glob('*.py'))
     if not sources:raise SystemExit('仓库内期货源码缺失：'+str(SOURCE/'backend'))
     content={p.name:p.read_bytes() for p in sources}
@@ -86,6 +125,7 @@ def main():
         data_manifest=json.loads((runtime/'futures-release.json').read_text('utf-8')).get('data_manifest')
     if data_manifest:manifest['data_manifest']=data_manifest
     (runtime/'futures-release.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
+    if args.frontend:publish_frontend()
     print(json.dumps({'version':version,'files':len(hashes)}))
 
 

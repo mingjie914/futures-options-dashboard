@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {transformWithEsbuild} from 'vite';
+import {linkZoom} from '../../../frontend/src/charts.js';
 const sharedRequire=createRequire(new URL('../../../frontend/package.json',import.meta.url));
 const React=sharedRequire('react'), {renderToStaticMarkup}=sharedRequire('react-dom/server');
 
@@ -11,6 +12,36 @@ const {code}=await transformWithEsbuild(source,'MarketPanels.jsx',{jsx:'automati
 const module={exports:{}};
 new Function('module','exports','require',code)(module,module.exports,id=>id.startsWith('react')?sharedRequire(id):createRequire(import.meta.url)(id));
 const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel}=module.exports;
+test('linked date charts restore late mounts, synchronize both ways and detach without echoes',()=>{
+ const chart=()=>({range:{start:0,end:100},calls:0,handlers:new Map(),
+  on(name,fn){this.handlers.set(name,fn);},off(name){this.handlers.delete(name);},
+  dispatchAction({start,end},options){assert.equal(options.silent,true);this.range={start,end};this.calls++;},
+  drag(start,end,batch=false){this.range={start,end};this.handlers.get('datazoom')?.(batch?{batch:[this.range]}:this.range);}});
+ const group=new Set(),a=chart(),b=chart(),outside=chart();
+ const detach=linkZoom(a,group);linkZoom(outside,new Set());
+ a.drag(20,70);const detachB=linkZoom(b,group);
+ assert.deepEqual(b.range,{start:20,end:70});
+ b.drag(40,90,true);assert.deepEqual(a.range,b.range);assert.equal(b.calls,1);
+ assert.deepEqual(outside.range,{start:0,end:100});
+ detach();b.drag(0,100);assert.deepEqual(a.range,{start:40,end:90});
+ linkZoom(a,group);assert.deepEqual(a.range,{start:0,end:100});
+ detachB();assert.equal(b.handlers.size,0);assert.equal(group.has(b),false);
+});
+test('linked contract legends synchronize selections, late mounts and cleanup without affecting ratios',()=>{
+ const chart=()=>({selected:{},handlers:new Map(),calls:0,
+  on(name,fn){this.handlers.set(name,fn);},off(name){this.handlers.delete(name);},
+  dispatchAction({type,name},options){assert.equal(options.silent,true);this.selected[name]=type==='legendSelect';this.calls++;},
+  select(name,value){this.selected[name]=value;this.handlers.get('legendselectchanged')?.({name,selected:{...this.selected}});}});
+ const group=new Set(),holdings=chart(),changes=chart(),ratio=chart(),prices=chart();
+ linkZoom(holdings,group,true);const detach=linkZoom(changes,group,true);linkZoom(ratio,group);
+ holdings.select('RB2701',false);assert.equal(changes.selected.RB2701,false);assert.equal(ratio.calls,0);
+ linkZoom(prices,group,true);assert.equal(prices.selected.RB2701,false);
+ prices.select('RB2701',true);assert.equal(holdings.selected.RB2701,true);assert.equal(changes.selected.RB2701,true);
+ changes.select('RB2705',false);assert.equal(prices.selected.RB2705,false);assert.equal(holdings.selected.RB2705,false);
+ detach();holdings.select('RB2705',true);assert.equal(changes.selected.RB2705,false);assert.equal(changes.handlers.size,0);assert.equal(group.legendCharts.has(changes),false);
+ assert.equal(ratio.calls,0);
+});
+
 test('radar displays authoritative objects without reclassifying product summary',()=>{
  const objects=[{key:'IM:IM2610/IM2612',product_summary_level:'普通观察',bucket:'优先核查',direction:'卖 IM2610 / 买 IM2612',events:[]}];
  assert.equal(radarRows({objects}),objects);
@@ -25,21 +56,17 @@ test('radar keeps small result lists visible and carries candidate evidence into
  assert.match(source,/direction_code:r.direction_code/);
  assert.match(source,/e.far\?'跨期分析'/);
 });
-test('basis panel distinguishes index close and CU reference scopes before data loads',()=>{
- const html=renderToStaticMarkup(React.createElement(BasisPanel,{product:'CU',priceType:'close',onProduct(){},Chart(){return null;}}));
- assert.match(html,/CU：周频参考价差/);
- assert.match(html,/股指：指数 − 期货/);
- assert.match(source,/正值：期货贴水；负值：期货升水/);
- assert.match(source,/重选当前活跃合约/);
+test('basis keeps one control row, meaningful units and compact formula hints',()=>{
+ const html=renderToStaticMarkup(React.createElement(BasisPanel,{product:'CU',priceType:'close',controls:()=>React.createElement('span',null,'controls')}));
+ assert.match(html,/controls/);assert.match(html,/读取基差/);
+ assert.match(source,/isIndex\?'点':'元\/吨'/);
+ assert.match(source,/正值贴水，负值升水/);
+ assert.match(source,/非年化/);
+ assert.match(source,/测试样本/);
+ const basis=source.slice(source.indexOf('export function BasisPanel'),source.indexOf('export function SpreadDirection'));
+ assert.doesNotMatch(basis,/<details|ContractTerms|<table/);
 });
-test('contract rules remain scoped references',()=>{
- const terms={multiplier:200,tick_size:0.2,tick_value:40,settlement:'现金交割',source_url:'https://www.cffex.com.cn/zz1000/',reviewed_on:'2026-09-12',calendar_source_url:'https://www.cffex.com.cn/',expiry_rule:'第三个周五',as_of:'2026-09-11',contracts:[{symbol:'IM2609',expected_last_trade_date:'2026-09-18',calendar_days_remaining:7},{symbol:'IM2703',expected_last_trade_date:null,calendar_days_remaining:null}],warnings:['不用于年化']};
- const html=renderToStaticMarkup(React.createElement(module.exports.ContractTerms,{terms}));
- assert.match(html,/单腿每手一跳 40 元/);assert.match(html,/尚余 7 自然日/);
- assert.match(html,/非逐合约最终公告/);assert.match(html,/该年交易日历未核验/);
- assert.equal(renderToStaticMarkup(React.createElement(module.exports.ContractTerms,{})),'');
 
-});
 test('radar starts with all-product controls and does not require choosing a product',()=>{
  const html=renderToStaticMarkup(React.createElement(RadarPanel,{onSelect(){}}));
  assert.match(html,/扫描全部品种/);
@@ -61,7 +88,7 @@ test('holdings drilldown uses the actual API share field',async()=>{
  const app=await readFile(new URL('../src/App.jsx',import.meta.url),'utf8');
  assert.match(app,/"new_oi_share"/);
  assert.doesNotMatch(app,/"new_position_share"/);
- assert.match(app,/start:result.start/);
+ assert.doesNotMatch(app,/start:result.start|start=\{q.start\}|dateWindow/);
 });
 
 test('mini trend preserves zero, splits explicit gaps, and handles single observations',()=>{
@@ -78,5 +105,17 @@ test('scan keeps zero liquidity, missing leg null, sample and stale-pair warning
 test('curve uses supplied exact-date columns and preserves null historical values',()=>{
  const charts=[];const Chart=props=>{charts.push(props);return null;};
  const html=renderToStaticMarkup(React.createElement(CurvePanel,{onPair(){},Chart,data:{meta,curve:{nodes:[{symbol:'IM2609',price:100,volume:0,position:20}],adjacent:[],comparisons:[{lag:1,as_of:'2026-09-04',nodes:[{symbol:'IM2609',price:null,change:null}]},{lag:5,as_of:null,nodes:[{symbol:'IM2609',price:null,change:null}]}]}}}));
- assert.equal(charts[0].rows[0].lag1,null);assert.equal(charts[0].lines.length,2);assert.equal(charts[1].bar,true);assert.equal(charts[2].integer,true);assert.match(html,/窗口内观测不足/);assert.doesNotMatch(html,/历史分位/);
+ assert.equal(charts[0].rows[0].lag1,null);assert.equal(charts[0].lines.length,2);assert.equal(charts.length,1);assert.match(charts[0].tooltip([{dataIndex:0,marker:'',seriesName:'前1个观测日',value:null}]),/前1个观测日：—.*成交 0 手 · 持仓 20 手/);assert.doesNotMatch(html,/选取近月|选取远月|分析所选两腿|成交持仓与合约明细/);assert.match(html,/窗口内观测不足/);assert.doesNotMatch(html,/历史分位/);
+});
+
+test('curve keeps the shared selection and drills adjacent pairs into history',()=>{
+ const charts=[];let selected;
+ const data={meta,near:'IM2609',far:'IM2612',curve:{nodes:[{symbol:'IM2609',price:100,volume:0,position:null},{symbol:'IM2612',price:90,volume:8,position:10}],comparisons:[],adjacent:[{near:'IM2609',far:'IM2612',spread:10}]}};
+ const element=CurvePanel({data,onPair:(...pair)=>{selected=pair;},Chart:props=>{charts.push(props);return null;},controls:React.createElement('span',null,'共享筛选')});
+ const html=renderToStaticMarkup(element);
+ assert.deepEqual(charts[0].selected,['IM2609','IM2612']);assert.match(html,/共享筛选/);assert.match(html,/查看价差季节性/);
+ const adjacent=element.props.children.at(-1);adjacent.props.children[1][0].props.onClick();
+ assert.deepEqual(selected,['IM2609','IM2612']);
+ const empty=renderToStaticMarkup(React.createElement(CurvePanel,{data:{meta,curve:{nodes:[],comparisons:[],adjacent:[]}},Chart:()=>{throw Error('empty chart rendered');}}));
+ assert.match(empty,/当前日期暂无期限曲线数据/);
 });

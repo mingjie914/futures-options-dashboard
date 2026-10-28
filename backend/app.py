@@ -6,24 +6,28 @@ import os
 import json
 import subprocess
 import hashlib
-from functools import lru_cache
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Literal, Optional
 from .data import ROOT, normalize, historical_volatility
 from .pricing import scenario, exit_analysis
+from futures.backend.transport import ByteCache, ResearchHTTP, fingerprint, memory_size
 
 app=FastAPI(title='期权分析 · 本地截面',version='0.1.0')
-lock=Lock();state={'data':None}
+lock=Lock();state={'data':None,'revision':None}
+cache=ByteCache(int(os.environ.get('OPTIONS_CACHE_MB', '32')) * 1024**2)
 runtime=Path(os.environ.get('OPTIONS_RUNTIME') or os.environ.get('DASHBOARD_RUNTIME_ROOT') or ROOT/'runtime').resolve()
-runtime.mkdir(parents=True,exist_ok=True)
-_previous_cache={'snapshot_id':None,'result':None}
 
 
-@lru_cache(maxsize=16)
+
 def _iv_history(path, modified, code, end, window):
-    return historical_volatility(json.loads(Path(path).read_text('utf-8')),code,end,window)
+    key=('iv',path,modified,code,end,window)
+    result=cache.get(key)
+    if result is None:
+        result=historical_volatility(json.loads(Path(path).read_text('utf-8')),code,end,window)
+        cache[key]=result
+    return result
 
 
 @app.get('/api/options/v1/iv-history')
@@ -33,7 +37,7 @@ def iv_history(code:str, window:Literal['20','60']='60', snapshot_id:str=''):
     if not any(r['code']==code for r in snapshot['rows']):raise HTTPException(404,'当前截面无此合约')
     path=_active_folder()/'history-raw.json'
     if not path.exists():return dict(code=code,points=[],n=0,reason='尚未保存该合约的日线 IV 历史')
-    try:return _iv_history(str(path),path.stat().st_mtime_ns,code,snapshot['trade_date'],int(window))
+    try:return _iv_history(str(path),fingerprint([path]),code,snapshot['trade_date'],int(window))
     except (ValueError,KeyError,OSError,TypeError) as exc:raise HTTPException(503,'历史数据不可用，请检查已保存的日线') from exc
 
 
@@ -57,15 +61,19 @@ def _raw_root():
 
 
 def current(required=True):
-    if state['data'] is None:
-        try:
-            folder=_active_folder()
+    try:
+        folder=_active_folder()
+        revision=fingerprint([folder, runtime/'options-active.json', *folder.glob('*.json')])
+        if state['data'] is None or ('revision' in state and state['revision']!=revision):
             if not folder.exists() and not (runtime/'options-active.json').exists() and not os.environ.get('OPTIONS_SNAPSHOT_DIR'):
                 if not required:return None
                 raise HTTPException(503,'尚未接入期权数据，请配置已保存快照。',headers={'X-Snapshot-State':'empty'})
-            state['data']=normalize(folder)
-        except (OSError,ValueError,KeyError,TypeError) as exc:
-            raise HTTPException(503,'已保存期权快照不可用，请检查归档完整性与数据配置。') from exc
+            data=normalize(folder)
+            if memory_size(data)>int(os.environ.get('OPTIONS_ACTIVE_MB','16'))*1024**2:
+                raise ValueError('当前截面超过内存预算')
+            state.update(data=data,revision=revision)
+    except (OSError,ValueError,KeyError,TypeError) as exc:
+        raise HTTPException(503,'已保存期权快照不可用，请检查归档完整性与数据配置。') from exc
     return state['data']
 
 
@@ -193,12 +201,31 @@ def _previous_result(snapshot):
     return {'snapshot':previous}
 
 
+def source_version(path):
+    folder=_active_folder()
+    files=[folder, runtime/'options-active.json', *folder.glob('*.json')]
+    if path.endswith(('/previous','/history')):
+        files += list(_raw_root().rglob('*.json'))
+    return fingerprint(files)
+
+
+code_version=hashlib.sha256(b''.join(p.read_bytes() for p in sorted(Path(__file__).parent.glob('*.py')))
+    + Path(__file__).parents[1].joinpath('futures/backend/transport.py').read_bytes()).hexdigest()
+app.add_middleware(ResearchHTTP,version=source_version,cache=cache,code_version=code_version,
+    concurrency=int(os.environ.get('OPTIONS_HTTP_CONCURRENCY','1')),
+    paths=['/api/options/v1/'+name for name in ('snapshot','iv-history','previous','history')])
+
+
 @app.middleware('http')
 async def origin_check(request:Request,call_next):
     origin=request.headers.get('origin')
     if (origin and urlsplit(origin).netloc!=request.headers.get('host')) or request.headers.get('sec-fetch-site')=='cross-site':
         return JSONResponse({'detail':'仅允许同源本地访问'},403)
     return await call_next(request)
+
+
+@app.get('/api/options/v1/health')
+def health():return {'status':'ok'}
 
 
 @app.get('/api/options/v1/status')
@@ -214,11 +241,11 @@ def snapshot():return current()
 
 @app.get('/api/options/v1/previous')
 def previous():
-    global _previous_cache
-    snapshot=current();snapshot_id=snapshot['snapshot_id']
-    if _previous_cache['snapshot_id']==snapshot_id:return _previous_cache['result']
-    result=_previous_result(snapshot)
-    _previous_cache={'snapshot_id':snapshot_id,'result':result}
+    snapshot=current();key=('previous',snapshot['snapshot_id'],source_version('/previous'))
+    result=cache.get(key)
+    if result is None:
+        result=_previous_result(snapshot)
+        cache[key]=result
     return result
 
 
@@ -234,10 +261,13 @@ def _archive_entries():
     return sorted(entries,key=lambda x:_parse_asof(x['asof']),reverse=True)
 
 
-@lru_cache(maxsize=12)
 def _archived_snapshot(folder):
-    # Collector writes collection.json last; complete raw folders are immutable.
-    return normalize(Path(folder))
+    key=('archive',folder,fingerprint([Path(folder),*Path(folder).glob('*.json')]))
+    result=cache.get(key)
+    if result is None:
+        result=normalize(Path(folder))
+        cache[key]=result
+    return result
 
 
 def _history_snapshot(key):
@@ -321,6 +351,7 @@ def refresh():
         old=current(required=False);old_folder=_active_folder() if old else None
         python=os.environ.get('OPTIONS_WIND_PYTHON')
         if not python:raise HTTPException(503,'未配置 OPTIONS_WIND_PYTHON，Wind 手动采集未启用；可继续读取已保存快照')
+        runtime.mkdir(parents=True,exist_ok=True)
         folder=_raw_root()/datetime.now().strftime('wind-%Y%m%dT%H%M%S%f')
         try:
             result=subprocess.run([python,str(ROOT/'backend/collect.py'),'--out',str(folder)],capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=90,env={**os.environ,'PYTHONUTF8':'1'})
@@ -339,6 +370,7 @@ def refresh():
         except ValueError:previous=str(old_folder)  # Existing archive on another Windows drive.
         tmp=runtime/'options-active.tmp';tmp.write_text(json.dumps({'folder':folder.name,'path_base':'options_data_root','snapshot_id':new['snapshot_id'],'previous_folder':previous}),encoding='utf-8');tmp.replace(runtime/'options-active.json')
         state['data']=new
+        if 'revision' in state:state['revision']=source_version('/snapshot')
         return {'status':'ok','snapshot_id':new['snapshot_id'],'coverage':new['coverage']}
     except subprocess.TimeoutExpired:raise HTTPException(503,'Wind请求超时，已结束本次子进程；保留上一截面')
     finally:lock.release()

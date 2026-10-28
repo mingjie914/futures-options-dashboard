@@ -1,20 +1,6 @@
 import { createElement, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 
-// Keep display preferences in this browser tab; never cache market data.
-export function usePreference(key, initial) {
-  const storageKey = 'dashboard.ui.v1.' + key;
-  const read = () => {
-    try { const value = sessionStorage.getItem(storageKey); if (value !== null) return JSON.parse(value); } catch {}
-    return typeof initial === 'function' ? initial() : initial;
-  };
-  const [saved, setSaved] = useState(() => ({key, value: read()}));
-  const current = saved.key === key ? saved : {key, value: read()};
-  if (saved.key !== key) setSaved(current);
-  useEffect(() => {
-    try { sessionStorage.setItem(storageKey, JSON.stringify(current.value)); } catch {}
-  }, [storageKey, current.value]);
-  return [current.value, value => setSaved(previous => ({key, value: typeof value === 'function' ? value(previous.value) : value}))];
-}
+export { usePreference } from './preferences.js';
 
 export function ChartFrame({children}) {
   const ref=useRef(), [expanded,setExpanded]=useState(false), [error,setError]=useState('');
@@ -26,11 +12,11 @@ export function ChartFrame({children}) {
 }
 
 // Six chart views share one engine, loaded only after a chart is mounted.
-export function useChart(ref, draw, dependencies) {
+export function useChart(ref, draw, dependencies, zoomGroup, syncLegend = false) {
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
-    let cancelled = false, chart, observer;
+    let cancelled = false, chart, observer, unlink;
     const visibility = new IntersectionObserver(entries => {
       if (!entries.some(entry => entry.isIntersecting)) return;
       visibility.disconnect();
@@ -38,6 +24,7 @@ export function useChart(ref, draw, dependencies) {
         if (cancelled) return;
         chart = init(node);
         draw(chart);
+        if (zoomGroup) unlink = linkZoom(chart, zoomGroup, syncLegend);
         observer = new ResizeObserver(() => chart.resize());
         observer.observe(node);
       }).catch(() => {
@@ -45,8 +32,38 @@ export function useChart(ref, draw, dependencies) {
       });
     }, { rootMargin: '200px' });
     visibility.observe(node);
-    return () => { cancelled = true; visibility.disconnect(); observer?.disconnect(); chart?.dispose(); };
-  }, dependencies);
+    return () => { cancelled = true; visibility.disconnect(); observer?.disconnect(); unlink?.(); chart?.dispose(); };
+  }, [...dependencies, zoomGroup, syncLegend]);
+}
+
+// Group members must use the same ordered date axis, including null gaps.
+export function linkZoom(chart, group, syncLegend = false) {
+  const apply = target => target.dispatchAction({type:'dataZoom', ...group.range}, {silent:true});
+  group.add(chart);
+  if (group.range) apply(chart);
+  const change = event => {
+    const {start, end} = event.batch?.[0] || event;
+    group.range = {start, end};
+    for (const target of group) if (target !== chart) apply(target);
+  };
+  chart.on('datazoom', change);
+  const legend = event => {
+    group.selected = event.selected;
+    for (const target of group.legendCharts) if (target !== chart) applyLegend(target);
+  };
+  const applyLegend = target => {
+    for (const [name, selected] of Object.entries(group.selected || {}))
+      target.dispatchAction({type: selected ? 'legendSelect' : 'legendUnSelect', name}, {silent:true});
+  };
+  if (syncLegend) {
+    (group.legendCharts ||= new Set()).add(chart);
+    applyLegend(chart);
+    chart.on('legendselectchanged', legend);
+  }
+  return () => {
+    chart.off('datazoom', change); group.delete(chart);
+    if (syncLegend) { chart.off('legendselectchanged', legend); group.legendCharts.delete(chart); }
+  };
 }
 
 // Shared by futures and options: the name opens the same compact explanation.

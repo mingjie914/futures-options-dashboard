@@ -1,3 +1,4 @@
+import { conditionalFetch as fetch } from '../../../frontend/src/transport.js';
 import { useChart, ChartFrame, usePreference } from '../../../frontend/src/charts.js';
 import {useEffect, useRef, useState} from 'react';
 import {lineSegments, tooltipRows, seasonalSelection} from './lineSegments.mjs';
@@ -34,7 +35,7 @@ export function HistoryChart({result, heatmap=false, showAllYears=false}) {
     } : {
       ...common,
       color: ['#4e7fb9', '#568f84', '#a48b59', '#8c7b9f', '#b36c73', '#505c6b', '#4e7fb9', '#65a30d', '#c026d3', '#b45309'],
-      legend: {type: 'scroll', top: 0, formatter: name => name === result.lines[currentIndex]?.label ? name+'（当前）' : name, data: result.lines.map(l => l.label), selected,
+      legend: {type: 'scroll', orient: 'horizontal', left: 0, right: 0, top: 0, height: 24, itemWidth: 18, itemHeight: 9, itemGap: 16, pageIconSize: 10, textStyle: {fontSize: 12}, formatter: name => name === result.lines[currentIndex]?.label ? name+'（当前）' : name, data: result.lines.map(l => l.label), selected,
         scrollDataIndex: result.mode === 'seasonal' && !showAllYears ? Math.max(0,result.lines.length-5) : 0},
       tooltip: {trigger: 'axis', confine: true, renderMode: 'richText', formatter: params => {
         const list = Array.isArray(params) ? params : [params];
@@ -48,7 +49,7 @@ export function HistoryChart({result, heatmap=false, showAllYears=false}) {
           ...absent.map(line => `${line.label}: —（该对齐日无观测）`),
           ...(rows.length ? [] : ['该日无有效观测（连线不代表补值）'])].join('\n');
       }},
-      yAxis: {type: 'value', name: result.unit, scale: true, axisLabel: {formatter: display}, splitLine: {lineStyle: {color: '#eef0f3'}}},
+      yAxis: {type: 'value', scale: true, axisLabel: {formatter: display}, splitLine: {lineStyle: {color: '#eef0f3'}}},
       series: segments.map(({name, lineIndex, data}) => ({name, type: 'line', showSymbol: result.mode !== 'overview', symbolSize: 3, connectNulls: true, emphasis: {focus: 'series'},
         itemStyle: {color: palette[lineIndex % palette.length]},
         lineStyle: {color: palette[lineIndex % palette.length], width: lineIndex === (result.mode === 'spread' ? currentIndex : result.lines.length-1) ? 2.8 : 1.3},
@@ -70,7 +71,7 @@ export default function HistoryPanel({product, end, near, far, priceType, revisi
   const [overviewMetric, setOverviewMetric] = usePreference('futures.history.overviewMetric','price');
   const [overviewStyle, setOverviewStyle] = usePreference('futures.history.overviewStyle','line');
   const [result, setResult] = useState(null), [error, setError] = useState('');
-  const anchorYear = 2000 + Number(near?.slice(-4,-2) || end.slice(2,4));
+  const anchorYear = mode === 'overview' ? Number(end.slice(0,4)) : 2000 + Number(near?.slice(-4,-2) || end.slice(2,4));
   const effectiveMetric = mode === 'spread' ? 'price' : mode === 'overview' ? overviewMetric : metric;
   const summary = result?.seasonal_summary;
   useEffect(() => {

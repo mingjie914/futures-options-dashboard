@@ -117,13 +117,14 @@ def test_gateway_upstreams_configurable(monkeypatch):
     from pathlib import Path
     monkeypatch.setenv('DASHBOARD_FUTURES_API', 'http://futures.internal:9001/')
     monkeypatch.setenv('DASHBOARD_OPTIONS_API', 'http://options.internal:9002/')
+    monkeypatch.setenv('DASHBOARD_SEATS_API', 'http://seats.internal:9003/')
     spec = importlib.util.spec_from_file_location('gateway_config_test', Path(__file__).parents[1] / 'backend/gateway.py')
     gateway = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(gateway)
-    assert gateway.TARGETS == {'futures': 'http://futures.internal:9001', 'options': 'http://options.internal:9002'}
+    assert gateway.TARGETS == {'futures': 'http://futures.internal:9001', 'options': 'http://options.internal:9002', 'seats': 'http://seats.internal:9003'}
 
 
-def test_public_readonly_keeps_calculations_and_hides_shared_records(monkeypatch):
+def test_public_readonly_blocks_retired_actions_and_hides_shared_records(monkeypatch):
     import httpx
     from backend.gateway import app as gateway
     monkeypatch.setenv('DASHBOARD_PUBLIC_READONLY','1')
@@ -138,6 +139,6 @@ def test_public_readonly_keeps_calculations_and_hides_shared_records(monkeypatch
             assert getattr(client,method)('/api/'+path).status_code==403
         assert called==[]
         for path in ['futures/v1/scenario','options/v1/scenarios','options/v1/exit-analysis']:
-            assert client.post('/api/'+path).status_code==200
-        assert len(called)==3
+            assert client.post('/api/'+path).status_code==403
+        assert called==[]
         assert client.get('/api/options/v1/snapshot').headers['x-snapshot-state']=='empty'

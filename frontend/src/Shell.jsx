@@ -1,3 +1,4 @@
+import { selectedProduct } from './preferences.js';
 import { Component, lazy, Suspense, useEffect, useRef, useState } from 'react';
 
 const FuturesApp = lazy(async () => {
@@ -5,12 +6,12 @@ const FuturesApp = lazy(async () => {
   return { default: module.App };
 });
 const OptionsApp = lazy(() => import('./Options.jsx'));
+const SeatsApp = lazy(() => import('./seats/Dashboard.tsx'));
 // Only confirmed destinations are visible; deployment can set these at build time.
 const HOME = import.meta.env.VITE_HOME_URL || 'https://mingjiec.com/';
-const SEATS = import.meta.env.VITE_SEATS_URL;
 const BASE = import.meta.env.BASE_URL;
-const modules = [['futures', '期货', '期限结构、跨期与季节性'], ['options', '期权', '波动率、持仓与期权链']];
-const currentModule = () => location.pathname.startsWith(`${BASE}futures`) ? 'futures' : 'options';
+const modules = [['seats', '席位', SeatsApp], ['futures', '期货', FuturesApp], ['options', '期权(Beta)', OptionsApp]];
+const currentModule = () => modules.find(([id]) => location.pathname.startsWith(`${BASE}${id}/`) || location.pathname === `${BASE}${id}`)?.[0] || 'futures';
 
 class ModuleErrorBoundary extends Component {
   state = { error: null };
@@ -35,13 +36,21 @@ export default function Shell() {
     if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     if (next !== active) {
-      lastView.current[active] = location.pathname + location.search;
-      history.pushState({}, '', lastView.current[next] || `${BASE}${next}/`);
+      lastView.current[active] = location.pathname + location.search + location.hash;
+      const target = new URL(lastView.current[next] || `${BASE}${next}/`, location.origin), product = selectedProduct();
+      if (next !== 'options' && product && target.searchParams.get('product')?.split('.')[0] !== product) {
+        target.searchParams.set('product', product);
+        for (const key of ['near', 'far', 'focus_symbol']) target.searchParams.delete(key);
+      }
+      target.hash = '';
+      history.pushState({}, '', target);
       setActive(next);
     }
     menu.current.querySelector('summary').focus();
     menu.current.open = false;
+    window.scrollTo({top: 0, left: 0, behavior: 'instant'});
   }
+  const ActiveModule = modules.find(([id]) => id === active)[2];
   return <div className="unified-shell">
     <header className="unified-topbar"><nav aria-label="站点导航">
       <a className="unified-brand" href={HOME}>MINGJIE</a><a href={HOME}>策略</a>
@@ -51,13 +60,13 @@ export default function Shell() {
         onFocus={()=>{menu.current.open=true;}}
         onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))menu.current.open=false;}}
         onKeyDown={event => { if (event.key === 'Escape') { menu.current.querySelector('summary').focus(); menu.current.open=false; event.preventDefault(); } }}>
-        <summary aria-label="切换看板" className="is-active" onClick={event=>{event.preventDefault();menu.current.open=true;}}>看板 <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><path d="m3 4.5 3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg></summary>
-        <div className="board-menu__items">{modules.map(([id, label, description]) => <a key={id} href={`${BASE}${id}/`} aria-current={active === id ? 'page' : undefined} onClick={event => select(event, id)}><span>{label}</span><small>{description}</small></a>)}{SEATS && <a href={SEATS}><span>席位</span><small>会员持仓与变化</small></a>}</div>
+        <summary aria-label="切换看板" onClick={event=>{event.preventDefault();menu.current.open=true;}}>看板</summary>
+        <div className="board-menu__items">{modules.map(([id, label]) => <a key={id} href={`${BASE}${id}/`} aria-current={active === id ? 'page' : undefined} onClick={event => select(event, id)}><span>{label}</span></a>)}</div>
       </details>
     </nav></header>
     <div className={`module-frame ${active === 'futures' ? 'futures-module' : ''}`}>
       <ModuleErrorBoundary key={active}><Suspense fallback={<p className="module-loading" role="status">加载看板…</p>}>
-        {active === 'futures' ? <FuturesApp /> : <OptionsApp />}
+        <ActiveModule />
       </Suspense></ModuleErrorBoundary>
     </div>
   </div>;

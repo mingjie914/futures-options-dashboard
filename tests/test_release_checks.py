@@ -116,7 +116,7 @@ def test_refresh_quality_rejection_keeps_pointer_and_state(monkeypatch, tmp_path
     monkeypatch.setattr(app_module, 'ROOT', tmp_path)
     monkeypatch.setattr(app_module, 'runtime', runtime)
     monkeypatch.setattr(app_module, 'state', {'data':old})
-    monkeypatch.setattr(app_module, '_previous_cache', {'snapshot_id':None, 'result':None})
+    app_module.cache.clear()
     monkeypatch.setattr(app_module, 'normalize', lambda folder: bad)
     monkeypatch.setattr(app_module.subprocess, 'run', lambda *args, **kwargs:
                         type('Result', (), {'returncode':0, 'stderr':''})())
@@ -141,7 +141,7 @@ def test_refresh_pointer_keeps_previous_folder(monkeypatch, tmp_path):
     monkeypatch.setattr(app_module, 'ROOT', tmp_path)
     monkeypatch.setattr(app_module, 'runtime', runtime)
     monkeypatch.setattr(app_module, 'state', {'data':old})
-    monkeypatch.setattr(app_module, '_previous_cache', {'snapshot_id':None, 'result':None})
+    app_module.cache.clear()
     monkeypatch.setattr(app_module, 'normalize', lambda folder: new)
     monkeypatch.setattr(app_module.subprocess, 'run', lambda *args, **kwargs:
                         type('Result', (), {'returncode':0, 'stderr':''})())
@@ -223,7 +223,7 @@ def test_previous_endpoint_fallback_and_cache(monkeypatch, tmp_path):
     monkeypatch.setattr(app_module, 'ROOT', tmp_path)
     monkeypatch.setattr(app_module, 'runtime', runtime)
     monkeypatch.setattr(app_module, 'state', {'data':current})
-    monkeypatch.setattr(app_module, '_previous_cache', {'snapshot_id':None, 'result':None})
+    app_module.cache.clear()
     monkeypatch.setattr(app_module, 'normalize', fake_normalize)
 
     with TestClient(app) as client:
@@ -247,7 +247,7 @@ def test_previous_endpoint_returns_reason_for_different_trade_date(monkeypatch, 
     monkeypatch.setattr(app_module, 'ROOT', tmp_path)
     monkeypatch.setattr(app_module, 'runtime', runtime)
     monkeypatch.setattr(app_module, 'state', {'data':current})
-    monkeypatch.setattr(app_module, '_previous_cache', {'snapshot_id':None, 'result':None})
+    app_module.cache.clear()
 
     with TestClient(app) as client:
         response=client.get('/api/options/v1/previous')

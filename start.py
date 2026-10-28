@@ -1,6 +1,6 @@
 """One local command; independent APIs, frozen futures code, no automatic Wind."""
 from pathlib import Path
-import argparse,os,subprocess,sys,time,json,socket
+import argparse,os,subprocess,time,json,socket
 from urllib.request import build_opener, ProxyHandler
 
 ROOT=Path(__file__).resolve().parent
@@ -11,13 +11,13 @@ def local_environment(runtime):
     path=runtime/'local-settings.json'
     settings=json.loads(path.read_text('utf-8')) if path.exists() else {}
     return {**{k:str((ROOT/Path(v)).resolve()) for k,v in settings.items()
-               if k in ('FUTURES_DATA_ROOT','OPTIONS_DATA_ROOT','OPTIONS_SNAPSHOT_DIR')}, **os.environ}
+               if k in ('FUTURES_DATA_ROOT','OPTIONS_DATA_ROOT','OPTIONS_SNAPSHOT_DIR','SEATS_RUNTIME','SEATS_SNAPSHOT_PATH')}, **os.environ}
 
 
 def entry_ready():
     opener=build_opener(ProxyHandler({}))
     try:
-        for path in ['/health','/api/futures/v1/health','/api/options/v1/status']:
+        for path in ['/health','/api/futures/v1/health','/api/options/v1/health','/api/seats/v1/health']:
             with opener.open(ENTRY+path,timeout=2) as response:
                 data=json.load(response)
             if data.get('status')!='ok':return False
@@ -27,25 +27,27 @@ def entry_ready():
 
 
 def show_entry(module, reused=False):
-    print(('统一终端已运行，复用现有服务：' if reused else '统一终端：')+ENTRY+'/'+module+'/',flush=True)
-    print('顶部可切换期货研究 / 期权研究；两者共用此入口。',flush=True)
+    print(('研究看板已运行，复用现有服务：' if reused else '研究看板：')+ENTRY+'/'+module+'/',flush=True)
+    print('顶部切换席位 / 期货 / 期权(Beta)。',flush=True)
 
 
 def main():
     parser=argparse.ArgumentParser(description='启动统一研究终端，不自动采集或更新发布版本')
-    parser.add_argument('--module',choices=['futures','options'],default='options')
+    parser.add_argument('--module',choices=['futures','options','seats'],default='futures')
     args=parser.parse_args()
     if entry_ready():
         show_entry(args.module,reused=True)
         return
-    if not (ROOT/'frontend/dist/index.html').exists():raise SystemExit('请先构建前端')
     runtime=Path(os.environ.get('DASHBOARD_RUNTIME_ROOT') or ROOT/'runtime').resolve()
+    pointer=runtime/'frontend-release.json'
+    dist=runtime/json.loads(pointer.read_text('utf-8'))['release'] if pointer.exists() else ROOT/'frontend/dist'
+    if not (dist/'index.html').exists():raise SystemExit('请先构建并发布前端')
     if not (runtime/'futures-release.json').is_file():
         raise SystemExit('请先执行 python tools/freeze_backend.py 准备本地期货发布版本')
     config=json.loads((runtime/'futures-release.json').read_text('utf-8'))
     base=runtime if config.get('path_base')=='runtime_root' else ROOT
     config.update({key:str(base/Path(config[key])) for key in ['runtime','release']})
-    ports=[8790,8794,8795]
+    ports=[8790,8794,8795,8796]
     for port in ports:
         with socket.socket() as s:
             if s.connect_ex(('127.0.0.1',port))==0:raise SystemExit(f'{port}已占用；不重复启动或停止现有服务')
@@ -56,17 +58,25 @@ def main():
     executable='Scripts/python.exe' if os.name=='nt' else 'bin/python'
     python=os.environ.get('OPTIONS_PYTHON',str(ROOT/'.venv'/executable))
     futures_python=os.environ.get('FUTURES_PYTHON',str(ROOT/'.venv-futures'/executable))
-    for name,exe in [('OPTIONS_PYTHON',python),('FUTURES_PYTHON',futures_python)]:
+    seats_python=os.environ.get('SEATS_PYTHON',str(ROOT/'.venv-seats'/executable))
+    for name,exe in [('OPTIONS_PYTHON',python),('FUTURES_PYTHON',futures_python),('SEATS_PYTHON',seats_python)]:
         if not Path(exe).is_file():raise SystemExit(f'{name}解释器不存在：{exe}；请准备虚拟环境或配置完整路径')
     runtime.mkdir(parents=True,exist_ok=True)
     services=[('futures',futures_python,config['release'],'backend.api:app',8795),
               ('options',python,str(ROOT),'backend.app:app',8794),
+              ('seats',seats_python,str(ROOT/'seats'),'seat_dashboard.main:app',8796),
               ('gateway',python,str(ROOT),'backend.gateway:app',8790)]
     children=[];logs=[]
     try:
         for name,exe,cwd,app,port in services:
             log=open(runtime/(name+'.log'),'a',encoding='utf-8');logs.append(log)
-            proc=subprocess.Popen([exe,'-m','uvicorn',app,'--host','127.0.0.1','--port',str(port)],cwd=cwd,env=env,stdout=log,stderr=log,
+            service_env=env
+            extra=[]
+            if name=='seats':
+                service_env={**env,'DASHBOARD_RUNTIME_ROOT':env.get('SEATS_RUNTIME',str(runtime/'seats'))}
+                if env.get('SEATS_SNAPSHOT_PATH'):service_env['DASHBOARD_SNAPSHOT_PATH']=env['SEATS_SNAPSHOT_PATH']
+                extra=['--app-dir',str(ROOT/'seats/backend/src')]
+            proc=subprocess.Popen([exe,'-m','uvicorn',app,'--host','127.0.0.1','--port',str(port),*extra],cwd=cwd,env=service_env,stdout=log,stderr=log,
                                   creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
             children.append(proc)
         deadline=time.monotonic()+30

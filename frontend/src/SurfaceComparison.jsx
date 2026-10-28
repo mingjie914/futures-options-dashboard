@@ -1,3 +1,4 @@
+import { conditionalFetch as fetch } from './transport.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useChart, ChartFrame, Metric, usePreference } from './charts.js';
 import { surfaceMetrics } from './surfaceMetrics.js';
@@ -9,7 +10,7 @@ export function IvHistory({rows,spot,snapshot,monthId}) {
   const [code,setCode]=usePreference('options.iv.'+monthId+'.code',''),[window,setWindow]=usePreference('options.iv.window',60),[data,setData]=useState(null),[error,setError]=useState('');
   const ref=useRef();
   const ordered=useMemo(()=>[...rows].sort((a,b)=>a.strike-b.strike||a.cp.localeCompare(b.cp)),[rows]);
-  const selected=rows.find(r=>r.code===code)||[...rows].sort((a,b)=>Math.abs(a.strike-spot)-Math.abs(b.strike-spot)||a.cp.localeCompare(b.cp))[0];
+  const selected=ordered.find(r=>r.code===code)||ordered.reduce((best,row)=>!best||Math.abs(row.strike-spot)<Math.abs(best.strike-spot)?row:best,null);
   const id=selected?.code;
   const result=data?.code===id&&data?.window===window?data:null;
   useEffect(()=>{const c=new AbortController();setData(null);setError('');if(!id)return()=>c.abort();
@@ -28,7 +29,7 @@ export function IvHistory({rows,spot,snapshot,monthId}) {
     <div className="options-heading"><h2>隐含波动率 · 历史位置</h2><div className="options-analysis-tools"><label>合约<select value={id||''} onChange={e=>setCode(e.target.value)}>{ordered.map(r=><option key={r.code} value={r.code}>{r.code}</option>)}</select></label><label>观察窗口<select value={window} onChange={e=>setWindow(Number(e.target.value))}><option value={20}>近20个交易日</option><option value={60}>近60个交易日</option></select></label></div></div>
     <div className="options-iv-layout"><div className="options-iv-stats">
       <Metric label="截面 IV" value={selected?.iv==null?'—':`${fmt(selected.iv*100,2)}%`} hint={'由买卖中价反解的隐含波动率。'}/>
-      <Metric label="收盘 IV" value={latest?`${fmt(latest.iv*100,2)}%`:'—'} hint={'由收盘价反解；利率1.5%，ACT/365。观测日 '+(latest?.date||'无')}/>
+      <Metric label="收盘 IV" value={latest?.iv==null?'—':`${fmt(latest.iv*100,2)}%`} hint={'由收盘价反解；利率1.5%，ACT/365。观测日 '+(latest?.date||'无')}/>
       <Metric label="历史分位" value={result?.percentile==null?'—':`${fmt(result.percentile)}%`} hint={'(低于当前IV的样本数＋相等数÷2) ÷ 有效样本数 ×100%；含当前值，'+(result?.n??0)+'/'+window+' 个有效交易日。'}/>
       <Metric label="IV − HV20" value={gap==null?'—':`${fmt(gap,2)} pp`} hint={'同日收盘IV − HV20（百分点）。HV20＝20日对数收益样本标准差×√252；两者期限不同。'}/>
     </div><div>{error?<p role="alert">{error}</p>:!result?<p role="status">读取已保存历史…</p>:result.points.length?<ChartFrame><div ref={ref} className="options-iv-sparkline" role="img" aria-label="所选合约历史隐含波动率与指数历史波动率"/></ChartFrame>:<p>{result.reason}</p>}</div></div>
@@ -58,7 +59,7 @@ export default function SurfaceComparison({ rows, months, metric }) {
     <div ref={chartRef} className="options-vol-chart" aria-label="跨月波动率比较图" />
     {visible.some(m => m.forward === null) ? <p className="options-time-context">{visible.filter(m => m.forward === null).map(m => m.code).join('、')} 缺少可用隐含远期，IV 指标保留为空；有买卖报价不等于可计算 IV。</p> : null}
     <p className="options-note">微笑：K/F · OTM 报价 · 偏度：Put 25Δ IV − Call 25Δ IV</p>
-    <div className="options-mini-table-wrap"><table className="options-mini-table"><thead><tr><th>月份</th><th>截面剩余日历 / 交易日</th><th>隐含远期 F</th><th>ATM IV</th><th>Call 25Δ IV</th><th>Put 25Δ IV</th><th>25Δ偏度 pp</th></tr></thead><tbody>{visible.map((m,i)=><tr key={m.id}><td>{m.code.slice(0,-2)}<strong style={{color:colors[data.findIndex(x=>x.id===m.id)%colors.length]}}>{m.code.slice(-2)}</strong></td><td>{m.calendar_days ?? '—'} / {m.trading_days ?? '—'}</td><td>{fmt(m.forward)}</td><td>{m.atm_iv === null ? '—' : `${fmt(m.atm_iv*100)}%`}</td><td>{m.call25_iv === null ? '—' : `${fmt(m.call25_iv*100)}%`}</td><td>{m.put25_iv === null ? '—' : `${fmt(m.put25_iv*100)}%`}</td><td>{fmt(m.skew25_pp,2)}</td></tr>)}</tbody></table></div>
+    <div className="options-mini-table-wrap"><table className="options-mini-table"><thead><tr><th>月份</th><th>截面剩余日历 / 交易日</th><th>隐含远期 F</th><th>ATM IV</th><th>Call 25Δ IV</th><th>Put 25Δ IV</th><th>25Δ偏度 pp</th></tr></thead><tbody>{visible.map(m=><tr key={m.id}><td>{m.code.slice(0,-2)}<strong style={{color:colors[data.findIndex(x=>x.id===m.id)%colors.length]}}>{m.code.slice(-2)}</strong></td><td>{m.calendar_days ?? '—'} / {m.trading_days ?? '—'}</td><td>{fmt(m.forward)}</td><td>{m.atm_iv === null ? '—' : `${fmt(m.atm_iv*100)}%`}</td><td>{m.call25_iv === null ? '—' : `${fmt(m.call25_iv*100)}%`}</td><td>{m.put25_iv === null ? '—' : `${fmt(m.put25_iv*100)}%`}</td><td>{fmt(m.skew25_pp,2)}</td></tr>)}</tbody></table></div>
 
   </section>;
 }
