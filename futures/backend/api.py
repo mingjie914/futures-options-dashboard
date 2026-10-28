@@ -111,7 +111,7 @@ def create_app(store=None):
                       for p in (store.runtime/name).rglob('*') if p.is_file()]
         return [date.today().isoformat(), fingerprint(files)]
     code_version = sha256(b''.join(p.read_bytes() for p in sorted(Path(__file__).parent.glob('*.py')))).hexdigest()
-    app.add_middleware(ResearchHTTP, version=source_version, cache=store.cache, code_version=code_version,
+    app.add_middleware(ResearchHTTP, version=source_version, cache=store.cache, code_version=code_version, session=store.read_session,
         concurrency=int(os.environ.get('FUTURES_HTTP_CONCURRENCY', '1')),
         paths=['/api/'+name for name in ('products','contracts','dashboard','spread-history',
             'seasonal-position','contract-position','contract-history','basis-reference','radar','position-peaks',

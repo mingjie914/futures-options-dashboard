@@ -13,6 +13,8 @@ from fastapi.testclient import TestClient
 from seat_dashboard.core.config import Settings
 from seat_dashboard.core.response_cache import ResponseCache
 from seat_dashboard.main import create_app
+from seat_dashboard.adapters.store.duckdb.publisher import DuckDBPublisher
+import duckdb
 
 
 def test_namespace_gzip_conditional_and_cache_isolation(demo_reader, monkeypatch):
@@ -45,7 +47,7 @@ def test_namespace_gzip_conditional_and_cache_isolation(demo_reader, monkeypatch
         assert other.status_code == 200 and other.headers["etag"] != etag
     other = client.get(path.replace("RB.SHFE", "CF.CZCE"), headers={"If-None-Match": etag})
     assert other.status_code == 200 and other.headers["etag"] != etag
-    preflight = client.options(path, headers={"Origin": "http://localhost:3000", "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "if-none-match"})
+    preflight = client.options(path, headers={"Origin": "http://localhost:3000", "Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "if-none-match, a-im"})
     assert preflight.status_code == 200
     assert "/api/seats/v1/views/combination" in client.get("/openapi.json").json()["paths"]
 
@@ -86,6 +88,62 @@ def test_snapshot_pinning_batch_same_day_and_formula_invalidation(demo_reader, m
     updated = client.get(path, headers={"If-None-Match": first.headers["etag"]})
     assert updated.status_code == 200
     assert updated.json()["meta"]["batch_id"] == original_manifest["batch_id"] + 1
+
+
+def test_cross_batch_delta_corrects_history_deletes_rows_and_recovers_missing_base(demo_reader):
+    publisher = DuckDBPublisher(demo_reader.runtime_root)
+    def publish(sql):
+        metadata = publisher.current_metadata()
+        batch = publisher.next_batch_id()
+        target = publisher.temporary_snapshot_path(batch)
+        shutil.copyfile(publisher.runtime_root / metadata["database_path"], target)
+        with duckdb.connect(str(target)) as db:
+            db.execute(sql)
+        publisher.publish(target, {**metadata, "batch_id": batch})
+    publish("""INSERT INTO seat_dash_product_daily
+        SELECT p.* REPLACE (p.trade_date - CAST(i AS INTEGER) AS trade_date)
+        FROM (SELECT * FROM seat_dash_product_daily WHERE product_code='RB.SHFE'
+              ORDER BY trade_date LIMIT 1) p CROSS JOIN range(1,201) r(i)""")
+    app = create_app(reader=demo_reader)
+    with TestClient(app) as client:
+        path = "/api/seats/v1/products/RB.SHFE/history?limit=1000"
+        first = client.get(path)
+        assert len(first.json()["data"]["rows"]) >= 200
+        publish("""UPDATE seat_dash_product_daily SET total_long=total_long+17, net_position=net_position+17
+            WHERE product_code='RB.SHFE' AND trade_date=(SELECT min(trade_date)+1 FROM seat_dash_product_daily);
+            DELETE FROM seat_dash_product_daily WHERE product_code='RB.SHFE'
+              AND trade_date=(SELECT min(trade_date) FROM seat_dash_product_daily)""")
+        headers = {"If-None-Match": first.headers["etag"], "A-IM": "dashboard-json-delta", "Accept-Encoding": "gzip"}
+        delta = client.get(path, headers=headers)
+        assert delta.status_code == 226
+        assert delta.headers["delta-base"] == first.headers["etag"]
+        assert delta.headers["im"] == "dashboard-json-delta"
+        patch = delta.json()
+        assert patch["base"] == first.headers["etag"] and patch["version"] == delta.headers["etag"]
+        restored = first.json()
+        for op, keys, *value in patch["ops"]:
+            target = restored
+            for key in keys[:-1]:
+                target = target[key]
+            if op == "set":
+                target[keys[-1]] = value[0]
+            elif isinstance(target, list):
+                target.pop(keys[-1])
+            else:
+                del target[keys[-1]]
+        assert any(op == "remove" for op, *_ in patch["ops"])
+        full = client.get(path)
+        assert restored == full.json()
+        assert len(delta.content) < .8 * len(full.content)
+        assert client.get(path, headers={**headers, "If-None-Match": delta.headers["etag"]}).status_code == 304
+        assert client.get(path + "&start_date=2020-01-01", headers=headers).status_code == 200
+        cache = app.state.response_cache
+        assert cache.bytes <= cache.max_bytes
+        cache.entries.clear()
+        cache.bytes = 0
+        recovered = client.get(path, headers=headers)
+        assert recovered.status_code == 200 and recovered.json() == restored
+        assert client.get(path, headers={**headers, "If-None-Match": 'W/"missing"'}).status_code == 200
 
 
 @pytest.mark.parametrize("concurrency", [1, 2])
@@ -138,7 +196,7 @@ def test_byte_limit_lru_oversize_small_gzip_and_failure_recovery():
         assert cache.bytes <= cache.max_bytes
     assert len(cache.entries) < 10
     cache.response(request("/huge"), "v1", lambda: b"x" * 2000)
-    assert not any("/huge" in key for key in cache.entries)
+    assert not any(key[2][0] == "/huge" for key in cache.entries)
     try:
         cache.response(request("/fail"), "v1", lambda: 1 / 0)
     except ZeroDivisionError:

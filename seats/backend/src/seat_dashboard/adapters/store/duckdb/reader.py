@@ -26,7 +26,7 @@ def _one(rows: Iterable[dict[str, Any]]) -> dict[str, Any] | None:
 class DuckDBReader(DashboardReadPort):
     """Read-only page queries against the published DuckDB snapshot."""
 
-    QUERY_VERSION = "seat-queries-v5-group-identities"
+    QUERY_VERSION = "seat-queries-v6-group-identities"
     COMBINATION_ORDER = (
         "ORDER BY CASE c.combination_id WHEN 'industrial_major' THEN 1 "
         "WHEN 'brokerage_proprietary' THEN 2 WHEN 'capital_strike' THEN 3 "
@@ -350,16 +350,20 @@ class DuckDBReader(DashboardReadPort):
                 combination.pop("members_text").split("、") if combination["member_count"] else []
             )
         combination_positions = _as_dicts(connection.execute(
-            "WITH observed AS ("
+            "WITH identities AS ("
+            "SELECT p.product_code, coalesce(a.seat_id, p.seat_id) AS seat_id, "
+            "sum(p.net_position) AS net_position, sum(p.net_change) AS net_change "
+            "FROM seat_dash_product_seat_daily p "
+            "LEFT JOIN seat_dash_seat_alias a ON a.source_seat_name = p.seat_name "
+            "WHERE p.trade_date = ? GROUP BY p.product_code, coalesce(a.seat_id, p.seat_id)), "
+            "observed AS ("
             "SELECT p.product_code, m.combination_id, count(*) AS observed_count, "
             "count(*) FILTER (WHERE p.net_position > 0) AS long_count, "
             "count(*) FILTER (WHERE p.net_position < 0) AS short_count, "
             "count(*) FILTER (WHERE p.net_position = 0) AS flat_count, "
             "sum(p.net_position)::BIGINT AS net_position, sum(p.net_change)::BIGINT AS net_change "
-            "FROM seat_dash_product_seat_daily p "
-            "LEFT JOIN seat_dash_seat_alias a ON a.source_seat_name = p.seat_name "
-            "JOIN seat_dash_combination_member m ON m.seat_id = coalesce(a.seat_id, p.seat_id) "
-            "WHERE p.trade_date = ? GROUP BY p.product_code, m.combination_id), "
+            "FROM identities p JOIN seat_dash_combination_member m USING (seat_id) "
+            "GROUP BY p.product_code, m.combination_id), "
             "groups AS (SELECT c.combination_id, count(*) AS member_count "
             "FROM seat_dash_combination c JOIN seat_dash_combination_member m USING (combination_id) "
             "WHERE c.active GROUP BY c.combination_id) "

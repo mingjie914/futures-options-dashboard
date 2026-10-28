@@ -298,6 +298,58 @@ def test_http_same_day_revision_deletion_and_public_no_snapshot_writes(setup, mo
     assert client.get(url,headers={'Origin':'https://evil.example','If-None-Match':corrected.headers['etag']}).status_code==403
 
 
+@pytest.mark.parametrize('native_link', [False, True])
+def test_hot_release_pins_request_and_keeps_delta_baseline(setup, tmp_path, monkeypatch, native_link):
+    import shutil
+    from backend.transport import DELTA
+    _, original_store, original_file = setup
+    old_root = original_store.root
+    new_root = tmp_path / 'next' / 'futureshistoryprices1d'
+    shutil.copytree(old_root, new_root)
+    new_file = new_root / original_file.relative_to(old_root)
+    with duckdb.connect() as db:
+        db.execute('CREATE TABLE corrected AS SELECT * FROM read_parquet(?)', [str(new_file)])
+        db.execute("UPDATE corrected SET close=close+10 WHERE symbol='RB2610' AND trade_date=DATE '2026-09-01'")
+        db.execute('COPY corrected TO ? (FORMAT PARQUET)', [str(new_file)])
+    link, replacement = tmp_path / 'current', tmp_path / 'next-link'
+    selected = [old_root]
+    if native_link:
+        try:
+            link.symlink_to(old_root.parent, target_is_directory=True)
+            replacement.symlink_to(new_root.parent, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f'directory symlink unavailable: {exc}')
+    else:
+        resolve = Path.resolve
+        monkeypatch.setattr(Path, 'resolve', lambda p, *a, **kw: selected[0] if p == link / 'futureshistoryprices1d' else resolve(p, *a, **kw))
+    store = DailyStore(link, tmp_path / 'hot-runtime')
+    store.persist_queries = False
+    query, switched = store._query, []
+    def switching_query(files, sql, params=()):
+        result = query(files, sql, params)
+        if not switched:
+            if native_link:
+                replacement.replace(link)
+            else:
+                selected[0] = new_root
+            switched.append(True)
+            assert store.root == old_root
+            assert all(p.is_relative_to(old_root) for p in store._files())
+        return result
+    monkeypatch.setattr(store, '_query', switching_query)
+    with TestClient(create_app(store)) as client:
+        url = '/api/dashboard?product=RB&start=2026-09-01&end=2026-09-02'
+        before = client.get(url)
+        assert before.status_code == 200 and switched
+        assert store.root == new_root
+        changed = client.get(url, headers={'If-None-Match': before.headers['etag'], 'A-IM': DELTA})
+        assert changed.status_code == 226
+        assert changed.headers['delta-base'] == before.headers['etag']
+        full = client.get(url)
+        assert full.headers['etag'] == changed.headers['etag'] != before.headers['etag']
+        assert full.json()['spread']['series'][0]['spread'] == before.json()['spread']['series'][0]['spread'] + 10
+
+
 def test_duckdb_resource_limits_and_cache_default(setup):
     from backend.data import query_connection
     _, store, _=setup

@@ -412,6 +412,40 @@ def test_overlapping_rename_records_are_not_silently_added(tmp_path: Path):
     assert not (tmp_path / "runtime/manifests/current.json").exists()
 
 
+@pytest.mark.parametrize("active_name", ["乾坤期货", "高盛期货", None])
+def test_zero_rename_alias_keeps_facts_but_counts_one_group_identity(tmp_path, active_name):
+    source = _p2_source(tmp_path)
+    path = next(source.dataset_path("raw_seat").rglob("*.parquet"))
+    rows = pq.ParquetFile(path).read().to_pylist()
+    for row in rows:
+        row["seat_name"] = "乾坤期货" if row["seat_name"] == "席位A" else "高盛期货"
+        active = row["seat_name"] == active_name
+        row.update(long_position=100 if active else 0, long_change=5 if active else 0,
+                   short_position=0, short_change=0)
+    rows += [{**r, "seat_name": "其他席位", "long_position": 30} for r in rows if r["seat_name"] == "乾坤期货"]
+    pq.write_table(pa.Table.from_pylist(rows), path)
+    config = tmp_path / "groups.json"
+    config.write_text(json.dumps([{"id": "foreign_seats", "name": "外资席位", "members": ["高盛期货"]}]), encoding="utf-8")
+    runtime = tmp_path / "runtime"
+    builder = SnapshotBuilder(source, DuckDBPublisher(runtime), combination_config=config)
+    builder.build(BuildRequest(full=True))
+    for reclassify in (False, True):
+        if reclassify:
+            builder.reclassify(runtime)
+        data = DuckDBReader(runtime).view("combination", product_code="RB.SHFE")
+        assert data["metrics"][0]["seat_count"] == 3
+        group = next(r for r in data["combination_positions"] if r["combination_id"] == "foreign_seats")
+        assert group["missing_count"] == 0
+        assert group["net_position"] == (200 if active_name else 0)
+        assert group["net_change"] == (10 if active_name else 0)
+        assert group["long_count"] == int(active_name is not None)
+        assert group["flat_count"] == int(active_name is None)
+        signals = [r for r in data["combination_signals"] if r["combination_id"] == "foreign_seats"]
+        assert len(signals) == int(active_name is not None)
+        if signals:
+            assert signals[0]["net_position"] == 200 and signals[0]["action_code"] == "add_long"
+
+
 def _p2_source(tmp_path):
     seat_root, market_root = _fixture_source(tmp_path)
     for name in ('derive_product_daily', 'derive_product_seat', 'derive_main_contract_seat'):

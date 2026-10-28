@@ -81,7 +81,7 @@ class SnapshotBuilder:
     def combination_version(self) -> str:
         config = self.combination_config.read_bytes() if self.combination_config and self.combination_config.is_file() else b"[]"
         identity = json.dumps(self.SEAT_RENAMES, sort_keys=True).encode()
-        return self.RULE_VERSION + "-groups-" + hashlib.sha256(config + identity).hexdigest()[:12]
+        return self.RULE_VERSION + "-groups-v2-" + hashlib.sha256(config + identity).hexdigest()[:12]
 
     def reclassify(self, source_runtime: Path) -> dict[str, Any]:
         """Recalculate only group definitions/signals on a copy of a published snapshot."""
@@ -886,7 +886,8 @@ class SnapshotBuilder:
             overlap = connection.execute(
                 "SELECT trade_date, product_code FROM seat_dash_product_seat_daily "
                 "WHERE seat_name IN (?, ?) GROUP BY trade_date, product_code "
-                "HAVING count(*) > 1 LIMIT 1", [old, new],
+                "HAVING count(*) FILTER (WHERE long_position <> 0 OR short_position <> 0 "
+                "OR long_change <> 0 OR short_change <> 0) > 1 LIMIT 1", [old, new],
             ).fetchone()
             if overlap:
                 raise SnapshotValidationError(f"overlapping renamed seats {old}/{new}: {overlap}")
@@ -898,7 +899,14 @@ class SnapshotBuilder:
         connection.execute(
             f"""
             CREATE OR REPLACE TABLE seat_dash_combination_signal_daily AS
-            WITH combination_size AS (
+            WITH identities AS (
+                SELECT p.trade_date, p.product_code, coalesce(a.seat_id, p.seat_id) AS seat_id,
+                       sum(p.net_position) AS net_position, sum(p.net_change) AS net_change
+                FROM seat_dash_product_seat_daily p
+                LEFT JOIN seat_dash_seat_alias a ON a.source_seat_name = p.seat_name
+                WHERE p.{signal_where}
+                GROUP BY p.trade_date, p.product_code, coalesce(a.seat_id, p.seat_id)
+            ), combination_size AS (
                 SELECT c.combination_id, count(*) AS member_count
                 FROM seat_dash_combination c
                 INNER JOIN seat_dash_combination_member m USING (combination_id)
@@ -914,11 +922,9 @@ class SnapshotBuilder:
                        max(sign(p.net_change)) AS max_change_sign,
                        sum(p.net_position) AS net_position,
                        sum(p.net_change) AS net_change
-                FROM seat_dash_product_seat_daily p
-                LEFT JOIN seat_dash_seat_alias a ON a.source_seat_name = p.seat_name
-                INNER JOIN seat_dash_combination_member m ON m.seat_id = coalesce(a.seat_id, p.seat_id)
+                FROM identities p
+                INNER JOIN seat_dash_combination_member m USING (seat_id)
                 INNER JOIN combination_size s ON s.combination_id = m.combination_id
-                WHERE p.{signal_where}
                 GROUP BY p.trade_date, p.product_code, m.combination_id
             )
             SELECT trade_date, product_code, combination_id,

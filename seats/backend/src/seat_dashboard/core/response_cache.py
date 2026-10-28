@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import json
 from collections import OrderedDict
 from threading import BoundedSemaphore, Event, Lock
 from typing import Callable
 
 from fastapi import Request, Response
+from dashboard_json_delta import DELTA, changes
 
 
-API_VERSION = "seats-json-v2"
+API_VERSION = "seats-json-v3"
 
 
 def _accepts_gzip(value: str) -> bool:
@@ -36,14 +38,22 @@ class ResponseCache:
         self.max_bytes = max_bytes
         self.bytes = 0
         self.entries = OrderedDict()
-        self.pending: dict[str, Event] = {}
+        self.pending: dict[tuple, Event] = {}
         self.lock = Lock()
         self.slots = BoundedSemaphore(concurrency)
 
     def response(self, request: Request, version: str, build: Callable[[], bytes]) -> Response:
         # Sorting preserves duplicate query values; every filter belongs to the key.
         route = request.url.path.replace("/api/seats/v1/", "/api/v1/", 1)
-        key = repr((API_VERSION, version, route, sorted(request.query_params.multi_items())))
+        query = (route, tuple(sorted(request.query_params.multi_items())))
+        key = (API_VERSION, version, query)
+        previous = request.headers.get("if-none-match", "")
+        baseline = None
+        with self.lock:
+            current = self.entries.get(key)
+            if previous and request.headers.get("a-im") == DELTA and (current is None or current[2] != previous):
+                baseline = next((entry for old_key, entry in reversed(self.entries.items())
+                                 if old_key[2] == query and entry[2] == previous), None)
         while True:
             with self.lock:
                 entry = self.entries.get(key)
@@ -61,8 +71,8 @@ class ResponseCache:
                 with self.slots:
                     body = build()
                     compressed = gzip.compress(body, compresslevel=5, mtime=0) if len(body) >= 1024 else None
-                    etag = 'W/"' + hashlib.sha256(key.encode() + body).hexdigest() + '"'
-                    size = len(body) + len(compressed or b"") + len(key.encode()) + len(etag) + 256
+                    etag = 'W/"' + hashlib.sha256(repr(key).encode() + body).hexdigest() + '"'
+                    size = len(body) + len(compressed or b"") + len(repr(key).encode()) + len(etag) + 256
                     entry = (body, compressed, etag, size)
                 with self.lock:
                     if size <= self.max_bytes:
@@ -75,11 +85,21 @@ class ResponseCache:
                 with self.lock:
                     self.pending.pop(key).set()
         body, compressed, etag, _ = entry
-        headers = {"ETag": etag, "Cache-Control": "private, no-cache", "Vary": "Accept-Encoding", "X-Data-Version": version}
+        headers = {"ETag": etag, "Cache-Control": "private, no-cache", "Vary": "Accept-Encoding, A-IM", "X-Data-Version": version}
         candidates = (part.strip().removeprefix("W/") for part in request.headers.get("if-none-match", "").split(","))
         if any(candidate in ("*", etag.removeprefix("W/")) for candidate in candidates):
             return Response(status_code=304, headers=headers)
+        status = 200
+        if baseline is not None:
+            with self.slots:
+                delta = json.dumps({"base": previous, "version": etag,
+                                    "ops": changes(json.loads(baseline[0]), json.loads(body))},
+                                   ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
+                if len(delta) < len(body) * .8:
+                    body, status = delta, 226
+                    compressed = gzip.compress(body, compresslevel=5, mtime=0) if len(body) >= 1024 else None
+                    headers.update({"IM": DELTA, "Delta-Base": previous, "Cache-Control": "no-store"})
         if compressed is not None and _accepts_gzip(request.headers.get("accept-encoding", "")):
             body = compressed
             headers["Content-Encoding"] = "gzip"
-        return Response(body, media_type="application/json", headers=headers)
+        return Response(body, status_code=status, media_type="application/vnd.mingjiec.delta+json" if status == 226 else "application/json", headers=headers)

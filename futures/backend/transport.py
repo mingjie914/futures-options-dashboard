@@ -12,7 +12,7 @@ from urllib.parse import parse_qsl, urlencode
 from starlette.responses import Response
 from starlette.concurrency import run_in_threadpool
 
-DELTA = 'dashboard-json-delta'
+from .dashboard_json_delta import DELTA, changes
 
 
 def encoded(value):
@@ -78,25 +78,6 @@ class ByteCache:
             self.bytes = 0
 
 
-def changes(before, after, path=()):
-    """Index-addressed edits preserve null values and explicitly carry deletions."""
-    if before == after:
-        return []
-    if isinstance(before, dict) and isinstance(after, dict):
-        result = [['remove', [*path, key]] for key in before if key not in after]
-        for key, value in after.items():
-            result += changes(before[key], value, (*path, key)) if key in before else [['set', [*path, key], value]]
-        return result
-    if isinstance(before, list) and isinstance(after, list):
-        result = []
-        for i in range(min(len(before), len(after))):
-            result += changes(before[i], after[i], (*path, i))
-        result += [['remove', [*path, i]] for i in range(len(before)-1, len(after)-1, -1)]
-        result += [['set', [*path, i], after[i]] for i in range(len(before), len(after))]
-        return result
-    return [['set', list(path), after]]
-
-
 def accepts_gzip(header):
     weights = {}
     for item in header.lower().split(','):
@@ -109,14 +90,19 @@ def accepts_gzip(header):
 
 
 class ResearchHTTP:
-    def __init__(self, app, *, version=None, cache=None, paths=(), code_version='', concurrency=1):
+    def __init__(self, app, *, version=None, cache=None, paths=(), code_version='', concurrency=1, session=None):
         self.app, self.version, self.cache = app, version, cache
         self.paths, self.code_version = set(paths), code_version
         self.slots = asyncio.Semaphore(concurrency)
+        self.session = session
 
     async def __call__(self, scope, receive, send):
         if scope['type'] != 'http' or scope['method'] != 'GET' or not scope['path'].startswith('/api/'):
             return await self.app(scope, receive, send)
+        with self.session() if self.session else nullcontext():
+            return await self.request(scope, receive, send)
+
+    async def request(self, scope, receive, send):
         headers = {k.decode().lower(): v.decode() for k, v in scope['headers']}
         query = urlencode(sorted(parse_qsl(scope['query_string'].decode(), keep_blank_values=True)))
         request_key = scope['path'] + '?' + query

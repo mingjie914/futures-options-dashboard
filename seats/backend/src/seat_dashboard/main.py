@@ -84,8 +84,8 @@ def create_app(reader: DashboardReadPort | None = None, settings: Settings | Non
         allow_origins=list(active_settings.cors_origins),
         allow_credentials=False,
         allow_methods=["GET", "OPTIONS"],
-        allow_headers=["Accept", "Content-Type", "X-Request-ID", "If-None-Match"],
-        expose_headers=["X-Request-ID", "ETag", "X-Data-Version"],
+        allow_headers=["Accept", "Content-Type", "X-Request-ID", "If-None-Match", "A-IM"],
+        expose_headers=["X-Request-ID", "ETag", "X-Data-Version", "IM", "Delta-Base"],
     )
 
     @app.middleware("http")

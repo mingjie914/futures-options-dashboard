@@ -122,6 +122,9 @@ def test_gateway_compresses_once_and_keeps_security(monkeypatch):
         assert request.headers['accept-encoding'] == 'identity'
         if request.headers.get('if-none-match') == 'W/"same"':
             return httpx.Response(304, headers={'etag': 'W/"same"'})
+        if request.headers.get('a-im') == DELTA:
+            return httpx.Response(226, json={'base':'W/"old"','version':'W/"same"','ops':[['remove',['rows',1]]]},
+                                  headers={'etag':'W/"same"','im':DELTA,'delta-base':'W/"old"','cache-control':'no-store'})
         return httpx.Response(200, content=payload, headers={'content-type': 'application/json', 'etag': 'W/"same"'})
 
     monkeypatch.setenv('DASHBOARD_PUBLIC_READONLY', '1')
@@ -132,6 +135,9 @@ def test_gateway_compresses_once_and_keeps_security(monkeypatch):
         unchanged = client.get('/api/futures/v1/products', headers={'If-None-Match': 'W/"same"', 'A-IM': DELTA})
         assert unchanged.status_code == 304 and unchanged.content == b''
         assert requests[-1].headers['a-im'] == DELTA
+        delta = client.get('/api/seats/v1/views/combination', headers={'If-None-Match':'W/"old"','A-IM':DELTA})
+        assert delta.status_code == 226 and delta.headers['delta-base'] == 'W/"old"'
+        assert delta.headers['im'] == DELTA and delta.json()['ops'] == [['remove',['rows',1]]]
         count = len(requests)
         assert client.get('/api/futures/v1/products', headers={'Origin': 'https://evil.example'}).status_code == 403
         assert client.post('/api/options/v1/refresh').status_code == 403

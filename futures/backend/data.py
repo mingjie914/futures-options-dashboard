@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from hashlib import file_digest, sha256
@@ -837,15 +838,28 @@ def validate_product(product):
 
 class DailyStore:
     def __init__(self, root=None, runtime=None):
-        self.root = Path(root or os.environ.get('FUTURES_DATA_ROOT') or Path(__file__).resolve().parents[1] / 'data').resolve()
-        if self.root.name != 'futureshistoryprices1d':
-            self.root /= 'futureshistoryprices1d'
+        self._source_root = Path(root or os.environ.get('FUTURES_DATA_ROOT') or Path(__file__).resolve().parents[1] / 'data').absolute()
+        if self._source_root.name != 'futureshistoryprices1d':
+            self._source_root /= 'futureshistoryprices1d'
+        self._pinned_root = ContextVar('futures_root', default=None)
         self.runtime = Path(runtime or os.environ.get('FUTURES_RUNTIME', str(Path(__file__).resolve().parents[1] / 'runtime')))
         if self.runtime.resolve() == self.root.resolve() or self.root.resolve() in self.runtime.resolve().parents:
             raise ValueError('运行目录不能位于生产日线源内')
         self.cache = ByteCache(int(os.environ.get('FUTURES_CACHE_MB', '96')) * 1024**2)
         self.lock = RLock()
         self.persist_queries = os.environ.get('DASHBOARD_PUBLIC_READONLY') != '1'
+
+    @property
+    def root(self):
+        return self._pinned_root.get() or self._source_root.resolve()
+
+    @contextmanager
+    def read_session(self):
+        token = self._pinned_root.set(self.root)
+        try:
+            yield
+        finally:
+            self._pinned_root.reset(token)
 
     def market_snapshot(self, end=None):
         """One bounded, read-only scan for the radar; never write source or snapshots."""

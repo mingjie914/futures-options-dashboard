@@ -32,6 +32,13 @@ seat-dashboard-demo = "seat_dashboard.demo:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools]
+py-modules = ["dashboard_json_delta"]
+
+[tool.setuptools.package-dir]
+"" = "../../futures/backend"
+seat_dashboard = "src/seat_dashboard"
+
 [tool.setuptools.package-data]
 seat_dashboard = ["adapters/store/duckdb/schema.sql"]
 
