@@ -115,6 +115,33 @@ def test_builder_publishes_atomic_snapshot_and_reader_can_query(tmp_path: Path):
     assert verify_current(exported)["valid"] is False
 
 
+def test_publish_after_rollback_keeps_existing_snapshots_and_readers(tmp_path: Path):
+    seat_root, market_root = _fixture_source(tmp_path)
+    publisher = DuckDBPublisher(tmp_path / "runtime")
+    builder = SnapshotBuilder(ParquetSource(seat_root, market_root), publisher)
+    assert publisher.next_batch_id() == 1
+    builder.build(BuildRequest())
+    first_manifest = publisher.manifest_path.read_bytes()
+    builder.build(BuildRequest())
+    first, second = (publisher.final_snapshot_path(batch) for batch in (1, 2))
+    hashes = [hashlib.sha256(path.read_bytes()).digest() for path in (first, second)]
+    with duckdb.connect(str(second), read_only=True) as old_reader:
+        previous = old_reader.execute("SELECT * FROM seat_dash_product_daily").fetchall()
+        publisher.manifest_path.write_bytes(first_manifest)
+        assert publisher.next_batch_id() == 3
+        assert builder.build(BuildRequest())["batch_id"] == 3
+        assert old_reader.execute("SELECT * FROM seat_dash_product_daily").fetchall() == previous
+        candidate = publisher.temporary_snapshot_path(2)
+        candidate.write_bytes(b"must not replace a published snapshot")
+        current = publisher.manifest_path.read_bytes()
+        with pytest.raises(FileExistsError):
+            publisher.publish(candidate, {"batch_id": 2})
+        assert candidate.is_file()
+        assert publisher.manifest_path.read_bytes() == current
+    assert [hashlib.sha256(path.read_bytes()).digest() for path in (first, second)] == hashes
+    assert verify_current(publisher.runtime_root)["valid"] is True
+
+
 def test_market_interest_rate_excludes_synthetic_contracts_and_requires_prior_date(tmp_path: Path):
     seat_root, market_root = _fixture_source(tmp_path)
     path = market_root / "market/year_month=2026-07/part-000.parquet"
@@ -503,6 +530,26 @@ def test_p2_pending_main_preserves_product_and_does_not_guess(tmp_path, failure)
     else:
         assert coverage['symbol'] is None and coverage['close'] is None
         assert coverage['price_status']==coverage['seat_status']=='main_unresolved'
+
+    from fastapi.testclient import TestClient
+    from seat_dashboard.main import create_app
+    def responses(folder):
+        with TestClient(create_app(reader=DuckDBReader(folder))) as client:
+            result={}
+            for view in ('combination','market-signals','term-structure','validation'):
+                response=client.get('/api/seats/v1/views/'+view,params={'product_code':'RB.SHFE'})
+                assert response.status_code==200
+                payload=response.json()
+                assert payload['meta']['backfill_status']=='unknown'
+                result[view]=payload['data']['main_contract_coverage']
+            return result
+    before=responses(runtime)
+    exported=tmp_path/'portable'
+    assert verify_main(['--runtime-root',str(runtime),'--export-root',str(exported)])==0
+    portable=json.loads((exported/'manifests/current.json').read_text(encoding='utf-8'))
+    assert portable['input_mode']=='p2-only-v1' and portable['backfill_status']=='unknown'
+    assert 'source_manifest' not in portable
+    assert responses(exported)==before
 
 
 @pytest.mark.parametrize('missing_factor', [False, True])

@@ -32,10 +32,12 @@ class DuckDBPublisher(MartPublishPort):
             raise SnapshotUnavailable(f"Invalid current snapshot manifest: {self.manifest_path}") from exc
 
     def next_batch_id(self) -> int:
-        current = self.current_metadata()
-        if not current:
-            return 1
-        return int(current.get("batch_id", 0)) + 1
+        latest = int((self.current_metadata() or {}).get("batch_id", 0))
+        for path in self.snapshots_root.glob("seat_dashboard_b*.duckdb"):
+            suffix = path.stem.removeprefix("seat_dashboard_b")
+            if suffix.isdecimal():
+                latest = max(latest, int(suffix))
+        return latest + 1
 
     def temporary_snapshot_path(self, batch_id: int) -> Path:
         self.ensure_dirs()
@@ -52,8 +54,9 @@ class DuckDBPublisher(MartPublishPort):
             raise FileNotFoundError(f"Candidate DuckDB snapshot does not exist: {source}")
         batch_id = int(metadata["batch_id"])
         final_path = self.final_snapshot_path(batch_id)
-        if source != final_path:
-            os.replace(source, final_path)
+        # Atomically refuse an existing version, including after a manifest rollback.
+        os.link(source, final_path)
+        source.unlink()
         manifest = {
             **metadata,
             "batch_id": batch_id,

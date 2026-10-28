@@ -125,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
             portable = {key: manifest[key] for key in (
                 "batch_id", "trade_date", "date_min", "date_max", "published_at", "data_backend",
                 "metric_version", "rule_version", "combination_version", "source_manifest_sha256", "warnings", "is_demo", "complete",
+                "input_mode", "backfill_status",
             ) if key in manifest}
             portable.update(database_path=f"snapshots/{source.name}", database_sha256=target_hash)
             (destination / "manifests").mkdir()
