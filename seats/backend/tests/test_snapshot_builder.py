@@ -521,6 +521,49 @@ def test_p2_only_rejects_ambiguous_inputs_without_publishing(tmp_path, failure):
     assert not (runtime / 'manifests/current.json').exists()
 
 
+@pytest.mark.parametrize("failure", [None, "long_position", "long_change", "short_position", "short_change", "null", "market", "invalid_month"])
+def test_czce_unresolved_zero_contracts_preserve_counts_without_guessing(tmp_path, failure):
+    source = _p2_source(tmp_path)
+    path = next(source.dataset_path("raw_seat").rglob("*.parquet"))
+    rows = pq.ParquetFile(path).read().to_pylist()
+    base = {**rows[-1], "exchange": "CZCE", "root": "CF", "product_code": "CF.CZCE",
+            "seat_name": "兼容席位", "long_position": 0, "short_position": 0, "long_change": 0, "short_change": 0}
+    unresolved = [{**base, "symbol": s, "contract_code": s + ".CZCE"} for s in ("CF108", "CF109")]
+    if failure in ("long_position", "long_change", "short_position", "short_change"):
+        unresolved[0][failure] = 1
+    elif failure == "null":
+        unresolved[0]["long_position"] = None
+    elif failure == "invalid_month":
+        unresolved[0].update(symbol="CF113", contract_code="CF113.CZCE")
+    rows += unresolved + [{**base, "seat_name": "有效席位", "symbol": "CF601", "contract_code": "CF601.CZCE", "long_position": 10}]
+    pq.write_table(pa.Table.from_pylist(rows), path)
+    market_path = next(source.market_1d_root.rglob("*.parquet"))
+    market = pq.ParquetFile(market_path).read().to_pylist()
+    market += [{**market[-1], "exchange": "CZCE", "symbol": s, "position": oi}
+               for s, oi in (("CF2601", 1000), ("CF108" if failure == "market" else "CF3108", 2000))]
+    pq.write_table(pa.Table.from_pylist(market), market_path)
+    runtime = tmp_path / "runtime"
+    publisher = DuckDBPublisher(runtime)
+    builder = SnapshotBuilder(source, publisher)
+    if failure:
+        with pytest.raises(SnapshotValidationError, match="ambiguous"):
+            builder.build(BuildRequest(full=True))
+        assert publisher.current_metadata() is None
+        return
+    with duckdb.connect() as db:
+        source.prepare(db)
+        assert db.execute("SELECT symbol FROM _p2_raw_seat WHERE seat_name='兼容席位' ORDER BY symbol").fetchall() == [("CF108",), ("CF109",)]
+        assert db.execute("SELECT count(*) FROM _p2_main_contract_seat WHERE product_code='CF.CZCE'").fetchone()[0] == 0
+    builder.build(BuildRequest(full=True))
+    with duckdb.connect(str(publisher.runtime_root / publisher.current_metadata()["database_path"]), read_only=True) as db:
+        assert db.execute("SELECT long_position,short_position,contract_count FROM seat_dash_product_seat_daily WHERE seat_name='兼容席位'").fetchone() == (0, 0, 2)
+        assert db.execute("SELECT total_long,total_short,seat_count FROM seat_dash_product_daily WHERE product_code='CF.CZCE'").fetchone() == (10, 0, 2)
+    result = DuckDBReader(runtime).view("term-structure", product_code="CF.CZCE")
+    assert [r["symbol"] for r in result["contracts"]] == ["CF2601"]
+    assert result["main_contract_coverage"][0]["seat_status"] == "missing_seat"
+    assert result["main_contract_coverage"][0]["symbol"] == "CF3108"
+
+
 def test_p2_only_czce_codes_match_three_and_four_digit_contracts(tmp_path):
     source = _p2_source(tmp_path)
     for dataset in ('raw_seat', 'market_1d'):

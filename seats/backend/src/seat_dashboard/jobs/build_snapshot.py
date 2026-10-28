@@ -215,7 +215,7 @@ class SnapshotBuilder:
                 "date_min": date_range[0].isoformat() if date_range[0] else None,
                 "date_max": date_range[1].isoformat() if date_range[1] else None,
                 "mode": request.mode,
-                "metric_version": self.METRIC_VERSION + ("-p2-calendar-v1" if self.source.p2_only else ""),
+                "metric_version": self.METRIC_VERSION + ("-p2-calendar-v2" if self.source.p2_only else ""),
                 "input_mode": "p2-only-v1" if self.source.p2_only else "derived",
                 "backfill_status": "unknown" if self.source.p2_only else "unspecified",
                 "rule_version": self.RULE_VERSION,
@@ -602,6 +602,8 @@ class SnapshotBuilder:
             if request.trade_date
             else "trade_date = (SELECT max(trade_date) FROM seat_dash_product_daily)"
         )
+        if self.source.p2_only:
+            signal_where += " AND regexp_full_match(symbol, '[A-Z]+[0-9]{4}')"
         connection.execute(
             f"""
             CREATE OR REPLACE TABLE seat_dash_product_seat_daily AS

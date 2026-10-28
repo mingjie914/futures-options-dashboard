@@ -93,14 +93,14 @@ class ParquetSource(SeatSourcePort):
             if rows:
                 raise SnapshotValidationError(f"P2-only {reason}: {rows}")
 
-        for dataset in self.datasets:
-            reject(f"""SELECT trade_date, symbol FROM {self._parquet_sql(dataset)}
-                WHERE upper(exchange)='CZCE' AND regexp_full_match(upper(symbol), '[A-Z]+[0-9]{{3}}')
-                  AND abs(CAST(substr(right(symbol,3),1,1) AS INTEGER) - year(CAST(trade_date AS DATE)) % 10)=5""",
-                "ambiguous CZCE decade")
         connection.execute("""
+            CREATE OR REPLACE TEMP MACRO _p2_ambiguous(s, e, d) AS (
+                coalesce(upper(e)='CZCE' AND regexp_full_match(upper(s), '[A-Z]+[0-9]{3}')
+                    AND abs(try_cast(substr(right(s,3),1,1) AS INTEGER) - year(d) % 10)=5, FALSE)
+            );
             CREATE OR REPLACE TEMP MACRO _p2_symbol(s, e, d) AS (
-                CASE WHEN upper(e) = 'CZCE' AND regexp_full_match(upper(s), '[A-Z]+[0-9]{3}')
+                CASE WHEN _p2_ambiguous(s, e, d) THEN upper(s)
+                WHEN upper(e) = 'CZCE' AND regexp_full_match(upper(s), '[A-Z]+[0-9]{3}')
                 THEN regexp_extract(upper(s), '^([A-Z]+)', 1) ||
                      lpad(CAST((year(d) + ((CAST(substr(regexp_extract(s, '([0-9]{3})$', 1), 1, 1) AS INTEGER)
                          - year(d) % 10 + 15) % 10) - 5) % 100 AS VARCHAR), 2, '0') || right(s, 2)
@@ -108,6 +108,12 @@ class ParquetSource(SeatSourcePort):
             )
         """)
         cutoff = f"AND CAST(trade_date AS DATE) <= DATE '{end.isoformat()}'" if end else ""
+        for dataset in self.datasets:
+            # Preserve unresolved zero compatibility rows as supplied; never guess a decade.
+            scope = "AND is_aggregated=0 AND (long_position=0 AND long_change=0 AND short_position=0 AND short_change=0) IS NOT TRUE" if dataset == "raw_seat" else ""
+            reject(f"""SELECT trade_date, symbol FROM {self._parquet_sql(dataset)}
+                WHERE _p2_ambiguous(symbol, exchange, CAST(trade_date AS DATE)) {scope} {cutoff}""",
+                "ambiguous CZCE decade")
         connection.execute(f"""
             CREATE OR REPLACE TEMP TABLE _p2_raw_seat AS
             WITH source AS (
@@ -124,7 +130,9 @@ class ParquetSource(SeatSourcePort):
             FROM source WHERE seat_name IS NOT NULL AND trim(seat_name) <> ''
         """)
         reject("""SELECT trade_date, product_code, symbol FROM _p2_raw_seat
-            WHERE NOT regexp_full_match(symbol, root || '[0-9]{4}')
+            WHERE (NOT regexp_full_match(symbol, root || '[0-9]{4}')
+                   AND NOT (_p2_ambiguous(symbol, exchange, trade_date)
+                            AND regexp_full_match(symbol, root || '[0-9]{3}')))
                OR try_cast(right(symbol, 2) AS INTEGER) NOT BETWEEN 1 AND 12
                OR product_code IS NULL""", "invalid or ambiguous contract code")
         reject("""SELECT trade_date, contract_code, seat_name FROM _p2_raw_seat
