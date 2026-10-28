@@ -16,8 +16,8 @@ from uuid import uuid4
 import duckdb
 
 ROOT = Path(__file__).resolve().parents[1]
-REGISTRY = Path(r"E:\阿里云数据库\wind更新\fundamental\indicators.json")
-WIND_PYTHON = Path(r"C:\pythonvenv\Scripts\python.exe")
+REGISTRY = Path(os.environ.get('FUNDAMENTAL_REGISTRY') or ROOT / 'data' / 'fundamental' / 'indicators.json')
+WIND_PYTHON = Path(os.environ.get('FUNDAMENTAL_WIND_PYTHON') or os.environ.get('OPTIONS_WIND_PYTHON') or sys.executable)
 _EMPTY_OBSERVATION_ISSUE = "No non-missing observations returned"
 
 
@@ -1695,9 +1695,9 @@ def main(argv=None):
     delivery = sub.add_parser('delivery-check', help='Verify pinned local sources and save delivery gaps; no fetch/publish')
     delivery.add_argument('--require-recovery', action='store_true', help='Also require matching successful offline recovery evidence')
     candidate = sub.add_parser('candidate-review', help='Reuse saved unverified values, never fetch or accept business metadata')
-    candidate.add_argument('--source-root', type=Path, default=Path(r'E:\交易数据\本地表\futuresfundamentals'))
+    candidate.add_argument('--source-root', type=Path, default=Path(os.environ.get('FUTURES_DATA_ROOT') or ROOT/'data')/'futuresfundamentals')
     financial = sub.add_parser('financial-inventory', help='Inspect latest local daily partition for candidate index identifiers; no network')
-    financial.add_argument('--source-root', type=Path, default=Path(r'E:\交易数据\本地表'))
+    financial.add_argument('--source-root', type=Path, default=Path(os.environ.get('FUTURES_DATA_ROOT') or ROOT/'data'))
     index_probe = sub.add_parser('index-probe', help='Explicit isolated Wind close probe for four index candidates; no publication')
     index_probe.add_argument('--start', required=True)
     index_probe.add_argument('--end', required=True)

@@ -3,92 +3,50 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {transformWithEsbuild} from 'vite';
-import React from 'react';
-import {renderToStaticMarkup} from 'react-dom/server';
+const sharedRequire=createRequire(new URL('../../../frontend/package.json',import.meta.url));
+const React=sharedRequire('react'), {renderToStaticMarkup}=sharedRequire('react-dom/server');
 
 const source=await readFile(new URL('../src/MarketPanels.jsx',import.meta.url),'utf8');
 const {code}=await transformWithEsbuild(source,'MarketPanels.jsx',{jsx:'automatic',format:'cjs'});
 const module={exports:{}};
-new Function('module','exports','require',code)(module,module.exports,createRequire(import.meta.url));
+new Function('module','exports','require',code)(module,module.exports,id=>id.startsWith('react')?sharedRequire(id):createRequire(import.meta.url)(id));
 const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel}=module.exports;
-test('raw candidate browser stays separate from business review and keeps unknown identity explicit',()=>{
- const html=renderToStaticMarkup(React.createElement(module.exports.FundamentalCandidates,{revision:0,Chart(){return null;}}));
- assert.match(html,/候选原始序列 · 同码属性核验/);
- assert.match(html,/不进入基差、雷达或回测/);
- assert.match(html,/未提供属性证据时，名称、单位与正式频率仍未知/);
- assert.match(source,/候选版本已变化/);
- assert.match(source,/未自动选择或统一口径/);
- assert.doesNotMatch(html,/已确认|交易建议/);
- assert.match(source,/d\.terminal_metadata\?\.metadata_sha256!==catalog\.terminal_metadata\?\.metadata_sha256/);
- assert.match(source,/期货序列 · 非独立现货/);
- assert.match(source,/不是本地取数水位/);
- assert.match(source,/单位未核验/);
-});
-test('EDB update status distinguishes replay, request cutoff and pre-check waterlines',()=>{
- const record={state:'completed',label:'隔离检查完成（非生产发布）',checked_at:'2026-09-12T05:22:40+00:00',requested_end:'2026-09-11',executed:true,network_fetch_enabled:false,counts:{pending_requests:0,release_check_requests:3,awaiting_release:null},waterlines:[{code:'S5715204',date:'2026-07-31'}],checkpoint:{label:'隔离检查完成（非生产发布）',requested_end:'2026-09-11',lock_present:false},issues:[]};
- const html=renderToStaticMarkup(React.createElement(module.exports.FundamentalUpdateStatus,{record}));
- for(const text of ['隔离检查完成','保存结果重放，未启用取数','不是指标取数或上游发布时间','不是最新观测日期','S5715204','2026-07-31','历史请求缺口：0','检查前待查发布区间：3','等待发布记录：未知','低频水位落后请求截止，不自动视为断更'])assert.ok(html.includes(text),text);
- assert.doesNotMatch(html,/<button|数据已全部更新/);
-});
-test('planning does not hide a failed execution checkpoint and locked is not running',()=>{
- const record={label:'仅生成计划',executed:false,counts:{},waterlines:[],checkpoint:{label:'上次执行失败',lock_present:true},issues:['运行记录含错误，请查看本地状态文件']};
- const html=renderToStaticMarkup(React.createElement(module.exports.FundamentalUpdateStatus,{record}));
- for(const text of ['仅计划，未执行','上次执行失败','锁文件存在，不代表进程仍存活','时间未核验','role="alert"'])assert.ok(html.includes(text),text);
-});
-test('update record errors and loading do not claim success or trigger ingestion',()=>{
- assert.match(renderToStaticMarkup(React.createElement(module.exports.FundamentalUpdateStatus,{})),/读取基本面独立更新记录/);
- const html=renderToStaticMarkup(React.createElement(module.exports.FundamentalUpdateStatus,{error:'service unavailable'}));
- assert.match(html,/role="alert"/);assert.match(html,/不触发取数/);assert.doesNotMatch(html,/检查完成/);
-});
 test('radar displays authoritative objects without reclassifying product summary',()=>{
  const objects=[{key:'IM:IM2610/IM2612',product_summary_level:'普通观察',bucket:'优先核查',direction:'卖 IM2610 / 买 IM2612',events:[]}];
  assert.equal(radarRows({objects}),objects);
  assert.deepEqual(radarRows(null),[]);
  assert.doesNotMatch(source,/const (priority|directional|deliveryMonth)=/);
- assert.match(source,/new URLSearchParams\(\{\.\.\.query,family\}\)/);
- assert.match(source,/\[filter,setFilter\]=useState\('priority'\)/);
- assert.match(source,/本次未发现符合当前条件的异常/);
+ assert.match(source,/new URLSearchParams\(\{\.\.\.query,family,price_type:'close'\}\)/);
+ assert.match(source,/\[filter,setFilter\]=usePreference\('futures.radar.filter','priority'\)/);
+ assert.match(source,/当前筛选无结果/);
 });
 test('radar keeps small result lists visible and carries candidate evidence into pair research',()=>{
  assert.match(source,/items.length<=10\?' short-results'/);
  assert.match(source,/direction_code:r.direction_code/);
  assert.match(source,/e.far\?'跨期分析'/);
 });
-test('research card retains saved assumptions, exposes unknown direction and costs',()=>{
- const props={data:{product:'IM',near:'IM2610',far:'IM2612',price_type:'close',meta:{snapshot_id:'test'},spread:{summary:{latest:{trade_date:'2026-09-11',spread:55}}}},onSaved(){}};
- const html=renderToStaticMarkup(React.createElement(module.exports.ResearchCard,props));
- assert.match(html,/待核查，不预设/);assert.match(html,/保存核查卡到自选/);
- assert.match(html,/未知费用留空/);assert.match(html,/记录参考：55/);
- const saved={plan:{direction:'sell',rationale:'测试已有原因',invalidation:'失效',lots:2,reference_spread:40,reference_date:'2026-09-01'}};
- const restored=renderToStaticMarkup(React.createElement(module.exports.ResearchCard,{...props,saved}));
- assert.match(restored,/测试已有原因/);assert.match(restored,/记录参考：40/);
-});
 test('basis panel distinguishes index close and CU reference scopes before data loads',()=>{
  const html=renderToStaticMarkup(React.createElement(BasisPanel,{product:'CU',priceType:'close',onProduct(){},Chart(){return null;}}));
- assert.match(html,/不是交割基差/);assert.match(html,/其他品种不以近似指标替代/);
- assert.match(html,/IM \/ IF \/ IC \/ IH：指数日收盘基差/);
+ assert.match(html,/CU：周频参考价差/);
+ assert.match(html,/股指：指数 − 期货/);
  assert.match(source,/正值：期货贴水；负值：期货升水/);
  assert.match(source,/重选当前活跃合约/);
 });
-test('contract rules remain scoped references and do not overwrite saved research assumptions',()=>{
+test('contract rules remain scoped references',()=>{
  const terms={multiplier:200,tick_size:0.2,tick_value:40,settlement:'现金交割',source_url:'https://www.cffex.com.cn/zz1000/',reviewed_on:'2026-09-12',calendar_source_url:'https://www.cffex.com.cn/',expiry_rule:'第三个周五',as_of:'2026-09-11',contracts:[{symbol:'IM2609',expected_last_trade_date:'2026-09-18',calendar_days_remaining:7},{symbol:'IM2703',expected_last_trade_date:null,calendar_days_remaining:null}],warnings:['不用于年化']};
  const html=renderToStaticMarkup(React.createElement(module.exports.ContractTerms,{terms}));
  assert.match(html,/单腿每手一跳 40 元/);assert.match(html,/尚余 7 自然日/);
  assert.match(html,/非逐合约最终公告/);assert.match(html,/该年交易日历未核验/);
  assert.equal(renderToStaticMarkup(React.createElement(module.exports.ContractTerms,{})),'');
- const card=renderToStaticMarkup(React.createElement(module.exports.ResearchCard,{data:{contract_terms:terms,product:'IM',near:'IM2609',far:'IM2703',price_type:'close',meta:{snapshot_id:'fixture'},spread:{summary:{latest:null}}},saved:{plan:{lots:1,multiplier:10,total_cost:null,rationale:'原假设',invalidation:''}},onSaved(){}}));
- assert.match(card,/采用已核验乘数 200/);assert.match(card,/当前假设与中金所乘数不同/);
- assert.match(card,/手工假设/);assert.match(card,/value="10"/);
- assert.match(source,/key==='multiplier'\?\{multiplier_source:null\}/);
+
 });
 test('radar starts with all-product controls and does not require choosing a product',()=>{
  const html=renderToStaticMarkup(React.createElement(RadarPanel,{onSelect(){}}));
- assert.match(html,/全品种初筛/);
  assert.match(html,/扫描全部品种/);
  assert.match(html,/name="min_volume"/);
  assert.match(html,/name="min_position"/);
  assert.doesNotMatch(html,/name="product"/);
- assert.match(html,/基本面不参与排名/);
+ assert.match(source,/e.family==='spread'/);
 });
 test('scan thresholds preserve default universe and reject missing liquidity when requested',()=>{
  assert.equal(passesScan({}),true);

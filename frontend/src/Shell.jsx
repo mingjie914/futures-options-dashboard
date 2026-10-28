@@ -1,88 +1,64 @@
-import { Component, lazy, Suspense, useState } from "react";
-import "./futures/styles.css";
+import { Component, lazy, Suspense, useEffect, useRef, useState } from 'react';
 
 const FuturesApp = lazy(async () => {
-  const module = await import("./futures/App.jsx");
+  const [module] = await Promise.all([import('./futures/App.jsx'), import('./futures/styles.css')]);
   return { default: module.App };
 });
-
-const OptionsApp = lazy(() => import("./Options.jsx"));
-
-function initialModule() {
-  if (typeof window !== "undefined" && window.location.pathname.startsWith("/futures")) {
-    return "futures";
-  }
-  return "options";
-}
+const OptionsApp = lazy(() => import('./Options.jsx'));
+// Only confirmed destinations are visible; deployment can set these at build time.
+const HOME = import.meta.env.VITE_HOME_URL || 'https://mingjiec.com/';
+const SEATS = import.meta.env.VITE_SEATS_URL;
+const BASE = import.meta.env.BASE_URL;
+const modules = [['futures', '期货', '期限结构、跨期与季节性'], ['options', '期权', '波动率、持仓与期权链']];
+const currentModule = () => location.pathname.startsWith(`${BASE}futures`) ? 'futures' : 'options';
 
 class ModuleErrorBoundary extends Component {
   state = { error: null };
-
-  static getDerivedStateFromError(error) {
-    return { error };
-  }
-
+  static getDerivedStateFromError(error) { return { error }; }
   render() {
-    if (this.state.error) {
-      return (
-        <section className="module-error" role="alert">
-          <h2>{this.props.label}暂时无法加载</h2>
-          <p>{this.state.error.message || "模块发生未知错误。"}</p>
-          <button type="button" onClick={this.props.onRetry}>重试模块</button>
-        </section>
-      );
-    }
-    return this.props.children;
+    return this.state.error ? <section className="module-error" role="alert"><h2>页面暂时无法加载</h2><p>{this.state.error.message}</p><button onClick={() => location.reload()}>重新加载</button></section> : this.props.children;
   }
-}
-
-function ModuleLoading({ label }) {
-  return <section className="module-loading" role="status">正在加载{label}…</section>;
 }
 
 export default function Shell() {
-  const [active, setActive] = useState(initialModule);
-  const [retrySeed, setRetrySeed] = useState(0);
-
-  function selectModule(next) {
-    setActive(next);
-    setRetrySeed(0);
-    if (typeof window !== "undefined") {
-      const path = next === "futures" ? "/futures/" : "/options/";
-      if (window.location.pathname !== path) window.history.replaceState({}, "", path);
+  const [active, setActive] = useState(currentModule);
+  const menu = useRef(null);
+  const lastView = useRef({});
+  useEffect(() => {
+    const back = () => setActive(currentModule());
+    const outside = event => { if (!menu.current?.contains(event.target)) menu.current?.removeAttribute('open'); };
+    window.addEventListener('popstate', back);
+    document.addEventListener('pointerdown', outside);
+    return () => { window.removeEventListener('popstate', back); document.removeEventListener('pointerdown', outside); };
+  }, []);
+  function select(event, next) {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    if (next !== active) {
+      lastView.current[active] = location.pathname + location.search;
+      history.pushState({}, '', lastView.current[next] || `${BASE}${next}/`);
+      setActive(next);
     }
+    menu.current.querySelector('summary').focus();
+    menu.current.open = false;
   }
-
-  const retry = () => setRetrySeed((value) => value + 1);
-  const isFutures = active === "futures";
-  const moduleLabel = isFutures ? "期货研究" : "期权研究";
-
-  return (
-    <div className="unified-shell">
-      <header className="unified-topbar">
-        <a className="unified-brand" href={isFutures ? "/futures/" : "/options/"} onClick={(event) => { event.preventDefault(); selectModule(active); }}>
-          <span className="unified-brand__mark">∿</span>
-          <span><strong>RESEARCH</strong><small>统一研究终端</small></span>
-        </a>
-        <nav className="unified-switch" aria-label="研究模块">
-          <button type="button" className={isFutures ? "is-active" : ""} aria-pressed={isFutures} onClick={() => selectModule("futures")}>期货研究</button>
-          <button type="button" className={!isFutures ? "is-active" : ""} aria-pressed={!isFutures} onClick={() => selectModule("options")}>期权研究</button>
-        </nav>
-        <div className="unified-status" aria-label="模块数据状态">
-          <span className="unified-status__badge unified-status__badge--futures">期货 · 模块内时点</span>
-          <span className="unified-status__badge">历史 / 盘中时点分别展示</span>
-        </div>
-      </header>
-
-      <div className={`unified-shell__content unified-shell__content--${active}`}>
-        <div className={`module-frame ${isFutures ? "futures-module" : "options-module"}`}>
-          <ModuleErrorBoundary key={`${active}-${retrySeed}`} label={moduleLabel} onRetry={retry}>
-            <Suspense fallback={<ModuleLoading label={moduleLabel} />}>
-              {isFutures ? <FuturesApp /> : <OptionsApp />}
-            </Suspense>
-          </ModuleErrorBoundary>
-        </div>
-      </div>
+  return <div className="unified-shell">
+    <header className="unified-topbar"><nav aria-label="站点导航">
+      <a className="unified-brand" href={HOME}>MINGJIE</a><a href={HOME}>策略</a>
+      <details ref={menu} className="board-menu"
+        onPointerEnter={event=>{if(event.pointerType==='mouse')menu.current.open=true;}}
+        onPointerLeave={event=>{if(event.pointerType==='mouse')menu.current.open=false;}}
+        onFocus={()=>{menu.current.open=true;}}
+        onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))menu.current.open=false;}}
+        onKeyDown={event => { if (event.key === 'Escape') { menu.current.querySelector('summary').focus(); menu.current.open=false; event.preventDefault(); } }}>
+        <summary aria-label="切换看板" className="is-active" onClick={event=>{event.preventDefault();menu.current.open=true;}}>看板 <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12"><path d="m3 4.5 3 3 3-3" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg></summary>
+        <div className="board-menu__items">{modules.map(([id, label, description]) => <a key={id} href={`${BASE}${id}/`} aria-current={active === id ? 'page' : undefined} onClick={event => select(event, id)}><span>{label}</span><small>{description}</small></a>)}{SEATS && <a href={SEATS}><span>席位</span><small>会员持仓与变化</small></a>}</div>
+      </details>
+    </nav></header>
+    <div className={`module-frame ${active === 'futures' ? 'futures-module' : ''}`}>
+      <ModuleErrorBoundary key={active}><Suspense fallback={<p className="module-loading" role="status">加载看板…</p>}>
+        {active === 'futures' ? <FuturesApp /> : <OptionsApp />}
+      </Suspense></ModuleErrorBoundary>
     </div>
-  );
+  </div>;
 }

@@ -1,10 +1,8 @@
 """Local-only HTTP interface. Requests never start Wind or production ingestion."""
 from __future__ import annotations
 
-import csv
 from contextlib import contextmanager
 from datetime import date
-from io import StringIO
 import json
 import math
 from pathlib import Path
@@ -17,13 +15,13 @@ from time import perf_counter
 from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import analytics
-from .data import CONTRACT, FIELDS, INDEX_SERIES, DailyStore, clean, validate_product, fundamental_review, fundamental_analysis, fundamental_update_status, fundamental_candidates, index_daily, contract_terms
+from .data import PRODUCT_NAMES, CONTRACT, FIELDS, INDEX_SERIES, DailyStore, clean, validate_product, fundamental_review, fundamental_analysis, fundamental_update_status, fundamental_candidates, index_daily, contract_terms
 
 
 class Watch(BaseModel):
@@ -128,7 +126,7 @@ def create_app(store=None):
         as_of = snapshot['meta']['as_of']
         return sorted([r for r in snapshot['rows'] if r['trade_date'] == as_of], key=lambda r: r['symbol'])
 
-    def dashboard(product='RB', near=None, far=None, price_type='close', start=None, end=None):
+    def dashboard(product='RB', near=None, far=None, price_type='close', start=None, end=None, view='all'):
         if price_type not in ('close', 'settle'):
             raise ValueError('价格口径只允许 close 或 settle')
         snapshot = read(product, start, end)
@@ -147,23 +145,30 @@ def create_app(store=None):
         if near and far and near >= far:
             raise ValueError('近月必须早于远月，且两腿不能相同')
         meta.update({'price_type': price_type, 'units': {'price': '品种原始报价单位', 'volume': '手', 'position': '手', 'amount': '元'}})
-        opportunities = []
-        for a, b in zip(contracts, contracts[1:]):
-            result = analytics.spread_series(rows, a['symbol'], b['symbol'], price_type)
-            trend = analytics.spread_chart_series(rows, result)[-60:]
-            opportunities.append({'near': a['symbol'], 'far': b['symbol'], **result['summary'],
-                'trend':[{'trade_date':p['trade_date'],'spread':p['spread']} for p in trend]})
-        spread = analytics.spread_series(rows, near, far, price_type) if near and far else {'series': [], 'summary': {}}
-        risk = analytics.spread_risk(spread['series'], [r['trade_date'] for r in rows])
-        return clean({'meta': meta, 'product': snapshot['product'], 'near': near, 'far': far,
-                      'contract_terms':contract_terms(snapshot['product'],[s for s in (near,far) if s],meta['as_of']),
-            'price_type': price_type, 'contracts': contracts,
-            'spread': spread, 'risk': risk,
-            'curve': analytics.term_structure_comparison(rows, meta['as_of'], price_type) if rows else {'nodes': [], 'adjacent': [], 'curvature': [], 'summary': {}, 'comparisons': []},
-            'rollover': analytics.rollover_series(rows, near, far, price_type) if near and far else {'series': [], 'summary': {}},
-            'opportunities': opportunities,
-            'warnings': ['仅日终研究，非实时可成交报价', '合约目录来自已观测日线，未覆盖无成交挂牌合约',
-                '基差页分列股指日收盘基差与CU周频参考价差；均非实时套利信号', '费用、保证金、到期日须逐品种核验']})
+        result = {'meta': meta, 'product': snapshot['product'], 'near': near, 'far': far,
+                  'price_type': price_type, 'contracts': contracts}
+        if view in ('all', 'spread', 'rollover'):
+            spread = analytics.spread_series(rows, near, far, price_type) if near and far else {'series': [], 'summary': {}}
+            result['spread'] = spread
+        if view in ('all', 'spread'):
+            result['risk'] = analytics.spread_risk(spread['series'], [r['trade_date'] for r in rows])
+        if view in ('all', 'curve'):
+            result['curve'] = analytics.term_structure_comparison(rows, meta['as_of'], price_type) if rows else {'nodes': [], 'adjacent': [], 'curvature': [], 'summary': {}, 'comparisons': []}
+        if view in ('all', 'rollover'):
+            result['rollover'] = analytics.rollover_series(rows, near, far, price_type) if near and far else {'series': [], 'summary': {}}
+        if view in ('all', 'scan'):
+            opportunities = []
+            for a, b in zip(contracts, contracts[1:]):
+                pair = analytics.spread_series(rows, a['symbol'], b['symbol'], price_type)
+                trend = analytics.spread_chart_series(rows, pair)[-60:]
+                opportunities.append({'near': a['symbol'], 'far': b['symbol'], **pair['summary'],
+                    'trend':[{'trade_date':p['trade_date'],'spread':p['spread']} for p in trend]})
+            result['opportunities'] = opportunities
+        if view == 'all':
+            result['contract_terms'] = contract_terms(snapshot['product'],[s for s in (near,far) if s],meta['as_of'])
+            result['warnings'] = ['仅日终研究，非实时可成交报价', '合约目录来自已观测日线，未覆盖无成交挂牌合约',
+                '基差页分列股指日收盘基差与CU周频参考价差；均非实时套利信号', '费用、保证金、到期日须逐品种核验']
+        return clean(result)
 
     @app.get('/api/radar')
     def radar(end: Optional[date] = None, price_type: str = 'close',
@@ -216,6 +221,20 @@ def create_app(store=None):
             radar_cache.update(key=key,result=result)
             return response(result, False)
 
+    @app.get('/api/position-peaks')
+    def position_peaks(end: Optional[date] = None,
+                       min_volume: int = Query(1000, ge=0, le=10000000),
+                       min_position: int = Query(1000, ge=0, le=10000000)):
+        try:
+            snapshot = store.market_snapshot(end.isoformat() if end else None)
+            as_of = max((r['trade_date'] for r in snapshot['rows']), default=None)
+            peaks = store.position_peaks(as_of) if as_of else []
+        except (OSError, RuntimeError, duckdb.Error) as exc:
+            raise HTTPException(503, '历史持仓读取失败') from exc
+        result = analytics.position_peak_ranking(snapshot['rows'], peaks, as_of, min_volume=min_volume, min_position=min_position)
+        return clean({**result, 'items':[{**r, 'name':PRODUCT_NAMES.get(r['product'], '')} for r in result['items']],
+                      'as_of':as_of, 'years':5, 'snapshot_id':snapshot['snapshot_id']})
+
     @app.get('/api/health')
     def health():
         return {'status': 'ok', 'mode': 'eod_readonly', 'daily_source_exists': store.root.is_dir(),
@@ -224,7 +243,7 @@ def create_app(store=None):
 
     @app.get('/api/products')
     def products():
-        return {'products': store.products(), 'meta': {'source': 'local_parquet', 'scope': 'latest_partition'}}
+        return {'products': [{**p, 'name':PRODUCT_NAMES.get(p['product'], '')} for p in store.products()], 'meta': {'source': 'local_parquet', 'scope': 'latest_partition'}}
 
     @app.get('/api/fundamentals/review')
     def review_fundamentals(code: Optional[str] = Query(None, pattern=r'^[SG]\d{7}$'),
@@ -264,8 +283,9 @@ def create_app(store=None):
 
     @app.get('/api/dashboard')
     def get_dashboard(product: str = 'RB', near: Optional[str] = None, far: Optional[str] = None,
-                      price_type: str = 'close', start: Optional[date] = None, end: Optional[date] = None):
-        return dashboard(product, near, far, price_type, start.isoformat() if start else None, end.isoformat() if end else None)
+                      price_type: str = 'close', start: Optional[date] = None, end: Optional[date] = None,
+                      view: str = Query('all', pattern='^(all|catalog|spread|curve|rollover|scan)$')):
+        return dashboard(product, near, far, price_type, start.isoformat() if start else None, end.isoformat() if end else None, view)
 
     @app.get('/api/data/catalog')
     def catalog():
@@ -503,20 +523,6 @@ def create_app(store=None):
             if not changed.rowcount:
                 raise HTTPException(404, '自选组合不存在，请重新加载')
         return watches()
-
-    @app.get('/api/export')
-    def export(product: str = 'RB', near: Optional[str] = None, far: Optional[str] = None,
-               price_type: str = 'close', start: Optional[date] = None, end: Optional[date] = None):
-        result = dashboard(product, near, far, price_type, start.isoformat() if start else None, end.isoformat() if end else None)
-        output = StringIO()
-        rows = result['spread']['series']
-        if rows:
-            writer = csv.DictWriter(output, fieldnames=list(rows[0]) + ['snapshot_id', 'price_type'])
-            writer.writeheader()
-            for row in rows:
-                writer.writerow({**row, 'snapshot_id': result['meta']['snapshot_id'], 'price_type': price_type})
-        return Response('\ufeff' + output.getvalue(), media_type='text/csv; charset=utf-8',
-                        headers={'Content-Disposition': 'attachment; filename="spread.csv"'})
 
     @app.post('/api/scenario')
     def scenario(payload: Scenario):

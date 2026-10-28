@@ -16,10 +16,6 @@ function positiveFinite(value) {
   return number !== null && number > 0 ? number : null;
 }
 
-function sameMonth(left, right) {
-  return String(left) === String(right);
-}
-
 function validQuote(row) {
   if (!row || !CONTRACT_SIDES.has(row.cp)) return false;
   const bid = positiveFinite(row.bid);
@@ -60,8 +56,7 @@ function interpolateDelta(rows, cp, target) {
   const points = rows
     .filter((row) => row.cp === cp && validQuote(row))
     .map((row) => ({ value: finiteNumber(row.delta), iv: finiteNumber(row.iv) }))
-    .filter((point) => point.value !== null && point.iv !== null)
-    .map((point) => ({ value: point.value, iv: point.iv }));
+    .filter((point) => point.value !== null && point.iv !== null);
   return interpolate(points, target, 'iv');
 }
 
@@ -119,8 +114,11 @@ function monthMetrics(month, rows) {
 export function surfaceMetrics(rows, months) {
   const inputRows = Array.isArray(rows) ? rows : [];
   const inputMonths = Array.isArray(months) ? months : [];
-  return inputMonths.map((month) => monthMetrics(
-    month,
-    inputRows.filter((row) => sameMonth(row?.month, month?.id)),
-  ));
+  const grouped = new Map();
+  for (const row of inputRows) {
+    const key = String(row?.month);
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(row);
+  }
+  return inputMonths.map(month => monthMetrics(month, grouped.get(String(month?.id)) || []));
 }

@@ -35,6 +35,40 @@ def number(v):
     except (TypeError,ValueError):return None
 
 
+def historical_volatility(raw, code, end, window):
+    """Fixed-contract close IV; calendar gaps remain null, never splice contracts."""
+    from statistics import stdev
+    provider_code=code.split('.')[0].replace('-','')
+    contract=next((c for c in raw['contracts'] if c['order_book_id']==provider_code),None)
+    if contract is None:raise ValueError('该合约未保存日线历史')
+    expiry=str(contract['maturity_date'])[:10]
+    group=[c for c in raw['contracts'] if str(c['maturity_date'])[:10]==expiry]
+    prices={(p['order_book_id'],str(p['date'])[:10]):number(p['close']) for p in raw['prices']}
+    dates=[d for d in raw['calendar'] if d<=end]
+    points=[]
+    for index,day in enumerate(dates):
+        spot=prices.get(('000852.XSHG',day))
+        t=(datetime.fromisoformat(expiry)-datetime.fromisoformat(day)).days/365
+        pairs={}
+        for c in group:
+            value=prices.get((c['order_book_id'],day))
+            if value is not None and value>0:pairs.setdefault(c['strike_price'],{})[c['option_type']]=value
+        nearest=sorted([(k,p) for k,p in pairs.items() if 'C' in p and 'P' in p],key=lambda x:abs(x[0]-(spot or 0)))[:5]
+        forward=median([k+(p['C']-p['P'])*math.exp(RATE*t) for k,p in nearest]) if spot and t>0 and len(nearest)>=3 else None
+        close=prices.get((provider_code,day))
+        iv=implied(close,forward,contract['strike_price'],t,contract['option_type']) if forward and close else None
+        closes=[prices.get(('000852.XSHG',d)) for d in dates[max(0,index-20):index+1]]
+        hv=stdev([math.log(b/a) for a,b in zip(closes,closes[1:])])*math.sqrt(252) if len(closes)==21 and all(closes) else None
+        points.append(dict(date=day,iv=iv,hv20=hv))
+    points=points[-window:]
+    values=[p['iv'] for p in points if p['iv'] is not None]
+    latest=next((p for p in reversed(points) if p['iv'] is not None),None)
+    percentile=100*sum((v<latest['iv'])+.5*(v==latest['iv']) for v in values)/len(values) if latest and len(values)>1 else None
+    return dict(code=code,source=raw['source'],test_only=raw.get('test_only',False),price_basis='close',
+                end=end,window=window,points=points,latest=latest,n=len(values),percentile=percentile,
+                range_min=min(values) if values else None,range_max=max(values) if values else None)
+
+
 def normalize(folder):
     meta=load(folder,'collection',{})
     trade_date=meta.get('trade_date','2026-09-09')
@@ -104,17 +138,17 @@ def normalize(folder):
             else:r['quality']='iv_unavailable'
     field_warnings=[]
     if rt_volume_count:
-        field_warnings.append('成交量优先使用同一盘中WSQ累计值；无该字段时保留为空')
+        field_warnings.append('成交量使用同日源盘口累计值；无该字段时保留为空')
     else:
         field_warnings.append('当前截面未取得盘中累计成交量，保留为空，不以0代替')
     if rt_oi_count:
-        field_warnings.append('持仓优先使用同一盘中WSQ值，增减相对前一交易日')
+        field_warnings.append('持仓使用同日源盘口值，增减相对前一交易日；缺少前值时不计算增减')
     else:
         field_warnings.append('当前截面未取得盘中WSQ持仓，' + ('持仓及增减保留为空' if is_live else '持仓增减使用日线值'))
     data=dict(mode=meta.get('mode','replay'),asof=asof,trade_date=trade_date,spot=spot,
-        source='Wind已保存响应',months=sorted(months.values(),key=lambda m:m['id']),rows=rows,
+        source=meta.get('source','Wind已保存响应'),test_only=meta.get('test_only',False),months=sorted(months.values(),key=lambda m:m['id']),rows=rows,
         rates={'risk_free':RATE},coverage={'contracts':len(rows),'quoted':sum(m['quoted'] for m in months.values())},
-        warnings=['手动截面，不是持续实时订阅；逐合约源日期与时间保留',
+        warnings=[*meta.get('warnings',[]),'手动截面，不是持续实时订阅；逐合约源日期与时间保留',
                   *field_warnings,
                   'IV按有效买卖中价、临近平值配对隐含远期计算；利率假设1.5%',
                   '当前支持MO；IO/HO/AU尚未开放分析，缺失月份不补示例数据'])

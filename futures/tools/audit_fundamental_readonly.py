@@ -5,9 +5,10 @@ from pathlib import Path
 from collections import Counter
 import math
 import hashlib
+import os
 
 sys.stdout.reconfigure(encoding='utf-8')
-source = Path(r'E:\阿里云数据库\wind更新')
+source = Path(os.environ.get('FUNDAMENTAL_PROJECT_ROOT') or Path(__file__).resolve().parents[1]/'data')
 fund = source / 'fundamental'
 registry = json.loads((fund / 'indicators.json').read_text(encoding='utf-8'))['indicators']
 

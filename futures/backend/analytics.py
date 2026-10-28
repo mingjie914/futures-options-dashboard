@@ -105,6 +105,39 @@ def index_basis(rows, points, symbol):
     return result
 
 
+def position_peak_ranking(rows, peaks, as_of, years=5, min_volume=0, min_position=0):
+    """Current OI leaders against the previous five delivery years of the same month."""
+    current = {}
+    for row in rows:
+        if row['trade_date'] != as_of or row['symbol'][-4:] in {'8888','9998','9999'}:
+            continue
+        product, _ = _contract(row['symbol'])
+        value = _number(row.get('position'))
+        if value is None or value <= 0:
+            continue
+        previous = current.get(product)
+        if previous is None or (-value, row['symbol']) < (-previous['position'], previous['symbol']):
+            current[product] = dict(product=product, symbol=row['symbol'], position=value, volume=_number(row.get('volume')))
+    current = {p:r for p,r in current.items() if r['position']>=min_position
+               and (min_volume<=0 or r['volume'] is not None and r['volume']>=min_volume)}
+    by_symbol = {r['symbol']: _number(r['peak']) for r in peaks}
+    items = []
+    for row in current.values():
+        product, delivery = _contract(row['symbol'])
+        history = [(f'{product}{y % 100:02d}{delivery.month:02d}', y)
+                   for y in range(delivery.year-years, delivery.year)]
+        observed = [(symbol, y, by_symbol[symbol]) for symbol, y in history
+                    if by_symbol.get(symbol) is not None and by_symbol[symbol] > 0]
+        if not observed:
+            continue
+        peak_symbol, _, peak = max(observed, key=lambda r: (r[2], r[1]))
+        items.append({**row, 'baseline_peak':peak, 'baseline_symbol':peak_symbol,
+                      'history_years':[y for _, y, _ in observed],
+                      'deviation':(row['position']/peak-1)*100})
+    items.sort(key=lambda r: (-r['deviation'], r['product']))
+    return {'items':items[:10], 'eligible':len(items), 'without_history':len(current)-len(items)}
+
+
 def radar_product(rows, as_of, price_type='close', min_volume=1000, min_position=1000):
     """Latest-only summaries, prior-only baselines; no price/OI filling or flow inference."""
     field = _field(price_type)

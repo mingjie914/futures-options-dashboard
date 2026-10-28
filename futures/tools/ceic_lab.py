@@ -670,8 +670,8 @@ def audit_dataset(source, registry_path, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--project', type=Path, default=Path(r'E:\阿里云数据库\wind更新'))
-    parser.add_argument('--source-root', type=Path, default=Path(r'E:\交易数据\本地表'))
+    parser.add_argument('--project', type=Path, default=Path(os.environ.get('CEIC_PROJECT_ROOT') or OUTPUT.parents[1]/'data'/'ceic'))
+    parser.add_argument('--source-root', type=Path, default=Path(os.environ.get('FUTURES_DATA_ROOT') or OUTPUT.parents[1]/'data'))
     parser.add_argument('--web-root', type=Path, help='Audit saved XLSX exports instead of replaying published wide tables')
     parser.add_argument('--build-candidates', action='store_true', help='Convert saved candidate JSONL to isolated wide Parquet; no fetch')
     parser.add_argument('--preview-append', type=Path, metavar='INCOMING_REVIEW', help='Read-only comparison of an audited incoming batch')

@@ -3,12 +3,16 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 import httpx
+import os
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import Response, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
 ROOT=Path(__file__).resolve().parents[1]
-TARGETS={'futures':'http://127.0.0.1:8795','options':'http://127.0.0.1:8794'}
+TARGETS={
+    'futures':os.environ.get('DASHBOARD_FUTURES_API','http://127.0.0.1:8795').rstrip('/'),
+    'options':os.environ.get('DASHBOARD_OPTIONS_API','http://127.0.0.1:8794').rstrip('/'),
+}
 
 
 @asynccontextmanager
@@ -36,6 +40,12 @@ def health():return {'status':'ok','service':'unified-local-entry'}
 @app.api_route('/api/{module}/v1/{path:path}',methods=['GET','POST','PUT','PATCH','DELETE'])
 async def proxy(module:str,path:str,request:Request):
     if module not in TARGETS:raise HTTPException(404,'未知模块')
+    if os.environ.get('DASHBOARD_PUBLIC_READONLY')=='1':
+        if module=='futures' and path=='watchlists' and request.method=='GET':
+            return JSONResponse({'items':[],'read_only':True})
+        calculations={('futures','scenario'),('options','scenarios'),('options','exit-analysis')}
+        if request.method!='GET' and not (request.method=='POST' and (module,path) in calculations):
+            raise HTTPException(403,'公开只读模式不保存自选或更新行情；情景计算仍可使用。')
     suffix='/api/'+path if module=='futures' else '/api/options/v1/'+path
     target=TARGETS[module]+suffix
     if request.url.query:target+='?'+request.url.query
@@ -44,7 +54,7 @@ async def proxy(module:str,path:str,request:Request):
     headers={k:v for k,v in request.headers.items() if k.lower() in ('host','origin','content-type','if-none-match','sec-fetch-site')}
     try:
         r=await request.app.state.client.request(request.method,target,content=body,headers=headers)
-        return Response(r.content,status_code=r.status_code,headers={k:v for k,v in r.headers.items() if k.lower() in ('content-type','etag','content-disposition','cache-control')})
+        return Response(r.content,status_code=r.status_code,headers={k:v for k,v in r.headers.items() if k.lower() in ('content-type','etag','cache-control','x-snapshot-state')})
     except httpx.HTTPError:
         return JSONResponse({'detail':module+'模块暂时不可用；其他模块可继续使用'},status_code=503)
 

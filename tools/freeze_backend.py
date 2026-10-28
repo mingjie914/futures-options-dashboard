@@ -1,9 +1,13 @@
 """Explicit import of a stable futures backend; never modify its source/runtime."""
 from pathlib import Path
-import argparse,hashlib,json,shutil,sqlite3,socket,uuid
+import argparse,hashlib,json,os,shutil,sqlite3,socket,uuid
 
 ROOT=Path(__file__).resolve().parents[1]
 SOURCE=ROOT/'futures'
+
+
+def runtime_root():
+    return Path(os.environ.get('DASHBOARD_RUNTIME_ROOT') or ROOT/'runtime').resolve()
 
 
 def review_hashes(folder):
@@ -13,7 +17,7 @@ def review_hashes(folder):
 
 def refresh_reviews(target):
     # Stage both collections first; retain the previous data for rollback.
-    stage=ROOT/'runtime/releases'/('futures-data-'+uuid.uuid4().hex[:12])
+    stage=runtime_root()/'releases'/('futures-data-'+uuid.uuid4().hex[:12])
     stage.mkdir(parents=True)
     hashes={}
     names=['fundamental_lab','ceic_lab']
@@ -31,7 +35,7 @@ def refresh_reviews(target):
         for name in names:
             dst=target/name
             for path in [dst,previous/name,stage/name]:
-                path.resolve().relative_to((ROOT/'runtime').resolve())
+                path.resolve().relative_to(runtime_root())
             if dst.exists():dst.rename(previous/name)
             try:(stage/name).rename(dst)
             except Exception:
@@ -61,11 +65,12 @@ def main():
     content={p.name:p.read_bytes() for p in sources}
     hashes={k:hashlib.sha256(v).hexdigest() for k,v in content.items()}
     version=hashlib.sha256(json.dumps(hashes,sort_keys=True).encode()).hexdigest()[:16]
-    release=ROOT/'runtime/releases'/('futures-'+version)
+    runtime=runtime_root()
+    release=runtime/'releases'/('futures-'+version)
     (release/'backend').mkdir(parents=True,exist_ok=True)
     for name,raw in content.items():(release/'backend'/name).write_bytes(raw)
     if any(hashlib.sha256(p.read_bytes()).hexdigest()!=hashes[p.name] for p in sources):raise RuntimeError('期货源在复制期间变化，请重试')
-    target=ROOT/'runtime/futures'
+    target=runtime/'futures'
     target.mkdir(exist_ok=True)
     data_manifest=refresh_reviews(target) if args.refresh_data else None
     # Evidence directories remain isolated and keep their original capability flags.
@@ -75,12 +80,12 @@ def main():
     src=SOURCE/'runtime/workbench.sqlite';dst=target/'workbench.sqlite'
     if src.exists() and not dst.exists():
         with sqlite3.connect(src.as_uri()+'?mode=ro',uri=True) as source,sqlite3.connect(dst) as dest:source.backup(dest)
-    manifest={'source':'futures','release':release.relative_to(ROOT).as_posix(),
-              'runtime':target.relative_to(ROOT).as_posix(),'hashes':hashes,'version':version}
-    if not data_manifest and (ROOT/'runtime/futures-release.json').is_file():
-        data_manifest=json.loads((ROOT/'runtime/futures-release.json').read_text('utf-8')).get('data_manifest')
+    manifest={'source':'futures','path_base':'runtime_root','release':release.relative_to(runtime).as_posix(),
+              'runtime':target.relative_to(runtime).as_posix(),'hashes':hashes,'version':version}
+    if not data_manifest and (runtime/'futures-release.json').is_file():
+        data_manifest=json.loads((runtime/'futures-release.json').read_text('utf-8')).get('data_manifest')
     if data_manifest:manifest['data_manifest']=data_manifest
-    (ROOT/'runtime/futures-release.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
+    (runtime/'futures-release.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
     print(json.dumps({'version':version,'files':len(hashes)}))
 
 

@@ -12,9 +12,8 @@ if __name__ == '__main__':
     if not args.standalone:
         unified = Path(__file__).resolve().parent.parent
         launcher = unified / 'start.py'
-        python = unified / '.venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
-        if not launcher.is_file() or not python.is_file():
-            raise SystemExit('未找到统一终端。请先准备仓库根目录的.venv；独立调试请显式使用 --standalone。')
+        if not launcher.is_file():
+            raise SystemExit('未找到仓库根目录的统一启动器；独立调试请显式使用 --standalone。')
         os.chdir(unified)
         sys.argv = [str(launcher), '--module', 'futures']
         runpy.run_path(str(launcher), run_name='__main__')

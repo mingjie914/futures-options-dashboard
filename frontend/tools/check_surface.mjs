@@ -49,3 +49,9 @@ assert.equal(limited.put25_iv, null);
 assert.equal(limited.skew25_pp, null);
 
 console.log('surface metrics hand-calculation and validity checks passed');
+
+// Month grouping preserves numeric/string ids, empty expiries and input order.
+const grouped = surfaceMetrics(rows.map(row => ({...row, month: Number(row.month)})), [month, {...month, id: 'absent'}]);
+assert.deepEqual(grouped[0], surfaceMetrics(rows, [month])[0]);
+assert.equal(grouped[1].valid_count, 0);
+assert.equal(grouped[1].atm_iv, null);

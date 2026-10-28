@@ -160,3 +160,33 @@ def test_seasonal_summary_missing_current_never_substitutes_prior_year():
     assert result['seasonal_summary']['current'] is None
     assert contract_history(rows, 'spread', 2026, 3, 10)['seasonal_summary'] is None
     assert contract_history(rows, 'same_month', 2026, 3, 10, end='2026-09-07')['seasonal_summary'] is None
+
+
+def test_position_peak_ranking_uses_previous_five_delivery_years_and_current_oi_leader():
+    from backend.analytics import position_peak_ranking
+    current = [row('2026-10-27','PK2612',185738), row('2026-10-27','PK2701',65886),
+               row('2026-10-26','RB2701',999999), row('2026-10-27','SH2701',317932),
+               row('2026-10-27','SH2611',1), row('2026-10-27','PK9999',999999),
+               row('2026-10-27','AD2612',10)]
+    peaks = [{'symbol':s,'peak':v} for s,v in [('PK2012',999999),('PK2112',1385),
+             ('PK2212',1264),('PK2312',74866),('PK2412',50278),('PK2512',52722),
+             ('PK2612',204598),('PK2501',888888),('SH2501',86486),('SH2601',173417)]]
+    result = position_peak_ranking(current, peaks, '2026-10-27')
+    pk, sh = result['items']
+    assert pk['symbol'] == 'PK2612' and pk['baseline_peak'] == 74866
+    assert pk['baseline_symbol'] == 'PK2312'
+    assert pk['history_years'] == [2021,2022,2023,2024,2025]
+    assert round(pk['deviation'],2) == 148.09
+    assert sh['history_years'] == [2025,2026] and round(sh['deviation'],2) == 83.33
+    assert result['without_history'] == 1
+
+
+def test_position_peak_ranking_skips_zero_missing_history_and_limits_top_ten():
+    from backend.analytics import position_peak_ranking
+    symbols = [chr(65+i) for i in range(12)]
+    result = position_peak_ranking([row('2026-10-27',s+'2612',100+i) for i,s in enumerate(symbols)],
+                                  [{'symbol':s+'2512','peak':50} for s in symbols], '2026-10-27')
+    assert result['eligible']==12 and len(result['items'])==10
+    assert [r['deviation'] for r in result['items']]==sorted([r['deviation'] for r in result['items']],reverse=True)
+    assert position_peak_ranking([row('2026-10-27','PK2612',1)],
+        [{'symbol':'PK2512','peak':0},{'symbol':'PK2412','peak':None}], '2026-10-27')['items']==[]

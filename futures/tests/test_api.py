@@ -933,12 +933,12 @@ def test_index_contract_terms_scope_calendar_and_cost_boundaries():
             contract_terms('IM',[bad],'2026-09-11')
 
 
-def test_bad_pairs_and_export(setup):
+def test_bad_pairs_and_removed_export(setup):
     client, _, _ = setup
     assert client.get('/api/dashboard?near=RB9999&far=RB2701').status_code == 422
     assert client.get('/api/dashboard?near=RB2701&far=RB2610').status_code == 422
     result = client.get('/api/export?product=RB&start=2026-09-01&end=2026-09-02')
-    assert result.status_code == 200 and 'snapshot_id' in result.text
+    assert result.status_code == 404
     scenario = client.post('/api/scenario', json={'direction': 'buy', 'entry_spread': 51,
         'exit_spread': 61, 'lots': 2, 'multiplier': 10, 'total_cost': 40})
     assert scenario.status_code == 200
@@ -957,3 +957,75 @@ def test_snapshot_rejects_source_change(setup, monkeypatch):
     with pytest.raises(OSError):
         store.read('RB', '2026-09-01', '2026-09-02')
     assert not store.runtime.exists()
+
+
+def test_daily_source_configuration_survives_directory_move(setup,monkeypatch,tmp_path):
+    _,store,_=setup
+    expected=store.read('RB','2026-09-01','2026-09-02')
+    moved=tmp_path/'mounted-market';store.root.parent.rename(moved)
+    monkeypatch.setenv('FUTURES_DATA_ROOT',str(moved))
+    configured=DailyStore(runtime=tmp_path/'other-runtime')
+    actual=configured.read('RB','2026-09-01','2026-09-02')
+    assert actual['rows']==expected['rows']
+    assert actual['meta']['snapshot_id']==expected['meta']['snapshot_id']
+    assert actual['meta']['stale'] is False
+
+
+def test_no_daily_source_does_not_block_health_and_user_state(monkeypatch,tmp_path):
+    monkeypatch.delenv('FUTURES_DATA_ROOT',raising=False)
+    store=DailyStore(runtime=tmp_path/'runtime')
+    assert store.root==Path(__file__).resolve().parents[1]/'data/futureshistoryprices1d'
+    client=TestClient(create_app(DailyStore(tmp_path/'missing-data',tmp_path/'runtime')))
+    assert client.get('/api/health').json()['status']=='ok'
+    assert client.get('/api/products').json()['products']==[]
+    assert client.get('/api/watchlists').json()['items']==[]
+    assert client.get('/api/dashboard?product=IM').status_code==503
+
+
+def test_position_peaks_endpoint_cutoff_and_source_invalidation(setup):
+    client, store, source = setup
+    old = store.root / 'year_month=2025-09' / 'data.parquet'
+    old.parent.mkdir()
+    def write_peak(value):
+        with duckdb.connect() as con:
+            con.execute("CREATE TABLE old AS SELECT * REPLACE ('RB2510' AS symbol, DATE '2025-09-02' AS trade_date, ?::DOUBLE AS position) FROM read_parquet(?) WHERE symbol='RB2610' AND trade_date=DATE '2026-09-02'", [value,str(source)])
+            con.execute("COPY old TO ? (FORMAT PARQUET)", [str(old)])
+    before = source.read_bytes()
+    write_peak(100)
+    r=client.get('/api/position-peaks?end=2026-09-02&min_volume=0&min_position=0')
+    assert r.status_code==200
+    item=r.json()['items'][0]
+    assert (item['product'],item['symbol'],item['name'])==('RB','RB2610','螺纹钢')
+    assert item['baseline_peak']==100 and item['deviation']==100
+    assert item['history_years']==[2025]
+    assert client.get('/api/position-peaks?end=2026-09-02&min_volume=0&min_position=0').json()==r.json()
+    write_peak(160)
+    assert client.get('/api/position-peaks?end=2026-09-02&min_volume=0&min_position=0').json()['items'][0]['deviation']==25
+    assert client.get('/api/position-peaks?end=2025-09-01').json()['items']==[]
+    assert client.get('/api/position-peaks?end=bad').status_code==422
+    assert source.read_bytes()==before
+    assert next(p for p in client.get('/api/products').json()['products'] if p['product']=='RB')['name']=='螺纹钢'
+
+
+@pytest.mark.parametrize('view,sections', [('catalog',[]),('spread',['spread','risk']),('curve',['curve']),('rollover',['spread','rollover']),('scan',['opportunities'])])
+def test_dashboard_view_preserves_values_and_omits_unrelated_sections(setup, view, sections):
+    client, _, _ = setup
+    full = client.get('/api/dashboard?product=RB').json()
+    response = client.get('/api/dashboard?product=RB&view='+view)
+    assert response.status_code == 200
+    result = response.json()
+    expected = {'meta','product','near','far','price_type','contracts',*sections}
+    assert set(result) == expected
+    for key in expected:
+        assert result[key] == full[key]
+
+
+def test_catalog_does_not_compute_charts_and_rejects_unknown_view(setup, monkeypatch):
+    from backend import analytics
+    client, _, _ = setup
+    def unexpected(*args, **kwargs):
+        raise AssertionError('Catalog must not compute unused analytics')
+    for name in ('spread_series','spread_risk','term_structure_comparison','rollover_series'):
+        monkeypatch.setattr(analytics, name, unexpected)
+    assert client.get('/api/dashboard?product=RB&view=catalog').status_code == 200
+    assert client.get('/api/dashboard?product=RB&view=unknown').status_code == 422

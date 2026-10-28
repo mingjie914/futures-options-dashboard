@@ -110,3 +110,34 @@ def test_gateway_module_failure_does_not_break_other_module():
         gateway.state.client=httpx.AsyncClient(transport=httpx.MockTransport(transport))
         assert c.get('/api/futures/v1/products').status_code==503
         assert c.get('/api/options/v1/status').json()=={'status':'ok'}
+
+
+def test_gateway_upstreams_configurable(monkeypatch):
+    import importlib.util
+    from pathlib import Path
+    monkeypatch.setenv('DASHBOARD_FUTURES_API', 'http://futures.internal:9001/')
+    monkeypatch.setenv('DASHBOARD_OPTIONS_API', 'http://options.internal:9002/')
+    spec = importlib.util.spec_from_file_location('gateway_config_test', Path(__file__).parents[1] / 'backend/gateway.py')
+    gateway = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gateway)
+    assert gateway.TARGETS == {'futures': 'http://futures.internal:9001', 'options': 'http://options.internal:9002'}
+
+
+def test_public_readonly_keeps_calculations_and_hides_shared_records(monkeypatch):
+    import httpx
+    from backend.gateway import app as gateway
+    monkeypatch.setenv('DASHBOARD_PUBLIC_READONLY','1')
+    called=[]
+    def transport(request):
+        called.append((request.method,request.url.path))
+        return httpx.Response(200,json={'ok':True},headers={'X-Snapshot-State':'empty'})
+    with TestClient(gateway) as client:
+        gateway.state.client=httpx.AsyncClient(transport=httpx.MockTransport(transport))
+        assert client.get('/api/futures/v1/watchlists').json()=={'items':[],'read_only':True}
+        for method,path in [('post','futures/v1/watchlists'),('patch','futures/v1/watchlists/1'),('delete','futures/v1/watchlists/1'),('post','options/v1/refresh')]:
+            assert getattr(client,method)('/api/'+path).status_code==403
+        assert called==[]
+        for path in ['futures/v1/scenario','options/v1/scenarios','options/v1/exit-analysis']:
+            assert client.post('/api/'+path).status_code==200
+        assert len(called)==3
+        assert client.get('/api/options/v1/snapshot').headers['x-snapshot-state']=='empty'

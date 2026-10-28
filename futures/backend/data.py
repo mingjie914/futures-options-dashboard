@@ -19,6 +19,24 @@ FIELDS = ('exchange', 'symbol', 'trade_datetime', 'trade_date', 'open', 'high', 
 PRODUCT = re.compile(r'^[A-Z]{1,3}$')
 CONTRACT = re.compile(r'^[A-Z]{1,3}\d{4}$')
 SYNTHETIC = ('8888', '9998', '9999')
+# Display vocabulary aligned with the seat dashboard; no external path dependency.
+PRODUCT_NAMES = {
+    'A': '豆一', 'AD': '铸造铝合金', 'AG': '白银', 'AL': '铝', 'AO': '氧化铝', 'AP': '苹果',
+    'AU': '黄金', 'B': '豆二', 'BB': '胶合板', 'BC': '国际铜', 'BR': '丁二烯橡胶', 'BU': '沥青',
+    'BZ': '纯苯', 'C': '玉米', 'CF': '棉花', 'CJ': '红枣', 'CS': '玉米淀粉', 'CU': '铜',
+    'CY': '棉纱', 'EB': '苯乙烯', 'EC': '集运指数欧线', 'EG': '乙二醇', 'FB': '纤维板', 'FG': '玻璃',
+    'FU': '燃料油', 'HC': '热卷', 'I': '铁矿石', 'IC': '中证500', 'IF': '沪深300', 'IH': '上证50',
+    'IM': '中证1000', 'J': '焦炭', 'JD': '鸡蛋', 'JM': '焦煤', 'JR': '粳稻', 'L': '塑料',
+    'LC': '碳酸锂', 'LG': '原木', 'LH': '生猪', 'LR': '晚籼稻', 'LU': '低硫燃料油', 'M': '豆粕',
+    'MA': '甲醇', 'NI': '镍', 'NR': '20号胶', 'OI': '菜籽油', 'OP': '胶版印刷纸', 'P': '棕榈油',
+    'PB': '铅', 'PD': '钯', 'PF': '短纤', 'PG': '液化石油气', 'PK': '花生', 'PL': '丙烯',
+    'PM': '普麦', 'PP': '聚丙烯', 'PR': '瓶片', 'PS': '多晶硅', 'PT': '铂', 'PX': '对二甲苯',
+    'RB': '螺纹钢', 'RI': '早籼稻', 'RM': '菜粕', 'RR': '粳米', 'RS': '油菜籽', 'RU': '橡胶',
+    'SA': '纯碱', 'SC': '原油', 'SF': '硅铁', 'SH': '烧碱', 'SI': '工业硅', 'SM': '锰硅',
+    'SN': '锡', 'SP': '纸浆', 'SR': '白糖', 'SS': '不锈钢', 'T': '十年期国债', 'TA': 'PTA',
+    'TF': '五年期国债', 'TL': '三十年期国债', 'TS': '二年期国债', 'UR': '尿素', 'V': 'PVC', 'WH': '强麦',
+    'WR': '线材', 'Y': '豆油', 'ZC': '动力煤', 'ZN': '锌',
+}
 INDEX_SERIES = {
     'IH': ('000016.SH', '上证50'), 'IF': ('000300.SH', '沪深300'),
     'IM': ('000852.SH', '中证1000'), 'IC': ('000905.SH', '中证500'),
@@ -623,7 +641,7 @@ def _fundamental_coverage(runtime, product, catalog, failures):
                     dates = [point.get('observation_date') for point in points
                              if isinstance(point, dict) and point.get('code') == item.get('code')
                              and point.get('observation_date') is not None]
-                    entry = {**item, 'id':'wind_wsd:'+str(item.get('code')), 'provider':'Wind',
+                    entry = {**item, 'id':'index_close:'+str(item.get('code')), 'provider':snapshot.get('source','Wind'),
                         'usage':'daily_close_basis_only', 'role':'observed_index_close_basis',
                         'basis_eligible':False, 'replay_eligible':False,
                         'snapshot_sha256':snapshot.get('sha256')}
@@ -807,7 +825,7 @@ def validate_product(product):
 
 class DailyStore:
     def __init__(self, root=None, runtime=None):
-        self.root = Path(root or os.environ.get('FUTURES_DATA_ROOT', r'E:\交易数据\本地表'))
+        self.root = Path(root or os.environ.get('FUTURES_DATA_ROOT') or Path(__file__).resolve().parents[1] / 'data').resolve()
         if self.root.name != 'futureshistoryprices1d':
             self.root /= 'futureshistoryprices1d'
         self.runtime = Path(runtime or os.environ.get('FUTURES_RUNTIME', str(Path(__file__).resolve().parents[1] / 'runtime')))
@@ -816,6 +834,7 @@ class DailyStore:
         self.cache = OrderedDict()
         self.lock = RLock()
         self.radar_cache = None
+        self.position_peak_cache = None
 
     def market_snapshot(self, end=None):
         """One bounded, read-only scan for the radar; never write source or snapshots."""
@@ -843,6 +862,27 @@ class DailyStore:
                 'snapshot_id':sha256(json.dumps([key, rows], sort_keys=True).encode()).hexdigest()[:24]}
             self.radar_cache = (key, result)
             return result
+
+    def position_peaks(self, end):
+        """Aggregate contract peaks once per source version, without loading daily history into Python."""
+        with self.lock:
+            files = [p for p in self._files() if p.parent.name.split('=', 1)[1] <= end[:7]]
+            if not files:
+                raise FileNotFoundError('历史持仓源不可用')
+            before = self._fingerprints(files)
+            key = (end, before)
+            if self.position_peak_cache and self.position_peak_cache[0] == key:
+                return self.position_peak_cache[1]
+            rows = self._query(files, """SELECT upper(symbol) symbol, max(position) peak
+                FROM read_parquet(?, union_by_name=true)
+                WHERE regexp_full_match(symbol, '[A-Za-z]{1,3}[0-9]{4}')
+                  AND right(symbol,4) NOT IN ('8888','9998','9999')
+                  AND trade_date <= ?::DATE AND position >= 0 AND isfinite(position)
+                GROUP BY upper(symbol)""", (end,))
+            if before != self._fingerprints(files):
+                raise OSError('历史持仓源已变化，请重试')
+            self.position_peak_cache = (key, rows)
+            return rows
 
     def _files(self, start=None, end=None):
         files = sorted(self.root.glob('year_month=*/*.parquet'))

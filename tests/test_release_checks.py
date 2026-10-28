@@ -105,6 +105,7 @@ def test_validate_snapshot_allows_expired_old_and_new_month():
 
 
 def test_refresh_quality_rejection_keeps_pointer_and_state(monkeypatch, tmp_path):
+    monkeypatch.setenv('OPTIONS_WIND_PYTHON','explicit-test-python')
     runtime=tmp_path/'runtime';runtime.mkdir()
     old_folder=tmp_path/'data/raw/old';old_folder.mkdir(parents=True)
     pointer={'folder':str(old_folder), 'snapshot_id':'old-pointer'}
@@ -129,6 +130,7 @@ def test_refresh_quality_rejection_keeps_pointer_and_state(monkeypatch, tmp_path
 
 
 def test_refresh_pointer_keeps_previous_folder(monkeypatch, tmp_path):
+    monkeypatch.setenv('OPTIONS_WIND_PYTHON','explicit-test-python')
     runtime=tmp_path/'runtime';runtime.mkdir()
     old_folder=tmp_path/'data/raw/old';old_folder.mkdir(parents=True)
     pointer_path=runtime/'options-active.json'
@@ -148,19 +150,23 @@ def test_refresh_pointer_keeps_previous_folder(monkeypatch, tmp_path):
         response=client.post('/api/options/v1/refresh')
     assert response.status_code==200
     published=json.loads(pointer_path.read_text(encoding='utf-8'))
-    assert published['previous_folder']==str(old_folder)
+    assert published['path_base']=='options_data_root'
+    assert published['previous_folder']=='old'
     assert app_module.state['data'] is new
 
 
 @pytest.mark.parametrize('quoted,iv',[(10,True),(0,True),(10,False)])
 def test_empty_install_is_healthy_and_first_refresh_requires_valid_data(monkeypatch,tmp_path,quoted,iv):
+    monkeypatch.setenv('OPTIONS_WIND_PYTHON','explicit-test-python')
     runtime=tmp_path/'runtime';runtime.mkdir()
     monkeypatch.setattr(app_module,'ROOT',tmp_path)
     monkeypatch.setattr(app_module,'runtime',runtime)
     monkeypatch.setattr(app_module,'state',{'data':None})
     with TestClient(app) as client:
         assert client.get('/api/options/v1/status').json()==dict(status='ok',mode='empty',asof=None,snapshot_id=None)
-        assert client.get('/api/options/v1/snapshot').status_code==503
+        missing=client.get('/api/options/v1/snapshot')
+        assert missing.status_code==503
+        assert missing.headers['x-snapshot-state']=='empty'
         new=_quality_snapshot(quoted=quoted,iv=iv,snapshot_id='first')
         monkeypatch.setattr(app_module,'normalize',lambda folder:new)
         monkeypatch.setattr(app_module.subprocess,'run',lambda *args,**kwargs:
@@ -195,6 +201,8 @@ def test_existing_snapshot_failure_is_not_treated_as_empty(monkeypatch,tmp_path,
             response=getattr(client,method)('/api/options/v1/'+path)
             assert response.status_code==503
             assert '已保存期权快照不可用' in response.json()['detail']
+            assert 'x-snapshot-state' not in response.headers
+            assert str(tmp_path) not in response.text
     assert app_module.state['data'] is None
 
 
@@ -246,3 +254,59 @@ def test_previous_endpoint_returns_reason_for_different_trade_date(monkeypatch, 
     body=response.json()
     assert body['snapshot'] is None
     assert '不同' in body['reason']
+
+
+@pytest.mark.parametrize('configured',[False,True])
+def test_unavailable_wind_keeps_saved_snapshot(monkeypatch,tmp_path,configured):
+    runtime=tmp_path/'runtime';runtime.mkdir()
+    folder=tmp_path/'archive';folder.mkdir()
+    pointer={'folder':str(folder),'snapshot_id':'saved'}
+    path=runtime/'options-active.json';path.write_text(json.dumps(pointer))
+    saved=_quality_snapshot(snapshot_id='saved')
+    monkeypatch.setattr(app_module,'runtime',runtime)
+    monkeypatch.setattr(app_module,'state',{'data':saved})
+    if configured:
+        monkeypatch.setenv('OPTIONS_WIND_PYTHON',str(tmp_path/'missing-python'))
+        def missing(*args,**kwargs):raise FileNotFoundError('missing interpreter')
+        monkeypatch.setattr(app_module.subprocess,'run',missing)
+    else:
+        monkeypatch.delenv('OPTIONS_WIND_PYTHON',raising=False)
+        monkeypatch.setattr(app_module.subprocess,'run',lambda *a,**k:pytest.fail('未配置不得启动Wind'))
+    with TestClient(app) as client:
+        response=client.post('/api/options/v1/refresh')
+    assert response.status_code==503
+    assert 'OPTIONS_WIND_PYTHON' in response.json()['detail']
+    assert json.loads(path.read_text())==pointer
+    assert app_module.state['data'] is saved
+    assert not app_module.lock.locked()
+
+
+@pytest.mark.parametrize('path_base',['checkout','options_data_root'])
+def test_saved_snapshot_pointer_is_independent_of_working_directory(monkeypatch,tmp_path,path_base):
+    root=tmp_path/'moved-checkout';runtime=root/'runtime';runtime.mkdir(parents=True)
+    archive=tmp_path/'mounted-data';folder=archive/'saved';folder.mkdir(parents=True)
+    pointer={'folder':'saved','path_base':'options_data_root'} if path_base=='options_data_root' else {'folder':'data/raw/saved'}
+    if path_base=='checkout':folder=root/'data/raw/saved';folder.mkdir(parents=True)
+    (runtime/'options-active.json').write_text(json.dumps(pointer))
+    monkeypatch.setattr(app_module,'ROOT',root)
+    monkeypatch.setattr(app_module,'runtime',runtime)
+    monkeypatch.setattr(app_module,'state',{'data':None})
+    monkeypatch.setenv('OPTIONS_DATA_ROOT',str(archive))
+    monkeypatch.chdir(tmp_path)
+    saved=_quality_snapshot(snapshot_id='portable')
+    def normalize(selected):
+        assert selected==folder
+        return saved
+    monkeypatch.setattr(app_module,'normalize',normalize)
+    with TestClient(app) as client:
+        assert client.get('/api/options/v1/snapshot').json()['snapshot_id']=='portable'
+
+
+def test_explicit_missing_snapshot_is_an_error_not_empty_install(monkeypatch,tmp_path):
+    monkeypatch.setenv('OPTIONS_SNAPSHOT_DIR',str(tmp_path/'missing'))
+    monkeypatch.setattr(app_module,'runtime',tmp_path)
+    monkeypatch.setattr(app_module,'state',{'data':None})
+    with TestClient(app) as client:
+        response=client.get('/api/options/v1/status')
+    assert response.status_code==503
+    assert '已保存期权快照不可用' in response.json()['detail']

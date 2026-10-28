@@ -11,13 +11,30 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Literal, Optional
-from .data import ROOT, normalize
+from .data import ROOT, normalize, historical_volatility
 from .pricing import scenario, exit_analysis
 
 app=FastAPI(title='期权分析 · 本地截面',version='0.1.0')
 lock=Lock();state={'data':None}
-runtime=ROOT/'runtime';runtime.mkdir(exist_ok=True)
+runtime=Path(os.environ.get('OPTIONS_RUNTIME') or os.environ.get('DASHBOARD_RUNTIME_ROOT') or ROOT/'runtime').resolve()
+runtime.mkdir(parents=True,exist_ok=True)
 _previous_cache={'snapshot_id':None,'result':None}
+
+
+@lru_cache(maxsize=16)
+def _iv_history(path, modified, code, end, window):
+    return historical_volatility(json.loads(Path(path).read_text('utf-8')),code,end,window)
+
+
+@app.get('/api/options/v1/iv-history')
+def iv_history(code:str, window:Literal['20','60']='60', snapshot_id:str=''):
+    snapshot=current()
+    if snapshot_id and snapshot_id!=snapshot['snapshot_id']:raise HTTPException(409,'截面已变化，请刷新页面')
+    if not any(r['code']==code for r in snapshot['rows']):raise HTTPException(404,'当前截面无此合约')
+    path=_active_folder()/'history-raw.json'
+    if not path.exists():return dict(code=code,points=[],n=0,reason='尚未保存该合约的日线 IV 历史')
+    try:return _iv_history(str(path),path.stat().st_mtime_ns,code,snapshot['trade_date'],int(window))
+    except (ValueError,KeyError,OSError,TypeError) as exc:raise HTTPException(503,'历史数据不可用，请检查已保存的日线') from exc
 
 
 def _read_pointer():
@@ -27,20 +44,28 @@ def _read_pointer():
 
 
 def _active_folder():
-    folder=_read_pointer().get('folder')
-    return Path(folder) if folder else ROOT/'data/raw/legacy/im_analysis_20260909'
+    pointer=_read_pointer();folder=pointer.get('folder')
+    if folder:
+        base=_raw_root() if pointer.get('path_base')=='options_data_root' else ROOT
+        return _path_value(folder,base)
+    configured=os.environ.get('OPTIONS_SNAPSHOT_DIR')
+    return _path_value(configured) if configured else _raw_root()/'legacy/im_analysis_20260909'
+
+
+def _raw_root():
+    return _path_value(os.environ.get('OPTIONS_DATA_ROOT') or 'data/raw')
 
 
 def current(required=True):
     if state['data'] is None:
         try:
             folder=_active_folder()
-            if not folder.exists() and not (runtime/'options-active.json').exists():
+            if not folder.exists() and not (runtime/'options-active.json').exists() and not os.environ.get('OPTIONS_SNAPSHOT_DIR'):
                 if not required:return None
-                raise HTTPException(503,'尚无期权快照，请先配置 Wind 并手动刷新行情')
+                raise HTTPException(503,'尚未接入期权数据，请配置已保存快照。',headers={'X-Snapshot-State':'empty'})
             state['data']=normalize(folder)
         except (OSError,ValueError,KeyError,TypeError) as exc:
-            raise HTTPException(503,'已保存期权快照不可用：'+str(exc)) from exc
+            raise HTTPException(503,'已保存期权快照不可用，请检查归档完整性与数据配置。') from exc
     return state['data']
 
 
@@ -125,14 +150,14 @@ def _collection_meta(folder):
         return None
 
 
-def _path_value(value):
+def _path_value(value,base=None):
     path=Path(value)
-    return path if path.is_absolute() else ROOT/path
+    return path if path.is_absolute() else (base if base is not None else ROOT)/path
 
 
 def _find_previous_folder(snapshot,current_asof):
     candidates=[];trade_date=str(snapshot.get('trade_date'))
-    for collection in (ROOT/'data/raw').glob('*/collection.json'):
+    for collection in _raw_root().glob('*/collection.json'):
         meta=_collection_meta(collection.parent);asof=_parse_asof(meta.get('asof')) if meta else None
         if not meta or str(meta.get('trade_date'))!=trade_date or asof is None or not asof<current_asof:continue
         candidates.append((asof,collection.parent))
@@ -145,7 +170,8 @@ def _previous_result(snapshot):
     current_trade_date=str(snapshot.get('trade_date'))
     pointer=_read_pointer();value=pointer.get('previous_folder')
     if value:
-        folder=_path_value(value);meta=_collection_meta(folder)
+        base=_raw_root() if pointer.get('path_base')=='options_data_root' else ROOT
+        folder=_path_value(value,base);meta=_collection_meta(folder)
         if meta is None:return {'snapshot':None,'reason':'上一截面指针所指目录缺少有效collection.json'}
         if str(meta.get('trade_date'))!=current_trade_date:
             return {'snapshot':None,'reason':'上一截面交易日为'+str(meta.get('trade_date'))+'，与当前截面'+current_trade_date+'不同'}
@@ -155,7 +181,7 @@ def _previous_result(snapshot):
             return {'snapshot':None,'reason':'上一截面asof不早于当前截面，无法比较'}
     else:
         folder=_find_previous_folder(snapshot,current_asof)
-        if folder is None:return {'snapshot':None,'reason':'未找到同一trade_date且asof严格早于当前截面的上一截面'}
+        if folder is None:return {'snapshot':None,'reason':'暂无同一交易日更早的行情截面'}
     try:previous=normalize(folder)
     except (OSError,ValueError,TypeError) as exc:
         return {'snapshot':None,'reason':'上一截面不可用：'+str(exc)}
@@ -197,7 +223,7 @@ def previous():
 
 
 def _archive_entries():
-    raw=ROOT/'data/raw';entries=[]
+    raw=_raw_root();entries=[]
     for path in raw.glob('*/collection.json'):
         folder=path.parent
         if not (folder/'chain.json').exists() or not (folder/'quotes.json').exists():continue
@@ -293,9 +319,13 @@ def refresh():
     if not lock.acquire(blocking=False):raise HTTPException(409,'当前已有取数任务')
     try:
         old=current(required=False);old_folder=_active_folder() if old else None
-        folder=ROOT/'data/raw'/datetime.now().strftime('wind-%Y%m%dT%H%M%S%f')
-        python=os.environ.get('OPTIONS_WIND_PYTHON',r'C:\pythonvenv\Scripts\python.exe')
-        result=subprocess.run([python,str(ROOT/'backend/collect.py'),'--out',str(folder)],capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=90,env={**os.environ,'PYTHONUTF8':'1'})
+        python=os.environ.get('OPTIONS_WIND_PYTHON')
+        if not python:raise HTTPException(503,'未配置 OPTIONS_WIND_PYTHON，Wind 手动采集未启用；可继续读取已保存快照')
+        folder=_raw_root()/datetime.now().strftime('wind-%Y%m%dT%H%M%S%f')
+        try:
+            result=subprocess.run([python,str(ROOT/'backend/collect.py'),'--out',str(folder)],capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=90,env={**os.environ,'PYTHONUTF8':'1'})
+        except OSError as exc:
+            raise HTTPException(503,'Wind采集解释器不可用，保留上一截面；请检查 OPTIONS_WIND_PYTHON') from exc
         if result.returncode:
             (runtime/'last-refresh-error.txt').write_text(result.stderr[-4000:],encoding='utf-8')
             raise HTTPException(503,'Wind取数失败，保留上一有效截面；详见本地错误日志')
@@ -305,7 +335,9 @@ def refresh():
             raise HTTPException(503,'没有有效 IV，不发布本次截面')
         try:validate_snapshot(new,old or {})
         except ValueError as exc:raise HTTPException(503,str(exc)) from exc
-        tmp=runtime/'options-active.tmp';tmp.write_text(json.dumps({'folder':str(folder),'snapshot_id':new['snapshot_id'],'previous_folder':str(old_folder) if old_folder else None}),encoding='utf-8');tmp.replace(runtime/'options-active.json')
+        try:previous=Path(os.path.relpath(old_folder,_raw_root())).as_posix() if old_folder else None
+        except ValueError:previous=str(old_folder)  # Existing archive on another Windows drive.
+        tmp=runtime/'options-active.tmp';tmp.write_text(json.dumps({'folder':folder.name,'path_base':'options_data_root','snapshot_id':new['snapshot_id'],'previous_folder':previous}),encoding='utf-8');tmp.replace(runtime/'options-active.json')
         state['data']=new
         return {'status':'ok','snapshot_id':new['snapshot_id'],'coverage':new['coverage']}
     except subprocess.TimeoutExpired:raise HTTPException(503,'Wind请求超时，已结束本次子进程；保留上一截面')
