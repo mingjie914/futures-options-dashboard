@@ -74,7 +74,7 @@ class SnapshotBuilder:
         folder = (self.publisher.staging_root / f"duckdb-spill-b{batch_id:08d}").resolve()
         folder.relative_to(self.publisher.staging_root.resolve())
         folder.mkdir(parents=True, exist_ok=True)
-        return {"threads": threads, "memory_limit": f"{memory}MB",
+        return {"threads": threads, "memory_limit": f"{memory}MB", "preserve_insertion_order": False,
                 "temp_directory": str(folder), "max_temp_directory_size": f"{spill}MB"}
 
     @property

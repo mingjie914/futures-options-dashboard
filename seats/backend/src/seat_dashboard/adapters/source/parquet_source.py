@@ -134,6 +134,7 @@ class ParquetSource(SeatSourcePort):
                    AND NOT (_p2_ambiguous(symbol, exchange, trade_date)
                             AND regexp_full_match(symbol, root || '[0-9]{3}')))
                OR try_cast(right(symbol, 2) AS INTEGER) NOT BETWEEN 1 AND 12
+               OR symbol IS NULL
                OR product_code IS NULL""", "invalid or ambiguous contract code")
         reject("""SELECT trade_date, contract_code, seat_name FROM _p2_raw_seat
             GROUP BY ALL HAVING count(*) > 1""", "conflicting raw rows; export one authoritative revision")
@@ -149,10 +150,11 @@ class ParquetSource(SeatSourcePort):
             GROUP BY ALL HAVING count(*) > 1""", "conflicting latest market rows")
         connection.execute("""
             CREATE OR REPLACE TEMP TABLE _p2_product_seat AS
+            -- Raw contract keys are already unique and non-null; no second DISTINCT hash is needed.
             SELECT trade_date, exchange, root, product_code, seat_name,
                 sum(coalesce(long_position, 0)) AS long_position, sum(coalesce(long_change, 0)) AS long_change,
                 sum(coalesce(short_position, 0)) AS short_position, sum(coalesce(short_change, 0)) AS short_change,
-                sum(net_position) AS net_position, count(DISTINCT contract_code) AS contract_count
+                sum(net_position) AS net_position, count(*) AS contract_count
             FROM _p2_raw_seat GROUP BY ALL;
             CREATE OR REPLACE TEMP TABLE _p2_product_daily AS
             SELECT trade_date, exchange, root, product_code,

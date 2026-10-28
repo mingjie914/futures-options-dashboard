@@ -463,6 +463,7 @@ def test_p2_only_builds_from_contract_rows_and_rebuilds_same_day_revision(tmp_pa
     raw_path = next(source.dataset_path('raw_seat').rglob('*.parquet'))
     raw_rows = pq.ParquetFile(raw_path).read().to_pylist()
     raw_rows.append({**raw_rows[-1], 'seat_name':'零值席位','long_position':0,'short_position':0,'long_change':0,'short_change':0,'net_position':0})
+    raw_rows.append(dict(raw_rows[0]))  # Exact duplicates collapse before the unique-key check.
     pq.write_table(pa.Table.from_pylist(raw_rows),raw_path)
     path = next(source.market_1d_root.rglob('*.parquet'))
     market = pq.ParquetFile(path).read().to_pylist()
@@ -478,6 +479,7 @@ def test_p2_only_builds_from_contract_rows_and_rebuilds_same_day_revision(tmp_pa
     assert first['net_position'] == 0 and first['seat_count'] == 3
     with duckdb.connect(str(runtime/DuckDBPublisher(runtime).current_metadata()['database_path']),read_only=True) as c:
         assert c.execute("SELECT long_position,short_position,contract_count FROM seat_dash_product_seat_daily WHERE seat_name='零值席位'").fetchone()==(0,0,1)
+        assert c.execute("SELECT DISTINCT contract_count FROM seat_dash_product_seat_daily WHERE seat_name='席位A'").fetchall()==[(2,)]
     path = next(source.dataset_path('raw_seat').rglob('*.parquet'))
     rows = pq.ParquetFile(path).read().to_pylist()
     row = next(r for r in rows if r['trade_date'] == date(2026,7,28) and r['symbol'] == 'RB2601' and r['seat_name'] == '席位A')
@@ -498,13 +500,16 @@ def test_p2_only_builds_from_contract_rows_and_rebuilds_same_day_revision(tmp_pa
     assert not source.dataset_path('product_daily').exists()
 
 
-@pytest.mark.parametrize('failure', ['conflicting_raw', 'market_conflict'])
+@pytest.mark.parametrize('failure', ['conflicting_raw', 'market_conflict', 'null_symbol'])
 def test_p2_only_rejects_ambiguous_inputs_without_publishing(tmp_path, failure):
     source = _p2_source(tmp_path)
-    if failure == 'conflicting_raw':
+    if failure in ('conflicting_raw', 'null_symbol'):
         path = next(source.dataset_path('raw_seat').rglob('*.parquet'))
         rows = pq.ParquetFile(path).read().to_pylist()
-        rows.append({**rows[0], 'long_position': 12345})
+        if failure == 'conflicting_raw':
+            rows.append({**rows[0], 'long_position': 12345})
+        else:
+            rows[0].update(symbol=None, contract_code=None)
     else:
         path = next(source.market_1d_root.rglob('*.parquet'))
         rows = pq.ParquetFile(path).read().to_pylist()
@@ -663,6 +668,7 @@ def test_offline_build_has_separate_bounded_resources(tmp_path, monkeypatch):
     assert Path(config['temp_directory']).parent==builder.publisher.staging_root
     with duckdb.connect(config=config) as c:
         assert c.execute("SELECT current_setting('threads')").fetchone()[0]==1
+        assert c.execute("SELECT current_setting('preserve_insertion_order')").fetchone()[0] is False
         assert c.execute("SELECT current_setting('temp_directory')").fetchone()[0]==config['temp_directory']
     Path(config['temp_directory']).rmdir()
     monkeypatch.setenv('SEATS_BUILD_MEMORY_MB','256')
