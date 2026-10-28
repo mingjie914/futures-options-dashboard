@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from pathlib import Path
+from time import perf_counter
 from typing import ClassVar
 
 from seat_dashboard.ports.seat_source import SeatSourcePort
 
+logger = logging.getLogger(__name__)
 
 class ParquetSource(SeatSourcePort):
     """Read-only Parquet source backed by the existing local conversion output."""
@@ -148,9 +151,9 @@ class ParquetSource(SeatSourcePort):
         """)
         reject("""SELECT trade_date, exchange, symbol FROM _p2_market_1d
             GROUP BY ALL HAVING count(*) > 1""", "conflicting latest market rows")
-        connection.execute("""
+        for statement in """
             CREATE OR REPLACE TEMP TABLE _p2_product_seat AS
-            -- Raw contract keys are already unique and non-null; no second DISTINCT hash is needed.
+            -- Raw contract keys are already unique and non-null, so no second DISTINCT hash is needed.
             SELECT trade_date, exchange, root, product_code, seat_name,
                 sum(coalesce(long_position, 0)) AS long_position, sum(coalesce(long_change, 0)) AS long_change,
                 sum(coalesce(short_position, 0)) AS short_position, sum(coalesce(short_change, 0)) AS short_change,
@@ -194,11 +197,17 @@ class ParquetSource(SeatSourcePort):
                 CASE WHEN m.symbol IS NULL THEN 'main_unresolved'
                      WHEN m.close IS NULL OR m.close <= 0 THEN 'missing_close' ELSE 'ready' END AS price_status,
                 CASE WHEN m.symbol IS NULL THEN 'main_unresolved'
-                     WHEN EXISTS (SELECT 1 FROM _p2_raw_seat r WHERE r.trade_date=d.trade_date
+                     WHEN EXISTS (SELECT 1 FROM (SELECT DISTINCT trade_date, product_code, symbol FROM _p2_raw_seat) r WHERE r.trade_date=d.trade_date
                          AND r.product_code=d.product_code AND r.symbol=m.symbol)
                      THEN 'ready' ELSE 'missing_seat' END AS seat_status
             FROM calendar d LEFT JOIN _p2_main m USING (trade_date,product_code);
             CREATE OR REPLACE TEMP TABLE _p2_main_contract_seat AS
             SELECT r.*, m.close, m.position AS open_interest
             FROM _p2_raw_seat r JOIN _p2_main m USING (trade_date, product_code, symbol)
-        """)
+        """.split(";"):
+            stage = statement.split(" AS", 1)[0].split()[-1]
+            started = perf_counter()
+            logger.info("P2 stage %s started", stage)
+            connection.execute(statement)
+            logger.info("P2 stage %s completed in %.3fs", stage, perf_counter() - started)
+        connection.execute("DROP TABLE _p2_market_contracts; DROP TABLE _p2_main")

@@ -200,8 +200,12 @@ class SnapshotBuilder:
             if self.source.p2_only:
                 self.source.prepare(connection, request.trade_date)
                 connection.execute("CREATE OR REPLACE TABLE seat_dash_main_contract_coverage AS SELECT * FROM _p2_main_price")
+                connection.execute("DROP TABLE _p2_main_price")
             self._build_dimensions(connection, request, batch_id)
             self._build_source_marts(connection, request, batch_id)
+            if self.source.p2_only:
+                for name in ("raw_seat", "market_1d", "product_seat", "product_daily", "main_contract_seat"):
+                    connection.execute(f"DROP TABLE _p2_{name}")
             self._build_signals(connection, request, batch_id)
             self._build_validation(connection, request, batch_id)
             validation = self.validate_snapshot(connection)

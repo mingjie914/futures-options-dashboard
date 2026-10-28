@@ -457,7 +457,7 @@ def _p2_source(tmp_path):
     return ParquetSource(seat_root, market_root, p2_only=True)
 
 
-def test_p2_only_builds_from_contract_rows_and_rebuilds_same_day_revision(tmp_path):
+def test_p2_only_builds_from_contract_rows_and_rebuilds_same_day_revision(tmp_path, monkeypatch):
     source = _p2_source(tmp_path)
     runtime = tmp_path / 'runtime'
     raw_path = next(source.dataset_path('raw_seat').rglob('*.parquet'))
@@ -471,6 +471,11 @@ def test_p2_only_builds_from_contract_rows_and_rebuilds_same_day_revision(tmp_pa
     market += [{**current,'symbol':'RB0000','position':999999}, {**current,'sequence':2,'close':3210}]
     pq.write_table(pa.Table.from_pylist(market),path)
     builder = SnapshotBuilder(source, DuckDBPublisher(runtime))
+    build_signals = builder._build_signals
+    def after_source_release(connection, request, batch):
+        assert connection.execute("SELECT count(*) FROM duckdb_tables() WHERE temporary AND starts_with(table_name, '_p2_')").fetchone()[0] == 0
+        build_signals(connection, request, batch)
+    monkeypatch.setattr(builder, "_build_signals", after_source_release)
     original = builder.build(BuildRequest(full=True))
     reader = DuckDBReader(runtime)
     assert reader.view('term-structure',product_code='RB.SHFE')['contracts'][0]['close_price'] == 3210
