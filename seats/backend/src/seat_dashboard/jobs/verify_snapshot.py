@@ -44,7 +44,8 @@ def verify_current(runtime_root: Path) -> dict[str, Any]:
     connection, _ = reader._connect()
     try:
         tables = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
-        missing = [table for table in REQUIRED_TABLES if table not in tables]
+        required = (*REQUIRED_TABLES, "seat_dash_main_contract_coverage") if manifest.get("input_mode") == "p2-only-v1" else REQUIRED_TABLES
+        missing = [table for table in required if table not in tables]
         product_rows = int(connection.execute("SELECT count(*) FROM seat_dash_product_daily").fetchone()[0])
         seat_rows = int(connection.execute("SELECT count(*) FROM seat_dash_product_seat_daily").fetchone()[0])
         net_anomalies = int(

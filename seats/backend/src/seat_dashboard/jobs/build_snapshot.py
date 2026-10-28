@@ -180,6 +180,9 @@ class SnapshotBuilder:
         connection = duckdb.connect(str(target_path))
         try:
             connection.execute(self._schema_path().read_text(encoding="utf-8"))
+            if self.source.p2_only:
+                self.source.prepare(connection, request.trade_date)
+                connection.execute("CREATE OR REPLACE TABLE seat_dash_main_contract_coverage AS SELECT * FROM _p2_main_price")
             self._build_dimensions(connection, request, batch_id)
             self._build_source_marts(connection, request, batch_id)
             self._build_signals(connection, request, batch_id)
@@ -195,7 +198,9 @@ class SnapshotBuilder:
                 "date_min": date_range[0].isoformat() if date_range[0] else None,
                 "date_max": date_range[1].isoformat() if date_range[1] else None,
                 "mode": request.mode,
-                "metric_version": self.METRIC_VERSION,
+                "metric_version": self.METRIC_VERSION + ("-p2-calendar-v1" if self.source.p2_only else ""),
+                "input_mode": "p2-only-v1" if self.source.p2_only else "derived",
+                "backfill_status": "unknown" if self.source.p2_only else "unspecified",
                 "rule_version": self.RULE_VERSION,
                 "combination_version": self.combination_version,
                 "source_manifest_sha256": self._sha256(source_manifest),
@@ -1064,15 +1069,14 @@ class SnapshotBuilder:
             if request.trade_date
             else "trade_date = (SELECT max(trade_date) FROM seat_dash_product_daily)"
         )
+        main_prices = ("SELECT product_code,trade_date,close FROM seat_dash_main_contract_coverage"
+                       if self.source.p2_only else "SELECT product_code,trade_date,max(close) AS close FROM seat_dash_main_contract_seat_daily WHERE close IS NOT NULL GROUP BY product_code,trade_date")
+        factors = ("SELECT c.trade_date,c.product_code,p.net_cr5,p.f2_value FROM seat_dash_main_contract_coverage c LEFT JOIN seat_dash_product_daily p USING (trade_date,product_code)"
+                   if self.source.p2_only else "SELECT trade_date,product_code,net_cr5,f2_value FROM seat_dash_product_daily")
         connection.execute(
             f"""
             CREATE OR REPLACE TABLE seat_dash_rule_result_daily AS
-            WITH main_price AS (
-                SELECT product_code, trade_date, max(close) AS close
-                FROM seat_dash_main_contract_seat_daily
-                WHERE close IS NOT NULL
-                GROUP BY product_code, trade_date
-            ), forward_prices AS (
+            WITH main_price AS ({main_prices}), forward_prices AS (
                 SELECT product_code, trade_date, close,
                        lead(trade_date, 5) OVER (
                            PARTITION BY product_code ORDER BY trade_date
@@ -1087,22 +1091,22 @@ class SnapshotBuilder:
                            PARTITION BY product_code ORDER BY trade_date
                        ) AS future_10_close
                 FROM main_price
-            ), factor_long AS (
+            ), factors AS ({factors}), factor_long AS (
                 SELECT trade_date, product_code, 'net_cr5_concentration' AS rule_code,
                        net_cr5 AS factor_value
-                FROM seat_dash_product_daily p
-                WHERE net_cr5 IS NOT NULL
+                FROM factors
+                {"" if self.source.p2_only else "WHERE net_cr5 IS NOT NULL"}
                 UNION ALL
                 SELECT trade_date, product_code, 'f2_position_ratio', f2_value
-                FROM seat_dash_product_daily
-                WHERE f2_value IS NOT NULL
+                FROM factors
+                {"" if self.source.p2_only else "WHERE f2_value IS NOT NULL"}
             ), indexed AS (
                 SELECT *, row_number() OVER (
                     PARTITION BY product_code, rule_code ORDER BY trade_date
                 ) AS date_index
                 FROM factor_long
             ), current_rows AS (
-                SELECT * FROM indexed WHERE {target}
+                SELECT * FROM indexed WHERE {target} AND factor_value IS NOT NULL
             ), current_percentile AS (
                 SELECT c.trade_date, c.product_code, c.rule_code, c.factor_value,
                        c.date_index,
@@ -1311,6 +1315,12 @@ class SnapshotBuilder:
         )
         checks["market_rows"] = int(connection.execute("SELECT count(*) FROM seat_dash_market_daily").fetchone()[0])
         checks["warnings"] = []
+        if "seat_dash_main_contract_coverage" in {row[0] for row in connection.execute("SHOW TABLES").fetchall()}:
+            checks["main_price_pending"] = connection.execute("SELECT count(*) FROM seat_dash_main_contract_coverage WHERE price_status<>'ready'").fetchone()[0]
+            checks["main_seat_pending"] = connection.execute("SELECT count(*) FROM seat_dash_main_contract_coverage WHERE seat_status<>'ready'").fetchone()[0]
+            checks["warnings"].append("P2 backfill provenance unavailable; not certified")
+            if checks["main_price_pending"] or checks["main_seat_pending"]:
+                checks["warnings"].append(f"main layer pending: price={checks['main_price_pending']}, seat={checks['main_seat_pending']}")
         if checks["market_rows"] == 0:
             checks["warnings"].append("market_daily_empty; validation results will be unavailable")
         checks["complete"] = (
@@ -1329,6 +1339,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     mode.add_argument("--reclassify-from", type=Path, help="Rebuild group signals from a published runtime without source access")
     mode.add_argument("--full", action="store_true", help="build every available date")
     mode.add_argument("--date", type=date.fromisoformat, help="build one trade date")
+    parser.add_argument("--p2-only", action="store_true", help="derive source relations from raw seats and daily market data; ignore legacy P3")
     parser.add_argument("--dry-run", action="store_true", help="build and validate in memory without publishing")
     parser.add_argument("--runtime-root", type=Path)
     parser.add_argument("--seat-root", type=Path)
@@ -1379,7 +1390,7 @@ def main(argv: list[str] | None = None) -> int:
                 "RDS publishing is reserved but not enabled in V1; unsupported publishers: "
                 + ", ".join(unsupported_publishers)
             )
-        source = ParquetSource(settings.seat_data_root, settings.market_1d_root)
+        source = ParquetSource(settings.seat_data_root, settings.market_1d_root, p2_only=args.p2_only)
         publisher = DuckDBPublisher(settings.runtime_root)
         request = BuildRequest(full=bool(args.full), trade_date=args.date, dry_run=bool(args.dry_run))
         builder = SnapshotBuilder(

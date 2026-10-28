@@ -383,3 +383,147 @@ def test_overlapping_rename_records_are_not_silently_added(tmp_path: Path):
     with pytest.raises(SnapshotValidationError, match="overlapping renamed seats"):
         SnapshotBuilder(ParquetSource(seat_root, market_root), DuckDBPublisher(tmp_path / "runtime")).build(BuildRequest())
     assert not (tmp_path / "runtime/manifests/current.json").exists()
+
+
+def _p2_source(tmp_path):
+    seat_root, market_root = _fixture_source(tmp_path)
+    for name in ('derive_product_daily', 'derive_product_seat', 'derive_main_contract_seat'):
+        shutil.rmtree(seat_root / name)
+    path = next(market_root.rglob('*.parquet'))
+    rows = pq.ParquetFile(path).read().to_pylist()
+    rows += [{**r, 'symbol': 'RB2605', 'position': 1000} for r in rows]
+    pq.write_table(pa.Table.from_pylist(rows), path)
+    return ParquetSource(seat_root, market_root, p2_only=True)
+
+
+def test_p2_only_builds_from_contract_rows_and_rebuilds_same_day_revision(tmp_path):
+    source = _p2_source(tmp_path)
+    runtime = tmp_path / 'runtime'
+    raw_path = next(source.dataset_path('raw_seat').rglob('*.parquet'))
+    raw_rows = pq.ParquetFile(raw_path).read().to_pylist()
+    raw_rows.append({**raw_rows[-1], 'seat_name':'零值席位','long_position':0,'short_position':0,'long_change':0,'short_change':0,'net_position':0})
+    pq.write_table(pa.Table.from_pylist(raw_rows),raw_path)
+    path = next(source.market_1d_root.rglob('*.parquet'))
+    market = pq.ParquetFile(path).read().to_pylist()
+    current = next(r for r in market if r['symbol']=='RB2601' and r['trade_date']==date(2026,7,28))
+    market += [{**current,'symbol':'RB0000','position':999999}, {**current,'sequence':2,'close':3210}]
+    pq.write_table(pa.Table.from_pylist(market),path)
+    builder = SnapshotBuilder(source, DuckDBPublisher(runtime))
+    original = builder.build(BuildRequest(full=True))
+    reader = DuckDBReader(runtime)
+    assert reader.view('term-structure',product_code='RB.SHFE')['contracts'][0]['close_price'] == 3210
+    first = reader.view('combination', product_code='RB.SHFE')['metrics'][0]
+    assert first['total_long'] == 950 and first['total_short'] == 950
+    assert first['net_position'] == 0 and first['seat_count'] == 3
+    with duckdb.connect(str(runtime/DuckDBPublisher(runtime).current_metadata()['database_path']),read_only=True) as c:
+        assert c.execute("SELECT long_position,short_position,contract_count FROM seat_dash_product_seat_daily WHERE seat_name='零值席位'").fetchone()==(0,0,1)
+    path = next(source.dataset_path('raw_seat').rglob('*.parquet'))
+    rows = pq.ParquetFile(path).read().to_pylist()
+    row = next(r for r in rows if r['trade_date'] == date(2026,7,28) and r['symbol'] == 'RB2601' and r['seat_name'] == '席位A')
+    row['long_position'] += 10
+    row['long_change'] = 10
+    # Aggregated product rows must never be counted again.
+    rows.append({**row, 'is_aggregated': 1, 'long_position': 999999})
+    replacement = path.with_suffix('.new')
+    pq.write_table(pa.Table.from_pylist(rows), replacement)
+    replacement.replace(path)
+    result = builder.build(BuildRequest(full=True))
+    assert result['batch_id'] == 2
+    assert result['source_manifest_sha256'] != original['source_manifest_sha256']
+    revised = reader.view('combination', product_code='RB.SHFE')['metrics'][0]
+    assert revised['total_long'] == 960 and revised['net_position'] == 10
+    assert result['source_manifest']['input_mode'] == 'p2-only-v1'
+    assert set(result['source_manifest']['datasets']) == {'raw_seat', 'market_1d'}
+    assert not source.dataset_path('product_daily').exists()
+
+
+@pytest.mark.parametrize('failure', ['conflicting_raw', 'market_conflict'])
+def test_p2_only_rejects_ambiguous_inputs_without_publishing(tmp_path, failure):
+    source = _p2_source(tmp_path)
+    if failure == 'conflicting_raw':
+        path = next(source.dataset_path('raw_seat').rglob('*.parquet'))
+        rows = pq.ParquetFile(path).read().to_pylist()
+        rows.append({**rows[0], 'long_position': 12345})
+    else:
+        path = next(source.market_1d_root.rglob('*.parquet'))
+        rows = pq.ParquetFile(path).read().to_pylist()
+        for row in rows:
+            if row['trade_date'] == date(2026,7,28) and row['symbol'] == 'RB2605':
+                row['position'] = 10000 if failure == 'tie' else 20000
+                if failure == 'missing_main': row['symbol'] = 'RB2609'
+                if failure == 'unknown_oi': row['position'] = None
+        if failure == 'market_conflict': rows.append({**rows[0], 'close': 9999})
+    pq.write_table(pa.Table.from_pylist(rows), path)
+    runtime = tmp_path / 'runtime'
+    with pytest.raises(SnapshotValidationError, match='P2-only'):
+        SnapshotBuilder(source, DuckDBPublisher(runtime)).build(BuildRequest(full=True))
+    assert not (runtime / 'manifests/current.json').exists()
+
+
+def test_p2_only_czce_codes_match_three_and_four_digit_contracts(tmp_path):
+    source = _p2_source(tmp_path)
+    for dataset in ('raw_seat', 'market_1d'):
+        path = next(source.dataset_path(dataset).rglob('*.parquet'))
+        rows = pq.ParquetFile(path).read().to_pylist()
+        for r in rows:
+            r['exchange'] = 'CZCE'
+            r['symbol'] = r['symbol'].replace('RB26','CF6' if dataset == 'raw_seat' else 'CF26')
+            if dataset == 'raw_seat':
+                r.update(root='CF',product_code='CF.CZCE',contract_code=r['symbol']+'.CZCE')
+        pq.write_table(pa.Table.from_pylist(rows), path)
+    runtime = tmp_path / 'runtime'
+    SnapshotBuilder(source, DuckDBPublisher(runtime)).build(BuildRequest(full=True))
+    result = DuckDBReader(runtime).view('term-structure',product_code='CF.CZCE')
+    assert {r['contract_code'] for r in result['contracts']} == {'CF2601.CZCE','CF2605.CZCE'}
+    assert all(r['close_price'] is not None for r in result['contracts'])
+
+
+@pytest.mark.parametrize('failure', ['tie', 'missing_main', 'unknown_oi', 'missing_market'])
+def test_p2_pending_main_preserves_product_and_does_not_guess(tmp_path, failure):
+    source = _p2_source(tmp_path)
+    path = next(source.market_1d_root.rglob('*.parquet'))
+    rows = pq.ParquetFile(path).read().to_pylist()
+    for row in rows:
+        if row['trade_date']==date(2026,7,28) and row['symbol']=='RB2605':
+            row['position'] = 10000 if failure=='tie' else None if failure=='unknown_oi' else 20000
+            if failure=='missing_main': row['symbol']='RB2609'
+    if failure=='missing_market':rows=[r for r in rows if r['trade_date']!=date(2026,7,28)]
+    pq.write_table(pa.Table.from_pylist(rows),path)
+    runtime=tmp_path/'runtime'
+    metadata=SnapshotBuilder(source,DuckDBPublisher(runtime)).build(BuildRequest(full=True))
+    assert metadata['validation']['complete']
+    assert metadata['validation']['main_seat_pending']==1
+    assert metadata['backfill_status']=='unknown'
+    data= DuckDBReader(runtime).view('combination',product_code='RB.SHFE')
+    assert data['metrics'][0]['total_long']==950
+    coverage=data['main_contract_coverage'][0]
+    if failure=='missing_main':
+        assert coverage['symbol']=='RB2609' and coverage['close']==3200
+        assert coverage['price_status']=='ready' and coverage['seat_status']=='missing_seat'
+    else:
+        assert coverage['symbol'] is None and coverage['close'] is None
+        assert coverage['price_status']==coverage['seat_status']=='main_unresolved'
+
+
+@pytest.mark.parametrize('missing_factor', [False, True])
+def test_p2_validation_keeps_missing_days_and_uses_known_main_prices(tmp_path, missing_factor):
+    from datetime import timedelta
+    dates=[];day=date(2026,1,1)
+    while len(dates)<80:
+        if day.weekday()<5:dates.append(day)
+        day+=timedelta(days=1)
+    source=ParquetSource(tmp_path,tmp_path,p2_only=True)
+    builder=SnapshotBuilder(source,DuckDBPublisher(tmp_path/'runtime'))
+    with duckdb.connect() as c:
+        c.execute('CREATE TABLE seat_dash_product_daily(trade_date DATE,product_code VARCHAR,net_cr5 DOUBLE,f2_value DOUBLE)')
+        c.execute('CREATE TABLE seat_dash_main_contract_coverage(trade_date DATE,product_code VARCHAR,close DOUBLE)')
+        c.executemany('INSERT INTO seat_dash_product_daily VALUES (?,?,?,?)',[(d,'RB.SHFE',.8,.1) for i,d in enumerate(dates) if not missing_factor or i!=20])
+        # Day 10 has no price; day 15 has price but no seat publication. Both retain their date.
+        c.executemany('INSERT INTO seat_dash_main_contract_coverage VALUES (?,?,?)',[(d,'RB.SHFE',None if i==10 else 100+i) for i,d in enumerate(dates)])
+        builder._build_validation(c,BuildRequest(full=True),1)
+        for horizon in (5,10):
+            values=[(100+i+horizon)/(100+i)-1 for i in range(55-horizon) if i!=10 and i+horizon!=10 and (not missing_factor or i!=20)]
+            actual=c.execute("SELECT sample_size,mean_return,library_cutoff FROM seat_dash_rule_result_daily WHERE rule_code='net_cr5_concentration' AND horizon_days=?",[horizon]).fetchone()
+            assert actual[2]==dates[54]
+            assert actual[0]==len(values)
+            assert actual[1]==pytest.approx(sum(values)/len(values))

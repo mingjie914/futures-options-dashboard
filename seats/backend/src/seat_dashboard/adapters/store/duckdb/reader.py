@@ -108,6 +108,7 @@ class DuckDBReader(DashboardReadPort):
             "source_manifest_sha256": manifest.get("source_manifest_sha256"),
             "warnings": manifest.get("warnings", []),
             "is_demo": bool(manifest.get("is_demo", False)),
+            "backfill_status": manifest.get("backfill_status", "unspecified"),
         }
 
     @staticmethod
@@ -260,6 +261,11 @@ class DuckDBReader(DashboardReadPort):
                 )
             else:
                 data = self._validation(connection, selected_date, product_code, metrics, limit)
+            if manifest.get("input_mode") == "p2-only-v1":
+                product_sql, product_params = self._product_filter(product_code)
+                data["main_contract_coverage"] = _as_dicts(connection.execute(
+                    "SELECT * FROM seat_dash_main_contract_coverage WHERE trade_date=?" + product_sql + " ORDER BY product_code",
+                    [selected_date, *product_params]))
             return {"selected_date": selected_date, "scope": scope, **data}
         finally:
             connection.close()
