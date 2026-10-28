@@ -214,7 +214,7 @@
   height: 6px;
 }
 
-.stateNotice, .warningStrip{
+.stateNotice{
   display: flex;
   align-items: center;
   margin-top: 18px;
@@ -239,7 +239,7 @@
   font-size: 13px;
 }
 
-.stateIcon, .warningIcon{
+.stateIcon{
   display: inline-grid;
   width: 24px;
   height: 24px;
@@ -252,17 +252,6 @@
 
 .stateNotice .noticeButton{
   margin-left: auto;
-}
-
-.warningStrip{
-  color: var(--warning);
-  font-size: 14px;
-}
-
-.warningIcon{
-  width: auto;
-  height: auto;
-  background: transparent;
 }
 
 .viewPanel{

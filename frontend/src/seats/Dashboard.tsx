@@ -59,7 +59,7 @@ const stateCopy: Record<
   loading: { label: "正在加载数据", detail: "正在读取当前批次，请稍候。", icon: "◌", tone: "accent" },
   ready: { label: "数据已就绪", detail: "当前批次已通过完整性校验。", icon: "●", tone: "positive" },
   empty: { label: "暂无数据", detail: "当前筛选条件没有可展示的数据。", icon: "○", tone: "neutral" },
-  partial: { label: "数据部分可用", detail: "部分品种或席位尚未完成更新。", icon: "△", tone: "warning" },
+  partial: { label: "数据提示", detail: "部分数据缺失。", icon: "△", tone: "warning" },
   stale: { label: "快照较旧", detail: "距离上次发布已超过 48 小时，请核对所选交易日。", icon: "◷", tone: "warning" },
   error: { label: "数据读取失败", detail: "暂时无法读取看板数据，请稍后重试。", icon: "!", tone: "negative" },
 };
@@ -272,14 +272,8 @@ export function Dashboard() {
         />
 
         {loadState !== "ready" && (
-          <StateNotice state={loadState} detail={errorMessage ? `${errorMessage}${snapshot && loadedView === view ? "；下方保留上次成功读取的数据" : ""}` : undefined} onRetry={loadState === "error" ? refresh : undefined} />
+          <StateNotice state={loadState} detail={errorMessage ? `${errorMessage}${snapshot && loadedView === view ? "；下方保留上次成功读取的数据" : ""}` : loadState === "partial" ? snapshot?.meta.notice : undefined} onRetry={loadState === "error" ? refresh : undefined} />
         )}
-        {snapshot?.meta.warnings.map((warning) => (
-          <div className={styles.warningStrip} key={warning} role="status">
-            <span className={styles.warningIcon} aria-hidden="true">△</span>
-            <span>{warning}</span>
-          </div>
-        ))}
 
         {(!snapshot || loadedView !== view) && loadState === "loading" && <DashboardSkeleton />}
         {(!snapshot || loadedView !== view) && loadState !== "loading" && <EmptyPageState state={loadState} onRetry={refresh} />}

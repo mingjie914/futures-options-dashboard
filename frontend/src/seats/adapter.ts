@@ -44,7 +44,7 @@ interface ApiMeta {
 
 interface ApiEnvelope<T> {
   meta: ApiMeta;
-  data: T;
+  data: T & { main_contract_coverage?: Array<{ price_status: string; seat_status: string }> };
 }
 
 interface ApiProduct {
@@ -673,7 +673,7 @@ function signalCountRows(market: ApiMarketView, term: ApiTermView) {
   return rows.length ? rows : [{ label: "当前无规则异动", value: 0, tone: "neutral" as Tone }];
 }
 
-function mapMeta(meta: ApiMeta, selectedDate: string, productLabel: string, metrics: ApiMetric[]) {
+function mapMeta(meta: ApiMeta, selectedDate: string, productLabel: string, metrics: ApiMetric[], coverage: ApiEnvelope<unknown>["data"]["main_contract_coverage"] = []) {
   const warnings = meta.warnings ?? [];
   const updated = meta.updated_at ? new Date(meta.updated_at) : null;
   const staleHours = updated && Number.isFinite(updated.getTime())
@@ -683,9 +683,18 @@ function mapMeta(meta: ApiMeta, selectedDate: string, productLabel: string, metr
     ? "demo"
     : ["mysql", "rds"].includes(meta.data_backend ?? "") ? "rds" : "local";
   const meaningfulWarnings = warnings.filter((warning) => warning !== "demo_fixture");
+  const priceGaps = coverage.filter(row => row.price_status !== "ready").length;
+  const seatGaps = coverage.filter(row => row.seat_status !== "ready").length;
+  const notices = [];
+  if (priceGaps || seatGaps) notices.push(`所选日主力缺口：${[priceGaps && `价格 ${priceGaps} 个品种`, seatGaps && `席位 ${seatGaps} 个品种`].filter(Boolean).join("、")}`);
+  for (const warning of meaningfulWarnings) {
+    if (warning === "P2 backfill provenance unavailable; not certified") notices.push("上游修订溯源缺失");
+    else if (/^main layer pending: price=\d+, seat=\d+$/.test(warning)) notices.push("全历史主力数据有缺口");
+    else notices.push("其他数据校验提示");
+  }
   const state = metrics.length === 0
     ? "empty"
-    : meaningfulWarnings.length > 0 ? "partial"
+    : notices.length > 0 ? "partial"
     : staleHours > 48 ? "stale" : "ready";
   return {
     state,
@@ -694,6 +703,7 @@ function mapMeta(meta: ApiMeta, selectedDate: string, productLabel: string, metr
     updatedAt: meta.updated_at ?? "未知",
     selectedProductLabel: productLabel,
     warnings,
+    notice: [...new Set(notices)].join("；"),
   } as DashboardSnapshot["meta"];
 }
 
@@ -735,6 +745,7 @@ export function mapApiSnapshot(
       combination.selected_date || options.trade_date,
       productLabel,
       combination.metrics,
+      active.data.main_contract_coverage,
     ),
     products,
     overview: {

@@ -51,6 +51,7 @@ export interface SnapshotMeta {
   updatedAt: string;
   selectedProductLabel: string;
   warnings: string[];
+  notice: string;
 }
 
 export interface SeatTag {

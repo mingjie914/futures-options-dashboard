@@ -18,6 +18,31 @@ const fixture = {
   "/views/validation": { rules: [] },
 };
 
+test("seat notices separate selected-day coverage from full-history gaps and provenance", () => {
+  const warnings = ["P2 backfill provenance unavailable; not certified", "main layer pending: price=67, seat=6196"];
+  const map = (coverage, publishedWarnings = warnings) => mapApiSnapshot(
+    { productCode: "RB.SHFE", tradeDate: "2026-10-28", scope: "all" },
+    { meta: {}, data: fixture["/meta/options"] }, undefined, undefined,
+    { meta: { warnings: publishedWarnings, complete: true, updated_at: new Date().toISOString() }, data: {
+      ...fixture["/views/term-structure"], metrics: [{ net_position: 0, net_change: 0 }], main_contract_coverage: coverage,
+    } },
+  ).meta;
+  const ready = [{ price_status: "ready", seat_status: "ready" }];
+  const history = map(ready);
+  assert.deepEqual(history.warnings, warnings);
+  assert.match(history.notice, /上游修订溯源缺失/);
+  assert.match(history.notice, /全历史主力数据有缺口/);
+  assert.doesNotMatch(history.notice, /所选日|67|6196|pending|更新/);
+  const partial = map([...ready, { price_status: "ready", seat_status: "missing_seat" }]);
+  assert.match(partial.notice, /所选日主力缺口：席位 1 个品种/);
+  assert.equal(partial.state, "partial");
+  const unresolved = map([{ price_status: "main_unresolved", seat_status: "main_unresolved" }], []);
+  assert.equal(unresolved.notice, "所选日主力缺口：价格 1 个品种、席位 1 个品种");
+  assert.equal(unresolved.state, "partial");
+  assert.equal(map(ready, []).state, "ready");
+  assert.equal(map(ready, []).notice, "");
+});
+
 test("requests only the active view and revalidates cached chunks; history follows the loaded date/version", async (t) => {
   let version = "v1";
   const requests = [];
