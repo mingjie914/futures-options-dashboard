@@ -133,7 +133,7 @@ test("unified static build keeps seats lazy and shares font/runtime", async () =
   const seat = manifest["src/seats/Dashboard.tsx"];
   assert.ok(seat?.isDynamicEntry);
   const js = await readFile(new URL(seat.file, output), "utf8");
-  assert.match(js, /联合席位/);
+  assert.match(js, /席位动向/);
   assert.match(js, /历史对照/);
   assert.doesNotMatch(js, /react-server-dom-webpack|vinext\/server|demo-data-/);
   const visit = (key, seen = new Set()) => { if (seen.has(key)) return seen; seen.add(key); for (const k of manifest[key]?.imports || []) visit(k,seen); return seen; };
