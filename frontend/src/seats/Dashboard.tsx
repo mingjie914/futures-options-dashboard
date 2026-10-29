@@ -864,15 +864,14 @@ function MarketTreemap({ items, onProduct }: { items: DashboardSnapshot["treemap
                   aria-label={`${item.label}，${interestMode ? "增仓比例" : "净持仓变动"} ${value == null ? "不可用" : interestMode ? `${(value * 100).toFixed(2)}%` : `${formatNumber(value)} 手`}，点击查看`}
                 >
                   <strong>{item.label}</strong>
-                  <span>{value == null ? "—" : interestMode ? `${value > 0 ? "+" : ""}${(value * 100).toFixed(2)}%` : formatSigned(value)}{!interestMode && <small> 手</small>}</span>
-                  {interestMode && (value == null || item.interestContractsChanged) && <small>{value == null ? "缺少可比数据" : "范围变动"}</small>}
+                  <span>{value == null ? "—" : interestMode ? `${value > 0 ? "+" : ""}${(value * 100).toFixed(2)}%` : formatSigned(value)}{!interestMode && <small> 手</small>}{interestMode && item.interestContractsChanged && <small> *</small>}</span>
                 </button>
               ); })}
             </div>
           </section>
         ))}
       </div>
-      <div className={styles.treeLegend}><span><i className={styles.legendLong} />{interestMode ? "总持仓增加" : "净持仓增加"}</span><span><i className={styles.legendShort} />{interestMode ? "总持仓减少" : "净持仓减少"}</span><span><i className={styles.legendFlat} />不变或不可比</span><span data-tooltip="按全市场变化绝对值着色，幅度越大越深。">色深：全市场排名</span></div>
+      <div className={styles.treeLegend}><span><i className={styles.legendLong} />{interestMode ? "总持仓增加" : "净持仓增加"}</span><span><i className={styles.legendShort} />{interestMode ? "总持仓减少" : "净持仓减少"}</span><span><i className={styles.legendFlat} />不变或不可比</span><span data-tooltip="按全市场变化绝对值着色，幅度越大越深。">色深：全市场排名</span>{interestMode && items.some(item => item.interestContractsChanged) && <span>* 合约范围变动</span>}</div>
     </section>
   );
 }
