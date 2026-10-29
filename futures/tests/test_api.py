@@ -156,6 +156,42 @@ def test_index_basis_real_local_snapshot_and_settle_rejection(setup,monkeypatch)
     assert client.get('/api/basis-reference?product=IM').status_code==503
 
 
+def test_rds_index_basis_revision_deletion_cache_and_scope(setup):
+    from backend.data import INDEX_SERIES, index_daily
+    client, store, path = setup
+    spot = store.root.parent/'aindexeodprices/year_month=2026-09/part.parquet'
+    spot.parent.mkdir(parents=True)
+    with duckdb.connect() as con:
+        con.execute('CREATE TABLE daily AS SELECT * FROM read_parquet(?)', [str(path)])
+        for product in INDEX_SERIES:
+            con.execute("INSERT INTO daily SELECT * REPLACE ('CFFEX' AS exchange,? AS symbol,8000 AS close) FROM daily WHERE symbol='RB2610'", [product+'2612'])
+        con.execute('COPY daily TO ? (FORMAT PARQUET)', [str(path)])
+        con.execute('CREATE TABLE spot (trade_date DATE,symbol VARCHAR,close DOUBLE)')
+        for code, _ in INDEX_SERIES.values():
+            con.execute("INSERT INTO spot VALUES ('2026-09-01',?,8001),('2026-09-02',?,8002)", [code,code])
+        con.execute('COPY spot TO ? (FORMAT PARQUET)', [str(spot)])
+        url='/api/basis-reference?product=IF&start=2026-09-01&end=2026-09-02'
+        for product, (code, _) in INDEX_SERIES.items():
+            value=client.get(url.replace('product=IF','product='+product)).json()
+            assert value['matched']==2 and value['latest']['reference_spread']==2
+            assert value['reference']['code']==code and value['reference']['source']=='RDS aindexeodprices'
+        first=client.get(url); version=client.get('/api/version').json()
+        assert client.get(url,headers={'If-None-Match':first.headers['etag']}).status_code==304
+        con.execute("UPDATE spot SET close=8010 WHERE symbol='000300.SH' AND trade_date='2026-09-02'")
+        con.execute("DELETE FROM spot WHERE symbol='000300.SH' AND trade_date='2026-09-01'")
+        con.execute('COPY spot TO ? (FORMAT PARQUET)', [str(spot)])
+        revised=client.get(url,headers={'If-None-Match':first.headers['etag']})
+        assert revised.status_code==200 and revised.json()['matched']==1
+        assert revised.json()['latest']['reference_spread']==10
+        assert revised.json()['series'][0]['reference_spread'] is None
+        assert client.get('/api/version').json()!=version
+        points=index_daily(store.runtime, 'IF','2026-09-02','2026-09-02',spot.parent.parent)['points']
+        assert len(points)==1 and points[0]['code']=='000300.SH'
+        con.execute("INSERT INTO spot VALUES ('2026-09-02','000300.SH',8011)")
+        con.execute('COPY spot TO ? (FORMAT PARQUET)', [str(spot)])
+        assert client.get(url).status_code==422  # Existing basis algorithm rejects ambiguous dates.
+
+
 def test_basis_reference_only_uses_pinned_cu_and_reports_unavailable(setup,monkeypatch):
     import hashlib,json
     from backend import data

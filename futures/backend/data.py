@@ -99,8 +99,20 @@ REVIEW_METADATA = 'terminal_metadata_combined_20260909.json'
 TERMINAL_METADATA_FILE = 'terminal_metadata_screenshots_20260914.json'
 
 
-def index_daily(folder, product=None, start=None, end=None):
-    """Read only the explicitly selected isolated index snapshot, never fetch on request."""
+def index_daily(folder, product=None, start=None, end=None, published=None):
+    """Read published RDS closes, or the explicit local review; never fetch on request."""
+    if published is not None and published.is_dir():
+        code, name = INDEX_SERIES[product]
+        files = sorted(p for p in published.glob('year_month=*/*.parquet')
+                       if (not start or p.parent.name[11:] >= start[:7]) and (not end or p.parent.name[11:] <= end[:7]))
+        rows = DailyStore._query(files, '''SELECT trade_date::VARCHAR observation_date, close raw_value
+            FROM read_parquet(?) WHERE symbol=? AND trade_date BETWEEN ?::DATE AND ?::DATE ORDER BY trade_date''',
+            (code, start or '0001-01-01', end or '9999-12-31')) if files else []
+        return {'source':'RDS aindexeodprices', 'sha256':fingerprint(files),
+                'indicators':[{'product':product, 'code':code, 'name':name, 'frequency':'D', 'unit':'指数点',
+                               'source':'RDS aindexeodprices', 'first':rows[0]['observation_date'] if rows else None,
+                               'last':rows[-1]['observation_date'] if rows else None}],
+                'points':[dict(row, code=code) for row in rows]}
     folder = Path(folder)
     selected = json.loads((folder/'index_review.json').read_bytes())
     if (selected.get('kind') != 'index_daily_review' or selected.get('state') != 'completed'

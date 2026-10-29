@@ -31,6 +31,7 @@ def test_gateway_keeps_old_lazy_assets_and_independent_seat_contract(tmp_path,mo
         gateway.app.state.client=httpx.AsyncClient(transport=httpx.MockTransport(upstream))
         for module in ['seats','futures','options']:
             assert client.get('/'+module+'/').text=='new'
+            assert client.get('/'+module+'/',headers={'sec-fetch-site':'cross-site'}).text=='new'
         # A pointer swap does not alter this running gateway's pinned HTML.
         (tmp_path/'frontend-release.json').write_text(json.dumps({'release':'releases/web-old'}))
         assert client.get('/seats/').text=='new'
@@ -45,6 +46,7 @@ def test_gateway_keeps_old_lazy_assets_and_independent_seat_contract(tmp_path,mo
         assert client.get('/api/futures/v1/health',headers={'Host':'mingjiec.com','Origin':'https://other.example'}).status_code==403
         assert client.post('/api/seats/v1/meta/options').status_code==403
         assert client.get('/api/seats/v1/meta/options',headers={'origin':'https://other.test'}).status_code==403
+        assert client.get('/api/seats/v1/meta/options',headers={'sec-fetch-site':'cross-site'}).status_code==403
         assert client.get('/api/seats/v1/views/unavailable').status_code==503
         assert client.get('/api/options/v1/snapshot').status_code==200
         assert client.get('/api/futures/v1/products').status_code==200

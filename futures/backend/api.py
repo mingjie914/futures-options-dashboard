@@ -107,6 +107,7 @@ def create_app(store=None):
         if not files:
             files = list((store.runtime/'snapshots').glob('*.json'))
         if path.startswith('/api/fundamentals') or path == '/api/basis-reference':
+            files += list((store.root.parent/'aindexeodprices').glob('year_month=*/*.parquet'))
             files += [p for name in ('fundamental_lab', 'ceic_lab')
                       for p in (store.runtime/name).rglob('*') if p.is_file()]
         return [date.today().isoformat(), fingerprint(files)]
@@ -401,7 +402,7 @@ def create_app(store=None):
         if is_index and price_type != 'close':
             return {'status':'unavailable','product':product,'execution_eligible':False,
                 'reason':'股指基差仅用期货收盘价对指数收盘价；请将顶部价格口径切换为收盘。结算价不可视为同一收盘时点。'}
-        if is_index and not (store.runtime/'fundamental_lab/index_review.json').exists():
+        if is_index and not (store.root.parent/'aindexeodprices').is_dir() and not (store.runtime/'fundamental_lab/index_review.json').exists():
             return {'status':'unavailable','product':product,'execution_eligible':False,
                 'reason':'指数日收盘快照尚未验收；此页面不会自动取数。'}
         if symbol and (not CONTRACT.fullmatch(symbol) or symbol[:-4]!=product):
@@ -413,7 +414,7 @@ def create_app(store=None):
             raise ValueError('窗口中无所选真实合约')
         if is_index:
             try:
-                review=index_daily(store.runtime/'fundamental_lab',product,snapshot['start'],snapshot['end'])
+                review=index_daily(store.runtime/'fundamental_lab',product,snapshot['start'],snapshot['end'],store.root.parent/'aindexeodprices')
             except (OSError,RuntimeError,ValueError,KeyError,duckdb.Error) as exc:
                 raise HTTPException(503,'指数快照不可用或校验失败；不会自动取数或替换指标') from exc
             item=next(i for i in review['indicators'] if i['product']==product)

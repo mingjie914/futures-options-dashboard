@@ -31,7 +31,7 @@ app.add_middleware(ResearchHTTP)
 @app.middleware('http')
 async def same_origin(request,call_next):
     origin=request.headers.get('origin')
-    if (origin and urlsplit(origin).netloc!=request.headers.get('host')) or request.headers.get('sec-fetch-site')=='cross-site':
+    if request.url.path.startswith('/api/') and ((origin and urlsplit(origin).netloc!=request.headers.get('host')) or request.headers.get('sec-fetch-site')=='cross-site'):
         return JSONResponse({'detail':'仅允许同源访问'},status_code=403)
     return await call_next(request)
 

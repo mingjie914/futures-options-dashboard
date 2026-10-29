@@ -190,7 +190,9 @@ class SnapshotBuilder:
         tables = {"futuresseatraw": "raw_seat", "futureshistoryprices1d": "market_1d"}
         changes = set()
         for row in new.get("changed_months", []):
-            if row.get("table") not in tables or not re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", row.get("month", "")):
+            if row.get("table") not in tables:
+                continue  # Other published sources are outside the seat build's dependency scope.
+            if not re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", row.get("month", "")):
                 raise SnapshotValidationError("Invalid changed month")
             changes.add((tables[row["table"]], row["month"]))
         if not changes:

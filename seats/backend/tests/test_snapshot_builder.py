@@ -536,6 +536,7 @@ def test_p2_incremental_equals_full_with_month_boundaries_and_deletes(tmp_path, 
         if rows:
             pq.write_table(pa.Table.from_pylist(rows), path)
         changed.append({'table': table, 'month': f'2026-{month:02}', 'rows': len(rows)})
+    changed.append({'table': 'aindexeodprices', 'month': '2026-07', 'rows': 4})
     new_manifest = _input_manifest(source, tmp_path/'new.json', 'new', changed, old_manifest)
     inc = SnapshotBuilder(source, DuckDBPublisher(tmp_path/'inc')).build(BuildRequest(incremental_from=tmp_path/'base', base_input_manifest=old_manifest, input_manifest=new_manifest))
     full = SnapshotBuilder(source, DuckDBPublisher(tmp_path/'full')).build(BuildRequest(full=True))
