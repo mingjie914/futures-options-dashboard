@@ -46,7 +46,7 @@ export default function Shell() {
       history.pushState({}, '', target);
       setActive(next);
     }
-    menu.current.querySelector('summary').focus();
+    menu.current.querySelector('summary a').focus();
     menu.current.open = false;
     window.scrollTo({top: 0, left: 0, behavior: 'instant'});
   }
@@ -60,8 +60,8 @@ export default function Shell() {
         onPointerLeave={event=>{if(event.pointerType==='mouse')menu.current.open=false;}}
         onFocus={()=>{menu.current.open=true;}}
         onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))menu.current.open=false;}}
-        onKeyDown={event => { if (event.key === 'Escape') { menu.current.querySelector('summary').focus(); menu.current.open=false; event.preventDefault(); } }}>
-        <summary aria-label="切换看板" onClick={event=>{event.preventDefault();menu.current.open=true;}}>看板</summary>
+        onKeyDown={event => { if (event.key === 'Escape') { menu.current.querySelector('summary a').focus(); menu.current.open=false; event.preventDefault(); } }}>
+        <summary tabIndex={-1}><a href={`${BASE}${modules[0][0]}/`} aria-label="切换看板" onClick={event=>{select(event, modules[0][0]);menu.current.open=true;}}>看板</a></summary>
         <div className="board-menu__items">{modules.map(([id, label]) => <a key={id} href={`${BASE}${id}/`} aria-current={active === id ? 'page' : undefined} onClick={event => select(event, id)}><span>{label}</span></a>)}</div>
       </details>
     </nav></header>
