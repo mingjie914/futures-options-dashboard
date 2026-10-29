@@ -249,3 +249,23 @@ test("seat requests resolve a shared root through the published product catalog"
   for (const url of requests.filter(url => url.pathname.includes("/views/"))) assert.equal(url.searchParams.get("product_code"), "CU.SHFE");
   await assert.rejects(adapter.loadSnapshot({ productCode: "XX", scope: "all", tradeDate: "" }, undefined, "term"), /暂无席位数据/);
 });
+
+
+test("term chart keeps all contracts and distinguishes missing seat positions from zero", () => {
+  const contracts = Array.from({ length: 15 }, (_, i) => ({
+    contract_code: `RB${2701 + i}.SHFE`, symbol: `RB${2701 + i}`, contract_rank: i + 1,
+    net_position: i === 0 ? 0 : i === 1 ? -400 : null,
+    close_price: i === 1 ? null : 3300, price_date: i === 1 ? null : "2026-07-28",
+  }));
+  const wrap = data => ({ meta: { complete: true }, data });
+  const result = mapApiSnapshot(
+    { productCode: "RB.SHFE", tradeDate: "2026-07-28", scope: "all" },
+    wrap(fixture["/meta/options"]), undefined, undefined,
+    wrap({ ...fixture["/views/term-structure"], contracts }),
+  ).termStructure.contracts;
+  assert.equal(result.length, 15);
+  assert.deepEqual(result.map(c => c.netPosition), [0, -400, ...Array(13).fill(null)]);
+  assert.equal(result[1].closePrice, null);
+  assert.equal(result[14].closePrice, 3300);
+  assert.equal(result.filter(c => c.isNear).length, 1);
+});

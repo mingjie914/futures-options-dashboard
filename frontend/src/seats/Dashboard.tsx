@@ -348,7 +348,7 @@ function FilterBar({
   const productList = useRef<HTMLUListElement>(null);
   const productLabel = (product: DashboardSnapshot["products"][number]) => `${product.code.split(".")[0].toUpperCase()}/${product.label}`;
   const selectedProduct = products.find((product) => product.code.split(".")[0] === filters.productCode.split(".")[0]);
-  const matches = products.filter((product) => `${product.code} ${productLabel(product)}`.toLowerCase().includes((productQuery ?? "").trim().toLowerCase()));
+  const matches = products.filter((product) => productLabel(product).toLowerCase().includes((productQuery ?? "").trim().toLowerCase()));
   const openProducts = () => {
     setProductQuery("");
     setActiveProduct(Math.max(0, products.findIndex((product) => product.code === selectedProduct?.code)));
@@ -906,7 +906,8 @@ function TermView({ snapshot, onSeat, onTag }: { snapshot: DashboardSnapshot; on
 }
 
 function TermChart({ contracts, productLabel }: { contracts: TermContractRow[]; productLabel: string }) {
-  const total = sumSignedValues(contracts.map((contract) => contract.netPosition));
+  const positions = contracts.flatMap(c => c.netPosition == null ? [] : [c.netPosition]);
+  const total = sumSignedValues(positions);
   const prices = contracts.flatMap((contract) => contract.closePrice == null ? [] : [contract.closePrice]);
   const formatPrice = (price: number) => price.toLocaleString("zh-CN", { maximumFractionDigits: 3 });
   const priceMin = prices.length ? Math.min(...prices) : 0;
@@ -915,7 +916,7 @@ function TermChart({ contracts, productLabel }: { contracts: TermContractRow[]; 
   const priceLow = priceMin - pricePadding, priceHigh = priceMax + pricePadding;
   const priceY = (price: number) => 154 - (price - priceLow) / (priceHigh - priceLow) * 142;
   const pricePath = contracts.map((contract, index) => contract.closePrice == null ? "" : `${index && contracts[index - 1].closePrice != null ? "L" : "M"}${(index + 0.5) / contracts.length * 1000},${priceY(contract.closePrice)}`).join(" ");
-  const maxNetPosition = contracts.reduce((max, item) => Math.max(max, Math.abs(item.netPosition)), 1);
+  const maxNetPosition = positions.reduce((max, value) => Math.max(max, Math.abs(value)), 1);
   return (
     <section className={`${styles.panel} ${styles.termChartPanel}`}>
       <PanelHeader title={`${productLabel}合约结构`} />
@@ -931,18 +932,17 @@ function TermChart({ contracts, productLabel }: { contracts: TermContractRow[]; 
             <div className={`${styles.termColumn} ${contract.isNear ? styles.termColumnActive : ""}`} key={contract.contractCode}>
               <div className={styles.termBarArea}>
                 <span className={styles.termZeroLine} aria-hidden="true" />
-                <div className={`${styles.termBar} ${contract.netPosition > 0 ? styles.termBarPositive : contract.netPosition < 0 ? styles.termBarNegative : styles.termBarZero}`} style={{ "--bar-size": `${(Math.abs(contract.netPosition) / maxNetPosition) * 46}%` } as CSSProperties}>
+                {contract.netPosition != null && <div className={`${styles.termBar} ${contract.netPosition > 0 ? styles.termBarPositive : contract.netPosition < 0 ? styles.termBarNegative : styles.termBarZero}`} style={{ "--bar-size": `${(Math.abs(contract.netPosition) / maxNetPosition) * 46}%` } as CSSProperties}>
                   <span>{formatSigned(contract.netPosition)}</span>
-                </div>
+                </div>}
               </div>
               <strong>{contract.label}</strong>
-              <em className={contract.netPosition > 0 ? styles.changePositive : contract.netPosition < 0 ? styles.changeNegative : undefined}>{contract.netPosition > 0 ? "净多" : contract.netPosition < 0 ? "净空" : "持平"}</em>
-              <span className={styles.termPriceLabel} data-tooltip={contract.closePrice == null ? "当日合约收盘价缺失" : `${contract.priceDate} · ${contract.contractCode} 收盘价`}>收 {contract.closePrice == null ? "—" : formatPrice(contract.closePrice)}</span>
+              <em className={contract.netPosition == null ? undefined : contract.netPosition > 0 ? styles.changePositive : contract.netPosition < 0 ? styles.changeNegative : undefined}>{contract.netPosition == null ? "—" : contract.netPosition > 0 ? "净多" : contract.netPosition < 0 ? "净空" : "持平"}</em>
             </div>
           ))}
         </div>
       </div></div>
-      <div className={styles.termTotals} aria-label="展示合约合计"><strong data-tooltip={`展示 ${contracts.length} 个合约的净持仓按正负加总；净额 = 净多腿 − 净空腿。`}>合计</strong><span>净多腿 {formatNumber(total.positive)}</span><span>净空腿 {formatNumber(total.negative)}</span><span>净额 <b>{formatNumber(total.net)}</b> 手</span></div>
+      <div className={styles.termTotals} aria-label="展示合约合计"><strong data-tooltip={`${positions.length}/${contracts.length} 个合约有席位数据；只合计已披露净持仓，缺失不计零。`}>{positions.length < contracts.length ? "已披露合计" : "合计"}</strong><span>净多腿 {positions.length ? formatNumber(total.positive) : "—"}</span><span>净空腿 {positions.length ? formatNumber(total.negative) : "—"}</span><span>净额 <b>{positions.length ? formatNumber(total.net) : "—"}</b> 手</span></div>
     </section>
   );
 }

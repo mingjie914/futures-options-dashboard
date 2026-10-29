@@ -26,7 +26,7 @@ def _one(rows: Iterable[dict[str, Any]]) -> dict[str, Any] | None:
 class DuckDBReader(DashboardReadPort):
     """Read-only page queries against the published DuckDB snapshot."""
 
-    QUERY_VERSION = "seat-queries-v7-page-details"
+    QUERY_VERSION = "seat-queries-v8-contract-universe"
     COMBINATION_ORDER = (
         "ORDER BY CASE c.combination_id WHEN 'industrial_major' THEN 1 "
         "WHEN 'brokerage_proprietary' THEN 2 WHEN 'capital_strike' THEN 3 "
@@ -575,16 +575,32 @@ class DuckDBReader(DashboardReadPort):
             if product_code and product_code.strip().upper() not in {"ALL", "*"}
             else None
         )
-        product_sql, product_params = self._product_filter(normalized_product, "c.product_code")
+        product_sql, product_params = self._product_filter(normalized_product)
         contracts = _as_dicts(
             connection.execute(
-                "SELECT c.*, CASE WHEN isfinite(m.close) AND m.close > 0 THEN m.close END AS close_price, "
+                "WITH market AS (SELECT * FROM seat_dash_market_daily WHERE trade_date = ?" + product_sql +
+                " AND regexp_full_match(symbol, '[A-Z]+[0-9]{4}')"
+                " AND try_cast(right(symbol, 2) AS INTEGER) BETWEEN 1 AND 12), "
+                "codes AS (SELECT product_code, right(symbol, 3) AS suffix, min(symbol) AS symbol "
+                "FROM market WHERE exchange = 'CZCE' GROUP BY product_code, suffix HAVING count(*) = 1), "
+                "seats AS (SELECT c.* REPLACE (coalesce(k.symbol, c.symbol) AS symbol, "
+                "coalesce(k.symbol || '.CZCE', c.contract_code) AS contract_code, "
+                "coalesce(try_cast(right(k.symbol, 4) AS INTEGER), c.contract_month) AS contract_month) "
+                "FROM (SELECT * FROM seat_dash_contract_daily WHERE trade_date = ?" + product_sql + ") c "
+                "LEFT JOIN codes k ON c.product_code = k.product_code AND right(c.symbol, 3) = k.suffix "
+                "AND regexp_full_match(c.symbol, '[A-Z]+[0-9]{3}')), "
+                "contracts AS (SELECT coalesce(c.trade_date, m.trade_date) AS trade_date, "
+                "coalesce(c.product_code, m.product_code) AS product_code, "
+                "coalesce(c.contract_code, m.symbol || '.' || m.exchange) AS contract_code, "
+                "coalesce(c.symbol, m.symbol) AS symbol, "
+                "coalesce(c.contract_month, try_cast(regexp_extract(m.symbol, '([0-9]{4})$', 1) AS INTEGER)) AS contract_month, "
+                "c.total_long, c.total_short, c.net_position, c.seat_count, coalesce(c.batch_id, m.batch_id) AS batch_id, "
+                "CASE WHEN isfinite(m.close) AND m.close > 0 THEN m.close END AS close_price, "
                 "CASE WHEN isfinite(m.close) AND m.close > 0 THEN m.trade_date END AS price_date "
-                "FROM seat_dash_contract_daily c LEFT JOIN seat_dash_market_daily m "
-                "ON m.trade_date = c.trade_date AND m.product_code = c.product_code AND m.symbol = c.symbol "
-                "WHERE c.trade_date = ?" + product_sql +
-                " ORDER BY c.product_code, c.contract_rank LIMIT ?",
-                [selected_date, *product_params, max(limit, 100)],
+                "FROM market m FULL OUTER JOIN seats c USING (trade_date, product_code, symbol)) "
+                "SELECT *, row_number() OVER (PARTITION BY product_code ORDER BY contract_month NULLS LAST, contract_code) AS contract_rank "
+                "FROM contracts ORDER BY product_code, contract_rank" + ("" if normalized_product else " LIMIT ?"),
+                [selected_date, *product_params, selected_date, *product_params, *([] if normalized_product else [max(limit, 100)])],
             )
         )
         terms = _as_dicts(

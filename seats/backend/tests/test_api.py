@@ -127,3 +127,55 @@ def test_relocated_runtime_serves_without_source_scan(demo_runtime, tmp_path, mo
         assert response.status_code == 200
         assert response.json()["meta"]["trade_date"] == "2026-07-28"
         assert "database_path" not in response.json()["meta"]
+
+
+def test_term_contracts_include_market_only_without_filling_missing_seats(demo_reader, demo_runtime):
+    import duckdb
+
+    with duckdb.connect(str(next((demo_runtime / "snapshots").glob("*.duckdb")))) as connection:
+        symbols = [f"RB27{month:02d}" for month in range(1, 13)] + ["RB2801", "RB9999"]
+        connection.executemany(
+            "INSERT INTO seat_dash_market_daily VALUES ('2026-07-28', 'RB.SHFE', 'SHFE', ?, 3300, 50, 10, 1, 1)",
+            [(symbol,) for symbol in symbols],
+        )
+        connection.execute("UPDATE seat_dash_contract_daily SET total_short=total_long, net_position=0 WHERE symbol='RB2601'")
+        connection.execute("UPDATE seat_dash_market_daily SET close=0 WHERE symbol='RB2801'")
+        connection.execute("INSERT INTO seat_dash_market_daily VALUES ('2026-07-27', 'RB.SHFE', 'SHFE', 'RB2802', 3300, 50, 10, 1, 1)")
+    client = TestClient(create_app(reader=demo_reader))
+    response = client.get("/api/v1/views/term-structure", params={"product_code": "RB.SHFE", "trade_date": "2026-07-28", "detail": "contracts", "limit": 1})
+    assert response.status_code == 200, response.text
+    rows = response.json()["data"]["contracts"]
+    assert len(rows) == 15  # 13 market-only contracts and both disclosed seat contracts.
+    assert [row["contract_rank"] for row in rows] == list(range(1, 16))
+    assert [row["contract_month"] for row in rows] == sorted(row["contract_month"] for row in rows)
+    by_symbol = {row["symbol"]: row for row in rows}
+    assert by_symbol["RB2601"]["net_position"] == 0
+    assert by_symbol["RB2605"]["net_position"] == -400
+    assert by_symbol["RB2605"]["close_price"] is None
+    assert by_symbol["RB2701"]["close_price"] == 3300
+    assert by_symbol["RB2701"]["price_date"] == "2026-07-28"
+    assert all(by_symbol["RB2701"][key] is None for key in ("net_position", "total_long", "total_short", "seat_count"))
+    assert by_symbol["RB2801"]["close_price"] is None and by_symbol["RB2801"]["price_date"] is None
+    assert not {"CU2601", "RB2802", "RB9999"} & by_symbol.keys()
+
+
+def test_term_legacy_czce_code_uses_only_unique_same_day_market_match(demo_reader, demo_runtime):
+    import duckdb
+
+    with duckdb.connect(str(next((demo_runtime / "snapshots").glob("*.duckdb")))) as connection:
+        connection.executemany(
+            "INSERT INTO seat_dash_contract_daily VALUES ('2026-07-28', 'SH.CZCE', ?, ?, ?, 1, 100, 70, 30, 1, 1)",
+            [(s + ".CZCE", s, int(s[2:])) for s in ("SH611", "SH701")],
+        )
+        connection.executemany(
+            "INSERT INTO seat_dash_market_daily VALUES ('2026-07-28', 'SH.CZCE', 'CZCE', ?, 1500, 100, 10, 1, 1)",
+            [(s,) for s in ("SH2611", "SH2701", "SH3701")],
+        )
+    response = TestClient(create_app(reader=demo_reader)).get("/api/v1/views/term-structure", params={"product_code": "SH.CZCE"})
+    assert response.status_code == 200, response.text
+    rows = {row["symbol"]: row for row in response.json()["data"]["contracts"]}
+    assert set(rows) == {"SH2611", "SH701", "SH2701", "SH3701"}
+    assert rows["SH2611"]["net_position"] == 30 and rows["SH2611"]["close_price"] == 1500
+    assert rows["SH2611"]["contract_code"] == "SH2611.CZCE"
+    assert rows["SH701"]["close_price"] is None
+    assert rows["SH2701"]["net_position"] is None and rows["SH3701"]["net_position"] is None

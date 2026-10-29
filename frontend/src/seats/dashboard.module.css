@@ -1,4 +1,5 @@
 .dashboard{
+  --panel-inset: 20px;
   --bg: #fff;
   --surface: #fff;
   --surface-raised: #ffffff;
@@ -269,7 +270,7 @@
 .metricCard{
   position: relative;
   min-height: 112px;
-  padding: 16px 20px 14px;
+  padding: 16px var(--panel-inset) 14px;
   background: var(--surface);
 }
 
@@ -323,7 +324,7 @@
   align-items: flex-start;
   justify-content: space-between;
   min-height: 64px;
-  padding: 15px 20px;
+  padding: 15px var(--panel-inset);
   gap: 16px;
 }
 
@@ -343,7 +344,7 @@
 }
 
 .panelBadge{
-  padding: 4px 7px;
+  padding: 4px 0;
   color: var(--text-muted);
   font-size: 12px;
 }
@@ -365,9 +366,6 @@
   overflow-wrap: anywhere;
 }
 
-.matrixTable th:first-child, .matrixTable td:first-child, .rankingTable th:first-child, .rankingTable td:first-child, .anomalyTable th:first-child, .anomalyTable td:first-child, .validationTable th:first-child, .matrixTable th:last-child, .matrixTable td:last-child, .rankingTable th:last-child, .rankingTable td:last-child, .anomalyTable th:last-child, .anomalyTable td:last-child, .validationTable th:last-child, .validationTable td:last-child{
-  padding-right: 22px;
-}
 
 .matrixTable td{
   height: 65px;
@@ -484,7 +482,7 @@
   display: flex;
   align-items: center;
   min-height: 38px;
-  padding: 8px 22px;
+  padding: 8px var(--panel-inset);
   color: var(--text-muted);
   font-size: 13px;
   gap: 7px;
@@ -501,7 +499,7 @@
   display: grid;
   align-items: center;
   grid-template-columns: 32px minmax(100px, 1fr) 24px 75px 65px 90px;
-  padding: 0 22px;
+  padding: 0 var(--panel-inset);
   gap: 8px;
 }
 
@@ -586,6 +584,8 @@
   background: var(--surface-soft);
 }
 
+.rowTags .tagChip:last-child{ padding-right: 0; }
+
 .tagChipCompact{
   padding: 2px 5px;
   font-size: 12px;
@@ -596,7 +596,7 @@
   align-items: center;
   grid-template-columns: max-content repeat(var(--signal-count), minmax(0, 1fr));
   min-height: 74px;
-  padding: 0 22px;
+  padding: 0 var(--panel-inset);
 
   gap: 14px;
 }
@@ -797,7 +797,7 @@
   align-items: center;
   flex-wrap: wrap;
   min-height: 42px;
-  padding: 0 22px;
+  padding: 0 var(--panel-inset);
   color: var(--text-muted);
   font-size: 12px;
   gap: 15px;
@@ -858,8 +858,6 @@
 
 .termPriceLine{ position: absolute; z-index: 1; top: 0; left: 0; width: 100%; height: 166px; pointer-events: none; }
 
-.termPriceLabel{ color: var(--accent); font-size: 12px; white-space: nowrap; }
-
 .termColumn{
   display: grid;
   min-width: 0;
@@ -914,7 +912,7 @@
 }
 
 .oppositeList{
-  padding: 0 22px;
+  padding: 0 var(--panel-inset);
 }
 
 .oppositeRow{
@@ -949,12 +947,8 @@
 
 .oppositeDirection small{ color: var(--text-muted); font-size: 11px; }
 
-.oppositeRow .rowTags{
-  justify-content: flex-start;
-}
-
 .termChangeList{
-  padding: 0 22px;
+  padding: 0 var(--panel-inset);
 }
 
 .termChangeRow{
@@ -1336,7 +1330,7 @@ to{ opacity: 0.9; }
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
   gap: 16px;
-  padding: 0 20px;
+  padding: 0 var(--panel-inset);
 }
 
 .divergenceSignalCard{
@@ -1438,7 +1432,7 @@ to{ opacity: 0.9; }
 
 .marketGroups{
   display: grid;
-  padding: 0 22px 12px;
+  padding: 0 var(--panel-inset) 12px;
   gap: 16px;
 }
 
@@ -1528,7 +1522,7 @@ to{ opacity: 0.9; }
 
 .oppositeTotal b{ font-weight: 600; font-variant-numeric: tabular-nums; }
 
-.termTotals{ display: flex; flex-wrap: wrap; gap: 8px 24px; padding: 14px 22px;  color: var(--text-secondary); font-size: 13px; }
+.termTotals{ display: flex; flex-wrap: wrap; gap: 8px 24px; padding: 14px var(--panel-inset);  color: var(--text-secondary); font-size: 13px; }
 
 .termTotals strong, .termTotals b{ color: var(--text); font-weight: 600; }
 
@@ -1579,7 +1573,7 @@ to{ opacity: 0.9; }
 
 .twoColumnGrid{ grid-template-columns: 1fr; }
 
-.signalRibbon{ grid-template-columns: 1fr 1fr; padding: 14px 18px; }
+.signalRibbon{ grid-template-columns: 1fr 1fr; padding: 14px var(--panel-inset); }
 
 .signalRibbonIntro{ grid-column: 1 / -1; padding-bottom: 8px; }
 
@@ -1604,23 +1598,17 @@ to{ opacity: 0.9; }
 
 .metricValue{ font-size: 23px; }
 
-.panelHeader{ padding-right: 16px; padding-left: 16px; }
-
-.panelFootnote{ padding-right: 16px; padding-left: 16px; }
-
-.netRow{ grid-template-columns: 25px minmax(0, 1fr) 22px 62px 58px; padding: 0 16px; }
+.netRow{ grid-template-columns: 25px minmax(0, 1fr) 22px 62px 58px; padding: 0 var(--panel-inset); }
 
 .netRow .rowTags, .netRow.netHeader > :last-child{ display: none; }
 
 .treemap{ grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
 
-.marketGroups{ padding-inline: 16px; }
-
 .treeTile{ padding-inline: 8px; }
 
 .matrixTableWrap{ max-height: 560px; }
 
-.treeLegend{ padding: 0 16px; gap: 9px; }
+.treeLegend{ padding: 0 var(--panel-inset); gap: 9px; }
 
 .termChart{ padding-left: 58px; padding-right: 58px; }
 
@@ -1630,15 +1618,13 @@ to{ opacity: 0.9; }
 
 .termColumn strong{ font-size: 12px; }
 
-.oppositeList{ padding: 0 16px; }
-
 .oppositeRow{ grid-template-columns: minmax(0, 1fr) max-content; column-gap: 12px; padding: 12px 0; }
 
 .oppositeLegs{ grid-column: 1 / -1; }
 
 .oppositeDirection{ margin-right: 0; }
 
-.termChangeList{ padding: 0 16px; overflow-x: auto; }
+.termChangeList{ padding: 0 var(--panel-inset); overflow-x: auto; }
 
 .termChangeRow{ min-width: 520px; }
 
@@ -1763,17 +1749,13 @@ to{ opacity: 0.9; }
 
 .hoverHelp{ position: fixed; z-index: 1100; width: max-content; max-width: min(300px, calc(100vw - 24px)); padding: 10px 12px; border: 0; border-radius: 6px; background: var(--surface-soft); color: var(--text-secondary); font-family: inherit; font-size: 13px; font-weight: 400; line-height: 1.6; text-align: left; white-space: pre-line; overflow-wrap: anywhere; }
 
-.productSection{ --panel-inset: 20px; }
+:is(.matrixTable, .rankingTable, .anomalyTable, .validationTable) :is(th, td):first-child{ padding-left: var(--panel-inset); }
 
-.productSection .panelHeader, .productSection .netRow, .productSection .panelFootnote{ padding-inline: var(--panel-inset); }
-
-.productSection .rankingTable :is(th, td):first-child, .productSection .validationTable :is(th, td):first-child{ padding-left: var(--panel-inset); }
-
-.productSection .rankingTable :is(th, td):last-child, .productSection .validationTable :is(th, td):last-child{ padding-right: var(--panel-inset); }
+:is(.matrixTable, .rankingTable, .anomalyTable, .validationTable) :is(th, td):last-child{ padding-right: var(--panel-inset); }
 
 .productSection .validationSummary{ padding-inline: calc(var(--panel-inset) - 10px); }
 
 .productSection .historyMethod{ margin-inline: var(--panel-inset); }
-@media (max-width: 640px) {.productSection{ --panel-inset: 12px; } }
+@media (max-width: 640px) {.dashboard{ --panel-inset: 12px; } }
 
 .netRow{min-height:38px}

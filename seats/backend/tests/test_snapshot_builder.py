@@ -696,7 +696,8 @@ def test_czce_unresolved_zero_contracts_preserve_counts_without_guessing(tmp_pat
         assert db.execute("SELECT long_position,short_position,contract_count FROM seat_dash_product_seat_daily WHERE seat_name='兼容席位'").fetchone() == (0, 0, 2)
         assert db.execute("SELECT total_long,total_short,seat_count FROM seat_dash_product_daily WHERE product_code='CF.CZCE'").fetchone() == (10, 0, 2)
     result = DuckDBReader(runtime).view("term-structure", product_code="CF.CZCE")
-    assert [r["symbol"] for r in result["contracts"]] == ["CF2601"]
+    assert [r["symbol"] for r in result["contracts"]] == ["CF2601", "CF3108"]
+    assert result["contracts"][1]["net_position"] is None  # Never map ambiguous CF108 zero rows onto CF3108.
     assert result["main_contract_coverage"][0]["seat_status"] == "missing_seat"
     assert result["main_contract_coverage"][0]["symbol"] == "CF3108"
 

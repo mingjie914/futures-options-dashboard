@@ -207,9 +207,9 @@ interface ApiContract {
   symbol: string;
   contract_month: number | null;
   contract_rank: number;
-  total_long: number;
-  total_short: number;
-  net_position: number;
+  total_long: number | null;
+  total_short: number | null;
+  net_position: number | null;
   close_price?: number | null;
   price_date?: string | null;
 }
@@ -595,7 +595,7 @@ function treemapRows(rows: ApiMarketView["treemap"], products: ProductOption[]):
 }
 
 function contractRows(rows: ApiContract[]): TermContractRow[] {
-  return rows.slice(0, 12).map((row) => ({
+  return rows.map((row) => ({
     contractCode: row.contract_code,
     label: row.symbol || row.contract_code,
     netPosition: row.net_position,

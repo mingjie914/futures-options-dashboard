@@ -176,7 +176,7 @@ export interface TreemapItem {
 export interface TermContractRow {
   contractCode: string;
   label: string;
-  netPosition: number;
+  netPosition: number | null;
   isNear: boolean;
   closePrice?: number | null;
   priceDate?: string | null;
