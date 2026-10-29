@@ -1,6 +1,6 @@
 import { conditionalFetch as fetch } from '../../../frontend/src/transport.js';
 import {Metric,usePreference,RefreshButton} from '../../../frontend/src/charts.js';
-import {useEffect,useMemo,useRef,useState} from 'react';
+import {useEffect,useMemo,useState} from 'react';
 const fmt=v=>v==null?'—':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:2});
 const weak=(p,k)=>p?.['near_'+k]==null||p?.['far_'+k]==null?null:Math.min(p['near_'+k],p['far_'+k]);
 export const passesScan=(o,minHistory=0,minVolume=0)=>(minHistory<=0||(o.latest?.history_n??-1)>=minHistory)&&(minVolume<=0||(weak(o.latest,'volume')??-1)>=minVolume);
@@ -124,15 +124,10 @@ export function spreadMatrix(contracts, asOf, terms) {
 
 export function SpreadMatrix({data,onPair}) {
  const rows=useMemo(()=>spreadMatrix(data.contracts,data.meta.as_of,data.contract_terms),[data.contracts,data.meta.as_of,data.contract_terms]);
- const tableRef=useRef(null),[capacity,setCapacity]=useState(12),[page,setPage]=useState(0);
- useEffect(()=>{const el=tableRef.current;if(!el)return;const resize=()=>setCapacity(Math.max(1,Math.floor((el.clientWidth-64)/72)));resize();const observer=new ResizeObserver(resize);observer.observe(el);return()=>observer.disconnect();},[rows.length]);
- useEffect(()=>setPage(0),[rows[0]?.symbol]);
- const pages=Math.ceil(rows.length/capacity),size=Math.ceil(rows.length/Math.max(1,pages)),active=Math.min(page,pages-1),start=Math.max(0,active*size),columns=rows.slice(start,start+size);
  if(!rows.length)return null;
  return <section className="spread-matrix" aria-label="跨期价差矩阵">
   <div className="matrix-heading"><h2>跨期矩阵</h2><Metric label="对角收盘 / 右上价差 / 左下日均" hint="价差 = 近月 − 远月；日均 = 价差 ÷ 最后交易日间隔（自然日）。采用 RDS 当前修订日期，缺失或冲突不折算。点击切换组合。"/><span>{data.meta.as_of} · 最后交易日间隔</span></div>
-  {pages>1&&<div className="matrix-pager"><button type="button" aria-label="上一组合约列" disabled={active===0} onClick={()=>setPage(active-1)}>‹</button><span>{columns[0].symbol}—{columns.at(-1).symbol} · {active+1}/{pages}</span><button type="button" aria-label="下一组合约列" disabled={active===pages-1} onClick={()=>setPage(active+1)}>›</button></div>}
-  <div className="table-wrap" ref={tableRef}><table><colgroup><col style={{width:64}}/>{columns.map(row=><col key={row.symbol}/>)}</colgroup><thead><tr><th scope="col">合约</th>{columns.map(row=><th scope="col" key={row.symbol}>{row.symbol}</th>)}</tr></thead><tbody>{rows.map((row,i)=><tr key={row.symbol}><th scope="row">{row.symbol}</th>{row.cells.slice(start,start+size).map((cell,k)=>{const j=start+k;
+  <div className="table-wrap"><table style={{'--matrix-width':`${64+rows.length*72}px`}}><colgroup><col style={{width:64}}/>{rows.map(row=><col key={row.symbol}/>)}</colgroup><thead><tr><th scope="col">合约</th>{rows.map(row=><th scope="col" key={row.symbol}>{row.symbol}</th>)}</tr></thead><tbody>{rows.map((row,i)=><tr key={row.symbol}><th scope="row">{row.symbol}</th>{row.cells.map((cell,j)=>{
    const diagonal=i===j,selected=!diagonal&&cell.near===data.near&&cell.far===data.far,mark=[cell.maximum?'多':'',cell.minimum?'空':''].filter(Boolean).join('/');
    return <td key={rows[j].symbol} className={(diagonal?'matrix-price':i<j?'matrix-spread':'matrix-daily')+(selected?' matrix-selected':'')}>
     {diagonal?<span>{fmt(cell.value)}</span>:<button type="button" className={mark?'matrix-extreme':undefined} aria-pressed={selected} aria-label={`${cell.near} − ${cell.far}，${i<j?'价差':'日均'} ${fmt(cell.value)}${mark?'，'+mark+'头移仓参考':''}，选择组合`} onClick={()=>onPair(cell.near,cell.far)} title={`${cell.near} − ${cell.far}${mark?`；${mark}头移仓参考`:""}`}>
@@ -140,7 +135,6 @@ export function SpreadMatrix({data,onPair}) {
     </button>}
    </td>;
   })}</tr>)}</tbody></table></div>
-  <div className="matrix-roll-key"><Metric label="多：日均最大 · 空：日均最小" hint="仅比较有效日期组合；多头取最大、空头取最小。已有持仓固定近月列；不计分红与费用。"/><span>移仓参考</span></div>
  </section>;
 }
 
