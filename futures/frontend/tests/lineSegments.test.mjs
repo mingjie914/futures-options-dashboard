@@ -1,6 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {lineSegments, tooltipRows, seasonalSelection} from '../src/lineSegments.mjs';
+import {lineSegments, tooltipRows, seasonalSelection, inventoryHistory} from '../src/lineSegments.mjs';
+
+test('inventory keeps original units, null gaps, leap days and previous publication deltas', () => {
+  const points=[{date:'2023-12-29',value:12.5},{date:'2024-01-05',value:0},{date:'2024-02-23',value:null},{date:'2024-02-29',value:9},{date:'2024-03-08',value:11},{date:'2025-01-03',value:80}];
+  const result=inventoryHistory(points,'2024-12-31',1);
+  assert.deepEqual(result.rows.map(p=>p.change),[-12.5,null,null,2]);
+  assert.equal(result.rows[0].previous_date,'2023-12-29');
+  assert.equal(result.rows[0].value,0);
+  assert.equal(result.axis.length,366);
+  assert.equal(result.lines[0].points[2].x,'02-29');
+  assert.equal(inventoryHistory(points,'',0).lines.length,3);
+  assert.throws(()=>inventoryHistory([points[0],points[0]]),/重复日期/);
+  assert.deepEqual(inventoryHistory([], '',5).rows,[]);
+});
 
 test('seasonal defaults follow newest five available years, fewer years all visible', () => {
   const make=years=>years.map(year=>({year,label:`${year}年`}));

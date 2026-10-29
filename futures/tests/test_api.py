@@ -1257,3 +1257,47 @@ def test_version_uses_metadata_without_querying_history(setup, monkeypatch):
     assert client.get('/api/version').json() != second
     path.unlink()
     assert client.get('/api/version').status_code == 503
+
+
+def test_inventory_publication_scope_units_and_revision(setup):
+    client, store, _ = setup
+    url = '/api/inventory?product=RB&end=2026-09-04'
+    assert client.get(url).status_code == 503
+    folder = store.root.parent / 'futuresfundamentals'
+    folder.mkdir()
+    path = folder / 'part.parquet'
+    with duckdb.connect() as con:
+        con.execute('CREATE TABLE inventory(indicator VARCHAR,name VARCHAR,category VARCHAR,freq VARCHAR,unit VARCHAR,product VARCHAR,trade_date DATE,value DOUBLE)')
+        con.executemany('INSERT INTO inventory VALUES(?,?,?,?,?,?,?,?)', [
+            ('F_WR_RB_W','螺纹仓库仓单','仓单','D','吨','rb','2026-09-01',0),
+            ('F_WR_RB_W','螺纹仓库仓单','仓单','D','吨','rb','2026-09-02',None),
+            ('F_WR_RB_W','螺纹仓库仓单','仓单','D','吨','rb','2026-09-05',999),
+            ('F_WR_RB_F','螺纹厂库仓单','仓单','D','吨','rb','2026-09-01',20),
+            ('F_ST_RB_W','仓库库存','库存','W','吨','rb','2026-09-04',30),
+            ('F_WR_CF','棉花仓单','仓单','D','张','cf','2026-09-04',40),
+            ('LEGACY','未核实指标','库存','D','','rb','2026-09-04',888)])
+        con.execute('COPY inventory TO ? (FORMAT PARQUET)', [str(path)])
+        first = client.get(url)
+        assert first.status_code == 200
+        version = client.get('/api/version').json()['version']
+        data = first.json()
+        series = {s['id']:s for s in data['series']}
+        assert len(series) == 3 and data['preview'] is False
+        assert series['F_WR_RB_W']['points'] == [{'date':'2026-09-01','value':0},{'date':'2026-09-02','value':None}]
+        assert series['F_ST_RB_W']['frequency'] == 'W'
+        assert client.get('/api/inventory?product=CF').json()['series'][0]['unit'] == '张'
+        assert client.get('/api/inventory?product=I').json()['series'] == []
+        assert client.get('/api/inventory?product=RB&end=bad').status_code == 422
+        assert client.get(url, headers={'If-None-Match':first.headers['etag']}).status_code == 304
+        con.execute("UPDATE inventory SET value=5 WHERE indicator='F_WR_RB_W' AND trade_date='2026-09-01'")
+        revised = folder / 'revised.tmp'
+        con.execute('COPY inventory TO ? (FORMAT PARQUET)', [str(revised)])
+        revised.replace(path)
+        second = client.get(url, headers={'If-None-Match':first.headers['etag']})
+        assert second.status_code == 200 and second.headers['etag'] != first.headers['etag']
+        assert client.get('/api/version').json()['version'] != version
+        assert next(s for s in second.json()['series'] if s['id']=='F_WR_RB_W')['points'][0]['value'] == 5
+        con.execute("INSERT INTO inventory SELECT * FROM inventory WHERE indicator='F_WR_RB_F'")
+        con.execute('COPY inventory TO ? (FORMAT PARQUET)', [str(revised)])
+        revised.replace(path)
+        assert client.get(url).status_code == 503

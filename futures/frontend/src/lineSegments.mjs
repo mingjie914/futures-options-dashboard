@@ -1,4 +1,17 @@
 // Calendar padding is skipped, but an explicit missing observation breaks a line.
+export function inventoryHistory(points, end = '', years = 5) {
+  const all = points.filter(p => !end || p.date <= end).slice().sort((a,b) => a.date.localeCompare(b.date));
+  const firstYear = Number(all.at(-1)?.date.slice(0,4)) - years + 1;
+  const rows = all.map((p,i) => {
+    if (i && p.date === all[i-1].date) throw Error('同一序列存在重复日期');
+    const value = Number.isFinite(p.value) ? p.value : null, prev = all[i-1];
+    return {...p, value, previous_date: prev?.date, change: value != null && Number.isFinite(prev?.value) ? value - prev.value : null};
+  }).filter(p => !years || Number(p.date.slice(0,4)) >= firstYear);
+  const lines = Object.entries(Object.groupBy(rows,p=>p.date.slice(0,4))).map(([year,points])=>({year:Number(year),label:year,points:points.map(p=>({x:p.date.slice(5),trade_date:p.date,value:p.value}))}));
+  const axis = Array.from({length:366},(_,i)=>new Date(Date.UTC(2000,0,i+1)).toISOString().slice(5,10));
+  return {rows, lines, axis};
+}
+
 // Several segments share one legend name/color; no interpolated observations.
 export function seasonalSelection(lines, showAll=false) {
   const years = [...new Set(lines.map(l => l.year))].sort((a,b) => a-b);

@@ -103,7 +103,7 @@ def create_app(store=None):
     app.state.store = store
     radar_lock = Lock()
     def source_version(path):
-        files = store._files()
+        files = list((store.root.parent/'futuresfundamentals').glob('*.parquet')) if path == '/api/inventory' else store._files()
         if not files:
             files = list((store.runtime/'snapshots').glob('*.json'))
         if path.startswith('/api/fundamentals') or path == '/api/basis-reference':
@@ -115,7 +115,7 @@ def create_app(store=None):
     app.add_middleware(ResearchHTTP, version=source_version, cache=store.cache, code_version=code_version, session=store.read_session,
         concurrency=int(os.environ.get('FUTURES_HTTP_CONCURRENCY', '1')),
         paths=['/api/'+name for name in ('products','contracts','dashboard','spread-history',
-            'seasonal-position','contract-position','contract-history','basis-reference','radar','position-peaks',
+            'seasonal-position','contract-position','contract-history','basis-reference','inventory','radar','position-peaks',
             'fundamentals/analysis','fundamentals/review','fundamentals/candidates','data/futures_daily/rows')])
     public_hosts = [h.strip().lower() for h in os.environ.get('DASHBOARD_ALLOWED_HOSTS', '').split(',') if h.strip()]
     if any(any(c in h for c in '*:/') for h in public_hosts):
@@ -263,7 +263,7 @@ def create_app(store=None):
             if not store._files() and not any((store.runtime/'snapshots').glob('*.json')):
                 raise HTTPException(503, '数据版本暂不可用')
             # Metadata stats only: reuse the API fingerprint, including basis inputs.
-            value = sha256(repr([code_version, source_version('/api/basis-reference')]).encode()).hexdigest()
+            value = sha256(repr([code_version, source_version('/api/basis-reference'), source_version('/api/inventory')]).encode()).hexdigest()
             return JSONResponse({'version': value}, headers={'Cache-Control': 'no-store'})
         except (OSError, ValueError) as exc:
             raise HTTPException(503, '数据版本暂不可用') from exc
@@ -354,6 +354,31 @@ def create_app(store=None):
                 '近1月/3月/1年分别为30/90/365自然日窗口；分位使用此前最多252个有效配对，最少20个',
                 '20期均线含当日；窗口切换保留历史预热；缺失配对断线并重置均线',
                 '整品种缺失日期无法由观测日识别；图形不是交易信号']})
+
+    @app.get('/api/inventory')
+    def inventory(product: str, end: Optional[date] = None):
+        product = validate_product(product)
+        files = sorted((store.root.parent/'futuresfundamentals').glob('*.parquet'))
+        if not files:
+            raise HTTPException(503, '库存仓单数据尚未发布')
+        rows = store._query(files, '''SELECT indicator,name,category,freq,unit,trade_date::VARCHAR observation_date,value
+            FROM read_parquet(?) WHERE upper(product)=? AND trade_date<=?::DATE
+            AND (starts_with(indicator,'F_WR_') OR starts_with(indicator,'F_ST_'))
+            ORDER BY indicator,trade_date''', (product, (end or date.today()).isoformat()))
+        series = {}
+        for row in rows:
+            key = row['indicator']
+            if not row['unit'] or row['freq'] not in ('D','W'):
+                raise HTTPException(503, '库存仓单单位或频率尚未确认')
+            item = series.setdefault(key, dict(id=key,name=row['name'],kind=row['category'],unit=row['unit'],
+                frequency=row['freq'],source='交易所公开报表 · RDS',points=[]))
+            if (item['name'],item['kind'],item['unit'],item['frequency']) != (row['name'],row['category'],row['unit'],row['freq']):
+                raise HTTPException(503, '同一库存序列存在口径冲突')
+            if item['points'] and item['points'][-1]['date'] == row['observation_date']:
+                raise HTTPException(503, '库存仓单存在重复日期')
+            item['points'].append({'date':row['observation_date'],'value':row['value']})
+        return {'product':product,'as_of':max((r['observation_date'] for r in rows),default=None),
+                'preview':False,'history_scope':'all_published','series':list(series.values())}
 
     @app.get('/api/seasonal-position')
     def seasonal_position(product: str = 'RB', end: Optional[date] = None,
