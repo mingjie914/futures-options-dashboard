@@ -187,7 +187,7 @@ def create_app(store=None):
                 opportunities.append({'near': a['symbol'], 'far': b['symbol'], **pair['summary'],
                     'trend':[{'trade_date':p['trade_date'],'spread':p['spread']} for p in trend]})
             result['opportunities'] = opportunities
-        if view in ('all','curve'):
+        if view in ('all','curve','spread'):
             result['contract_terms'] = contract_terms(snapshot['product'],sorted({r['symbol'] for r in contracts}|{s for s in (near,far) if s}),meta['as_of'],store)
         if view == 'all':
             result['warnings'] = ['仅日终研究，非实时可成交报价', '合约目录来自已观测日线，未覆盖无成交挂牌合约',

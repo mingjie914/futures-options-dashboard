@@ -1148,6 +1148,7 @@ def test_published_contract_dates_keep_delivery_separate_and_invalidate_cache(se
         assert first.status_code == 200 and first.headers['etag'] != before.headers['etag']
         dates = first.json()['contract_terms']['contracts']
         assert dates and all(r['last_trade_date']=='2026-11-16' and r['last_delivery_date']=='2026-11-18' for r in dates)
+        assert client.get(url.replace('view=curve','view=spread')).json()['contract_terms']['contracts']==dates
         assert client.get('/api/version').json()['version'] != version
         assert client.get(url,headers={'If-None-Match':first.headers['etag']}).status_code == 304
         im = contract_terms('IM',['IM2703','IM2706'],'2026-10-29',store)['contracts']
@@ -1237,7 +1238,7 @@ def test_position_peaks_endpoint_cutoff_and_source_invalidation(setup):
     assert next(p for p in client.get('/api/products').json()['products'] if p['product']=='RB')['name']=='螺纹钢'
 
 
-@pytest.mark.parametrize('view,sections', [('catalog',[]),('spread',['spread','risk']),('curve',['curve','contract_terms']),('rollover',['spread','rollover']),('scan',['opportunities'])])
+@pytest.mark.parametrize('view,sections', [('catalog',[]),('spread',['spread','risk','contract_terms']),('curve',['curve','contract_terms']),('rollover',['spread','rollover']),('scan',['opportunities'])])
 def test_dashboard_view_preserves_values_and_omits_unrelated_sections(setup, view, sections):
     client, _, _ = setup
     full = client.get('/api/dashboard?product=RB').json()
