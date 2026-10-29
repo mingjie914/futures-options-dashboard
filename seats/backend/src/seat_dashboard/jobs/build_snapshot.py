@@ -1532,7 +1532,7 @@ def main(argv: list[str] | None = None) -> int:
         unsupported_publishers = sorted(set(settings.publish_stores) - {"duckdb"})
         if unsupported_publishers:
             raise RuntimeError(
-                "RDS publishing is reserved but not enabled in V1; unsupported publishers: "
+                "Unsupported DASHBOARD_PUBLISH_STORES: "
                 + ", ".join(unsupported_publishers)
             )
         source = ParquetSource(settings.seat_data_root, settings.market_1d_root, p2_only=args.p2_only)

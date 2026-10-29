@@ -16,7 +16,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mysql = ["pymysql>=1.1,<2"]
 test = [
   "pyarrow>=16,<22",
   "httpx>=0.27,<1",

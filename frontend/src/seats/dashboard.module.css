@@ -1344,17 +1344,6 @@ to{ opacity: 0.9; }
   gap: 8px;
 }
 
-.toastMark{
-  display: inline-grid;
-  width: 18px;
-  height: 18px;
-  place-items: center;
-  border-radius: 50%;
-  color: var(--surface-raised);
-  background: var(--positive);
-  font-size: 13px;
-}
-
 .toneAccent{ color: var(--accent); }
 
 .toneGold{ color: var(--gold); }

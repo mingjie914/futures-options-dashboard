@@ -4,34 +4,24 @@
 
 每日顺序：更新上游本地表、构建新快照、执行校验、发布 `current.json`、检查健康状态。构建失败不会替换当前成功批次。
 
-首次安装和本地启动：
+安装、前端构建、启动及回归统一使用[根目录 README](../../README.md)，不再维护独立前端或启动脚本。离线构建先复制 `seats/.env.example` 为 `seats/.env` 并设置实际输入目录和 `DASHBOARD_RUNTIME_ROOT`；统一启动的 `SEATS_RUNTIME` 指向相同运行目录。
+
+在研究看板根目录执行离线构建和校验：
 
 ```powershell
-Copy-Item .env.example .env
-python -m venv backend\.venv
-backend\.venv\Scripts\python.exe -m pip install -e "backend[test]"
-npm ci
-# 在 .env 设置实际 SEAT_LOCAL_ROOT 和 MARKET_1D_LOCAL_ROOT，再构建。
-backend\.venv\Scripts\python.exe -m seat_dashboard.jobs.build_snapshot --full
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\dev.ps1
+./.venv-seats/Scripts/python.exe -m seat_dashboard.jobs.build_snapshot --p2-only --full
+./.venv-seats/Scripts/python.exe -m seat_dashboard.jobs.verify_snapshot
 ```
 
-`--date YYYY-MM-DD` 适合快速开发快照；正式日常使用推荐 `--full`，从而保留席位历史、反转识别与统计验证所需历史窗口。API 请求只读取已发布 DuckDB，不扫描原始 Parquet。
+`--date YYYY-MM-DD` 只生成单日输出，适合开发验证；历史研究使用全量或已验证的 P2 增量快照。API 请求只读取已发布 DuckDB，不扫描原始 Parquet。
 
-验收命令：
-
-```powershell
-backend\.venv\Scripts\python.exe -m seat_dashboard.jobs.verify_snapshot
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\test.ps1
-```
-
-移机验证使用 `python -m seat_dashboard.jobs.verify_snapshot --runtime-root var --export-root var/cloud-ready`。仅将导出的数据库和清单作为 API 私有运行数据，配置运行目录后复验；前端只发布 `dist`。本地上传测试产物不代表未来生产长期从本机取数，正式数据来源与广播合同仍待云端方案确定。
+移机验证使用 `python -m seat_dashboard.jobs.verify_snapshot --runtime-root <运行目录> --export-root <新目录>`。仅将导出的数据库和清单作为 API 私有运行数据，配置运行目录后复验。生产数据与发布约定以[统一维护入口](../../docs/部署与统一维护入口.md)为准，本地构建不等于生产验收。
 
 ## 在线资源与离线构建
 
 在线 API 使用 `/api/seats/v1`（兼容 `/api/v1`），默认 1 个查询槽、DuckDB 每连接 1 线程/256 MB、每进程 128 MiB 响应缓存。配置项见 `.env.example`。这些是应用内限额；systemd Slice/进程数/反代由服务器配置控制，需单独验收总 RSS、OOM、CPU 和冷启动。
 
-构建 job 与 API 是独立命令/进程，API 不启动构建。当前 `--full` 创建新文件并重建维表、事实集市、信号、历史验证与校验；`--date` 生成所选日期输出，但历史窗口仍可能扫描源历史。所谓 raw 增量只指 raw 日期晚于派生表最大日期时补聚合新增日期，**不是跨快照全链增量**，不会处理旧日源端修订/删除。源变更契约未完成前，不改为仅追加、不虚报全增量。
+构建 job 与 API 是独立进程，API 不启动构建。`--full` 创建新快照；`--date` 生成单日输出，但历史窗口仍可能扫描源历史。P2 增量使用 `--p2-only --incremental-from <基线运行目录> --base-input-manifest <父清单> --input-manifest <当前清单>`：校验父批次、清单哈希和输入指纹后替换变化月份，处理修订、删除及其相邻日期影响，并重算所需历史统计；没有变化时跳过发布。输入必须是完整不可变批次，不能只凭最新日期判断增量；生产覆盖范围及自然变更验收仍以维护入口记录为准。
 
 ## 显式保留与清理
 
@@ -48,6 +38,8 @@ python -m seat_dashboard.jobs.prune_snapshots --runtime-root <运行目录>
 维护窗口停止构建/发布任务并等待旧查询结束后，再加 `--apply` 执行；需要取消年龄保护时显式传 `--min-age-hours 0`。发布指针变化时停止清理。旧批次清单/正式回滚操作、构建中临时磁盘上限和云端任务互斥仍需上线编排确认。本轮仅在测试临时目录验证删除，没有对现有研究/生产运行目录执行清理。
 
 ## 上线前发布一致性清单（2026-10-28 核对）
+
+以下保留当日证据和局限，不代表当前发布状态；后续变更见统一维护入口。
 
 | 环节 | 当前证据 | 上线待办 |
 | --- | --- | --- |

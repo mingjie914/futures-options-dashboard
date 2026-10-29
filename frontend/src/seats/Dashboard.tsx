@@ -310,7 +310,6 @@ export function Dashboard() {
       )}
       {toast && (
         <div className={styles.toast} role="status" aria-live="polite">
-          <span className={styles.toastMark} aria-hidden="true">✓</span>
           {toast}
         </div>
       )}

@@ -22,7 +22,6 @@ VENDOR_ROOT = FRONTEND_ROOT / "src" / "futures"
 MANIFEST_PATH = VENDOR_ROOT / "manifest.json"
 FUTURES_SOURCE_ROOT = FRONTEND_ROOT.parent / "futures" / "frontend" / "src"
 MANIFEST_VERSION = 1
-EXCLUDED_SOURCE_FILES = {PurePosixPath("main.jsx")}
 TEXT_SUFFIXES = {".css", ".html", ".js", ".jsx", ".json", ".mjs", ".ts", ".tsx"}
 RAW_API_PATH = re.compile(r"/api/(?!futures/v1/)")
 
@@ -90,8 +89,6 @@ def generated_entries(
     entries: list[dict[str, object]] = []
     for source_entry in source_entries:
         relative = PurePosixPath(str(source_entry["path"]))
-        if relative in EXCLUDED_SOURCE_FILES:
-            continue
         output = transform(relative, data_by_path[relative])
         output_by_path[relative] = output
         entries.append(
@@ -120,7 +117,6 @@ def write_stage(
         "manifest_version": MANIFEST_VERSION,
         "source_root": str(FUTURES_SOURCE_ROOT),
         "source_snapshot_sha256": source_hash,
-        "excluded_source_files": sorted(path.as_posix() for path in EXCLUDED_SOURCE_FILES),
         "source_files": source_entries,
         "files": output_entries,
     }

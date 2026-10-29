@@ -6,7 +6,7 @@ from typing import Any, Protocol
 
 
 class DashboardReadPort(Protocol):
-    """Page-oriented read contract shared by DuckDB and MySQL adapters."""
+    """Page-oriented snapshot read contract."""
 
     def snapshot_status(self) -> dict[str, Any]: ...
 

@@ -15,66 +15,6 @@ def _env_bool(name: str, default: bool = False) -> bool:
 
 
 @dataclass(frozen=True)
-class MySQLConfig:
-    host: str = ""
-    port: int = 3306
-    database: str = ""
-    user: str = ""
-    password: str = ""
-    ssl_ca: Path | None = None
-    connect_timeout: int = 10
-    read_timeout: int = 60
-    write_timeout: int = 60
-
-    @classmethod
-    def from_env(cls) -> "MySQLConfig":
-        ssl_ca = os.getenv("RDS_SSL_CA", "").strip()
-        return cls(
-            host=os.getenv("RDS_HOST", "").strip(),
-            port=int(os.getenv("RDS_PORT", "3306")),
-            database=os.getenv("RDS_DATABASE", "").strip(),
-            user=os.getenv("RDS_READER_USER", "").strip(),
-            password=os.getenv("RDS_READER_PASSWORD", ""),
-            ssl_ca=Path(ssl_ca) if ssl_ca else None,
-            connect_timeout=int(os.getenv("RDS_CONNECT_TIMEOUT", "10")),
-            read_timeout=int(os.getenv("RDS_READ_TIMEOUT", "60")),
-            write_timeout=int(os.getenv("RDS_WRITE_TIMEOUT", "60")),
-        )
-
-    @classmethod
-    def writer_from_env(cls) -> "MySQLConfig":
-        """Build a separate writer credential config without connecting to RDS."""
-        reader = cls.from_env()
-        return cls(
-            host=reader.host,
-            port=reader.port,
-            database=reader.database,
-            user=os.getenv("RDS_WRITER_USER", "").strip(),
-            password=os.getenv("RDS_WRITER_PASSWORD", ""),
-            ssl_ca=reader.ssl_ca,
-            connect_timeout=reader.connect_timeout,
-            read_timeout=reader.read_timeout,
-            write_timeout=reader.write_timeout,
-        )
-
-    def validate_for_connection(self) -> None:
-        missing = [
-            name
-            for name, value in (
-                ("RDS_HOST", self.host),
-                ("RDS_DATABASE", self.database),
-                ("RDS_READER_USER", self.user),
-                ("RDS_READER_PASSWORD", self.password),
-            )
-            if not value
-        ]
-        if missing:
-            raise RuntimeError(f"MySQL connection is not configured: {', '.join(missing)}")
-        if self.ssl_ca is None or not self.ssl_ca.is_file():
-            raise RuntimeError("RDS_SSL_CA must point to an existing CA certificate")
-
-
-@dataclass(frozen=True)
 class Settings:
     project_root: Path
     runtime_root: Path
@@ -95,7 +35,6 @@ class Settings:
     query_concurrency: int = 1
     cache_bytes: int = 128 * 1024 * 1024
     cors_origins: tuple[str, ...] = ("http://localhost:3000", "http://127.0.0.1:3000")
-    mysql: MySQLConfig = MySQLConfig()
 
     @classmethod
     def from_env(cls, project_root: Path | None = None) -> "Settings":
@@ -141,7 +80,6 @@ class Settings:
             query_concurrency=int(os.getenv("DASHBOARD_QUERY_CONCURRENCY", "1")),
             cache_bytes=int(os.getenv("DASHBOARD_CACHE_BYTES", str(128 * 1024 * 1024))),
             cors_origins=cors_origins,
-            mysql=MySQLConfig.from_env(),
         )
 
     @property

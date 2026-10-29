@@ -2,7 +2,7 @@
 
 ## 架构决策
 
-当前采用“显式配置的只读源 + 离线快照 + 页面级 API”。Parquet 是当前构建输入，DuckDB 是可迁移的服务快照，FastAPI 提供 REST 风格 HTTP 查询，静态 React 页面只理解 JSON 合同。生产输入将由云端采集/发布方案决定，本地研究目录仅用于开发测试，不是云端在线依赖。
+当前采用“显式配置的只读源 + 离线快照 + 页面级 API”。Parquet 是当前构建输入，DuckDB 是可迁移的服务快照，FastAPI 提供 REST 风格 HTTP 查询，静态 React 页面只理解 JSON 合同。生产输入来自权威 RDS 的不可变导出批次，本地研究目录仅用于开发测试，不是云端在线依赖。
 
 ```text
 derive_product_daily ─┐
@@ -27,9 +27,8 @@ market 1d ────────────┘                               
 - `adapters/source`：只读 Parquet 数据源。
 - `jobs/SnapshotBuilder`：唯一的大数据计算入口，生成指标、组合、信号和验证表。
 - `adapters/store/duckdb`：不可变快照发布与只读页面查询。
-- `adapters/store/mysql`：RDS 连接和未来读写实现边界。
 - `FastAPI`：统一信封、参数校验、历史查询。
-- `app/dashboard/adapter.ts`：后端字段到前端领域模型的唯一映射层。
+- `frontend/src/seats/adapter.ts`：后端字段到前端领域模型的唯一映射层。
 - `Dashboard.tsx`：只消费前端领域模型，不包含大数据公式。
 
 ## 快照发布
@@ -44,15 +43,7 @@ market 1d ────────────┘                               
 
 ## 页面数据流
 
-前端一次筛选并行读取：
-
-1. `/meta/options`
-2. `/views/combination`
-3. `/views/market-signals`
-4. `/views/term-structure`
-5. `/views/validation`
-
-接口返回同一批次和所选交易日。适配层统一中文名称、百分比、标签、空值和红多绿空语义。席位历史按需加载，避免首屏携带大序列。
+前端读取 `/meta/options` 和当前页的 `/views/combination`、`/views/market-signals` 或 `/views/term-structure`；合约结构页另读 `/views/validation`。适配层校验批次一致性，统一中文名称、百分比、标签、空值和红多绿空语义。席位历史按需加载，避免首屏携带大序列。
 
 ## 性能策略
 
@@ -62,18 +53,6 @@ market 1d ────────────┘                               
 - 组合一致性、异常倍数、跨期链和统计验证在快照阶段计算。
 - 版本化快照允许无停机切换和快速回滚。
 
-## RDS 迁移边界
+## RDS 消费边界
 
-RDS 是可选后续读取方案，项目不会从浏览器直连或修改原始表。上游管道使用 RDS `futuresseatraw`，本地 Parquet 目录为 `raw_seat_position`；生产表及接口以未来接入验证为准。
-
-迁移目标是将已验证的 `seat_dash_*` 看板表发布到 RDS：
-
-```text
-SnapshotBuilder → DuckDBPublisher
-                └→ MySQLMartPublisher → 阿里云 RDS seat_dash_*
-
-DuckDBReader ─────────┐
-MySQLDashboardReader ─┴→ 同一 API 合同 → 同一前端
-```
-
-MySQL 页面 SQL、幂等发布和影子对比完成前，`DASHBOARD_READ_STORE=mysql` 与 MySQL 发布会主动失败。切换前至少连续五批比较主键、行数、聚合指标和标准化 API 响应，并保留 DuckDB 回滚通道。
+RDS 保持权威上游，消费任务提供不可变 Parquet 批次，`SnapshotBuilder → DuckDBPublisher → DuckDBReader` 完成离线派生和在线查询；API 不直连 RDS，不写上游原始表。P2 输入与修订处理见[输入契约](rds-migration.md)，生产发布与部署见[统一维护入口](../../docs/部署与统一维护入口.md)。

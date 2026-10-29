@@ -9,7 +9,7 @@
     "build:refresh-futures": "python -X utf8 tools/build_frontend.py --refresh-futures && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/*.mjs tools/check_transport.mjs ../futures/frontend/tests/lineSegments.test.mjs ../futures/frontend/tests/market-panels.test.mjs"
+    "test": "node --test tests/*.mjs tools/check_*.mjs ../futures/frontend/tests/lineSegments.test.mjs ../futures/frontend/tests/market-panels.test.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "6.0.2",

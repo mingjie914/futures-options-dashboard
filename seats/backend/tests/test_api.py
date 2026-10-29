@@ -58,7 +58,7 @@ def test_all_product_alias_and_local_cors(demo_reader):
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
 
 
-def test_rds_read_switch_is_fail_closed_until_shadow_validation(tmp_path):
+def test_unsupported_read_store_is_fail_closed(tmp_path):
     settings = Settings(
         project_root=tmp_path,
         runtime_root=tmp_path / "var",
@@ -70,7 +70,7 @@ def test_rds_read_switch_is_fail_closed_until_shadow_validation(tmp_path):
         read_store="mysql",
     )
 
-    with pytest.raises(RuntimeError, match="reserved for the RDS migration phase"):
+    with pytest.raises(RuntimeError, match="Unsupported DASHBOARD_READ_STORE: mysql"):
         create_app(settings=settings)
 
 

@@ -23,11 +23,6 @@ logger = logging.getLogger(__name__)
 
 def _default_reader(settings: Settings) -> DashboardReadPort:
     if settings.read_store != "duckdb":
-        if settings.read_store == "mysql":
-            raise RuntimeError(
-                "DASHBOARD_READ_STORE=mysql is reserved for the RDS migration phase; "
-                "complete page-query implementation and shadow validation before enabling it"
-            )
         raise RuntimeError(f"Unsupported DASHBOARD_READ_STORE: {settings.read_store}")
     return DuckDBReader(
         settings.runtime_root,

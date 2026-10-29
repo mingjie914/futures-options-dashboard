@@ -47,9 +47,9 @@
 ## 统一约定
 
 - `product_code` 进入看板后统一转为大写形式，例如 `RB.SHFE`。
-- `seat_id` 为席位名称去首尾空格后的 MD5，便于 DuckDB/MySQL 迁移期间保持稳定。
+- `seat_id` 为席位名称去首尾空格后的 MD5，跨批次保持稳定。
 - 所有批次结果携带 `batch_id`。
-- `data_backend=local` 表示本地 DuckDB；`data_backend=demo` 只允许出现在显式 demo fixture；`data_backend=mysql` 预留给 RDS 阶段。
+- `data_backend=local` 表示 DuckDB 服务快照；`data_backend=demo` 只允许出现在显式 demo fixture。
 - `f2_value = net_position / (total_long + total_short)`；仅在分母有效时 `f2_status=ready`。
 - `net_cr5` 使用绝对净持仓前 5 名占全部席位绝对净持仓的比例。
 - `previous_net_position` 和 `net_position_change` 基于同品种同席位上一可用交易日；新出现与退出状态由 `entry_state` 标识。
