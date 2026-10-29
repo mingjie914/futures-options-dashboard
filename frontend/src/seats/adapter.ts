@@ -692,15 +692,10 @@ function mapMeta(meta: ApiMeta, selectedDate: string, productLabel: string, metr
     const details = gaps.slice(0, 3).map(row => `${row.product_code ?? "未知品种"}/${row.symbol ?? "主力未确定"}`).join("、");
     notices.push(`${selectedDate} 主力缺口：${[priceGaps && `价格 ${priceGaps} 个品种`, seatGaps && `席位 ${seatGaps} 个品种`].filter(Boolean).join("、")}（${details}${gaps.length > 3 ? "等" : ""}）`);
   }
-  for (const warning of meaningfulWarnings) {
-    const history = /^main layer pending: price=(\d+), seat=(\d+)$/.exec(warning);
-    if (warning === "P2 backfill provenance unavailable; not certified") notices.push("本批次未关联上游修订凭证");
-    else if (history) notices.push(`历史主力覆盖缺口：价格 ${history[1]}、席位 ${history[2]} 个品种交易日（非当日，两项可能重叠）`);
-    else notices.push("其他数据校验提示");
-  }
+  if (meaningfulWarnings.some(warning => warning !== "P2 backfill provenance unavailable; not certified" && !/^main layer pending: price=\d+, seat=\d+$/.test(warning))) notices.push("部分数据待核验");
   const state = metrics.length === 0
     ? "empty"
-    : notices.length > 0 ? "partial"
+    : notices.length > 0 || meaningfulWarnings.length > 0 ? "partial"
     : staleHours > 48 ? "stale" : "ready";
   return {
     state,

@@ -30,9 +30,9 @@ test("seat notices separate selected-day coverage from full-history gaps and pro
   const ready = [{ price_status: "ready", seat_status: "ready" }];
   const history = map(ready);
   assert.deepEqual(history.warnings, warnings);
-  assert.match(history.notice, /本批次未关联上游修订凭证/);
-  assert.match(history.notice, /历史主力覆盖缺口：价格 67、席位 6196 个品种交易日（非当日，两项可能重叠）/);
-  assert.doesNotMatch(history.notice, /2026-10-28|pending|更新/);
+  assert.equal(history.notice, "");
+  assert.equal(history.state, "partial");
+  assert.equal(map(ready, ["unknown validation warning"]).notice, "部分数据待核验");
   const partial = map([...ready, { product_code: "BC.INE", symbol: "BC2612", price_status: "ready", seat_status: "missing_seat" }]);
   assert.match(partial.notice, /2026-10-28 主力缺口：席位 1 个品种（BC.INE\/BC2612）/);
   assert.equal(partial.state, "partial");

@@ -308,7 +308,7 @@ export function Dashboard() {
             )}
           </div>
         )}
-        {loadState === "partial" && <p className={styles.dataNotice} role="status">数据提示 · {snapshot?.meta.notice || stateCopy.partial.detail}</p>}
+        {loadState === "partial" && snapshot?.meta.notice && <p className={styles.dataNotice} role="status">{snapshot.meta.notice}</p>}
       </main>
 
       {selectedTag && <TagInspector tag={selectedTag} onClose={() => setSelectedTag(null)} />}
@@ -821,9 +821,9 @@ function InlineEmpty({ label }: { label: string }) {
 function MarketView({ snapshot, scope, onSeat, onTag, onProduct }: { snapshot: DashboardSnapshot; scope: Scope; onSeat: (seatId: string, productCode?: string) => void; onTag: (tag: SeatTag) => void; onProduct: (productCode: string) => void }) {
   return (
     <div className={styles.pageStack}>
-      <MarketTreemap items={snapshot.treemap} onProduct={onProduct} />
-      <SignalRibbon counts={snapshot.overview.signalCounts} />
       <AnomalyTable rows={snapshot.anomalies} scope={scope} onSeat={onSeat} onTag={onTag} />
+      <SignalRibbon counts={snapshot.overview.signalCounts} />
+      <MarketTreemap items={snapshot.treemap} onProduct={onProduct} />
     </div>
   );
 }
@@ -884,6 +884,7 @@ function ProductView({ snapshot, onSeat, onTag }: { snapshot: DashboardSnapshot;
         <PanelHeader title={`${snapshot.meta.selectedProductLabel}概览`} />
         {snapshot.meta.selectedProductLabel !== "全市场" && <MetricGrid metrics={snapshot.overview.metrics} />}
       </div>
+      <ResearchSummary snapshot={snapshot} />
       <div className={styles.twoColumnGrid}>
         <NetPositionPanel rows={snapshot.netTop} onSeat={onSeat} onTag={onTag} />
         <TermChangePanel rows={snapshot.termStructure.topChanges} onSeat={onSeat} onTag={onTag} />
@@ -892,7 +893,6 @@ function ProductView({ snapshot, onSeat, onTag }: { snapshot: DashboardSnapshot;
         <SeatRankingPanel title="多头 Top20" rows={snapshot.longTop} onSeat={onSeat} onTag={onTag} />
         <SeatRankingPanel title="空头 Top20" rows={snapshot.shortTop} onSeat={onSeat} onTag={onTag} />
       </div>
-      <ResearchSummary snapshot={snapshot} />
     </div>
   );
 }
