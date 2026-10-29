@@ -449,7 +449,7 @@ def create_app(store=None):
                          years: int = Query(5, ge=1, le=10),
                          near_month: int = Query(10, ge=1, le=12),
                          far_month: int = Query(1, ge=1, le=12),
-                         far_year_offset: int = Query(1, ge=0, le=1),
+                         far_year_offset: int = Query(1, ge=0, le=99),
                          metric: str = 'position', price_type: str = 'close',
                          anchor_year: Optional[int] = Query(None, ge=2000, le=2099),
                          end: Optional[date] = None):
@@ -465,15 +465,20 @@ def create_app(store=None):
                 raise ValueError('无可用日期')
             end = date.fromisoformat(latest['meta']['as_of'])
         anchor_year = anchor_year or end.year
-        if not end.year-1 <= anchor_year <= end.year+2:
-            raise ValueError('对比末年须在截止年份前一年至后两年之间')
         if mode == 'overview':
             anchor_year = end.year
-        start = date(anchor_year-years-1, 1, 1)
+        if anchor_year < end.year-1 or mode == 'spread' and anchor_year+far_year_offset > 2099:
+            raise ValueError('对比末年不能早于截止年份前一年，远腿交割年份不能超过2099')
+        start = date(min(anchor_year,end.year)-years-1, 1, 1)
         try:
             snapshot = store.read(product, start.isoformat(), end.isoformat(), max_years=12)
         except (OSError, RuntimeError) as exc:
             raise HTTPException(503, '历史日线源不可用，且无对应快照') from exc
+        if mode != 'overview':
+            symbols = {r['symbol'] for r in snapshot['rows'] if r['symbol'][-4:] not in {'8888','9998','9999'}}
+            latest_year = max((analytics._contract(s)[1].year for s in symbols), default=end.year)
+            if anchor_year > latest_year:
+                raise ValueError('对比末年不能晚于已观测合约的最远交割年份')
         return {'meta': {**snapshot['meta'], 'read_start': start.isoformat(), 'anchor_year': anchor_year,
                          'comparison_years': years},
                 **analytics.contract_history(snapshot['rows'], mode, anchor_year, years,

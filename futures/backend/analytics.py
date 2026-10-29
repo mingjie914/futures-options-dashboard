@@ -376,8 +376,9 @@ def contract_history(rows, mode, anchor_year, years, near_month,
         raise ValueError('Unknown history metric')
     if not 1 <= years <= 10 or not 1 <= near_month <= 12 or not 1 <= far_month <= 12:
         raise ValueError('Invalid years or month')
-    if far_year_offset not in {0, 1} or (mode == 'spread' and far_year_offset*12+far_month <= near_month):
-        raise ValueError('远月必须晚于近月；跨年组合请选择次年')
+    if not 0 <= far_year_offset <= 99 or (mode == 'spread' and
+            (far_year_offset*12+far_month <= near_month or anchor_year+far_year_offset > 2099)):
+        raise ValueError('远月必须晚于近月，且交割年份不能超过2099')
     field = _field(price_type)
     contracts, daily, product = {}, {}, None
     for row in rows:

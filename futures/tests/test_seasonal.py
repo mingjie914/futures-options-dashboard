@@ -37,6 +37,17 @@ def history_row(day, symbol, position=10, close=100, volume=5):
                 close=close, settle_price=None, volume=volume)
 
 
+def test_spread_delivery_years_preserve_multi_year_gap_and_century_boundary():
+    rows = [history_row('2026-10-28', 'SC2611', close=600),
+            history_row('2026-10-28', 'SC2909', close=530)]
+    result = contract_history(rows, 'spread', 2026, 1, 11, 9, 3)
+    assert result['lines'][0]['label'] == 'SC2611 − SC2909'
+    assert result['lines'][0]['points'][0]['value'] == 70
+    for offset in (-1, 74, 100):
+        with pytest.raises(ValueError):
+            contract_history(rows, 'spread', 2026, 1, 11, 9, offset)
+
+
 def test_same_month_relative_year_and_same_day_share():
     rows = [history_row('2023-12-01', 'RB2405', 10),
             history_row('2023-12-01', 'RB2410', 30),

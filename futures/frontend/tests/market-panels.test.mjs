@@ -12,6 +12,28 @@ const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,m
 const module={exports:{}};
 new Function('module','exports','require',code)(module,module.exports,id=>id.startsWith('react')?sharedRequire(id):createRequire(import.meta.url)(id));
 const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel}=module.exports;
+
+test('seasonal spread follows selected legs and date despite a saved month preference',async()=>{
+ const source=await readFile(new URL('../src/HistoryPanel.jsx',import.meta.url),'utf8');
+ const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const effects=[],queries=[],module={exports:{}};
+ new Function('module','exports','require',code)(module,module.exports,id=>{
+  if(id==='react')return {...React,useEffect:fn=>effects.push(fn)};
+  if(id.endsWith('/charts.js'))return {usePreference:(key,initial)=>[key.endsWith('.month')?1:initial,()=>{}]};
+  if(id.endsWith('/transport.js'))return {conditionalFetch:url=>{queries.push(new URL(url,'http://test').searchParams);return Promise.resolve({ok:true,json:async()=>({lines:[]})});}};
+  return id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/HistoryPanel.jsx',import.meta.url))(id);
+ });
+ const props={product:'RB',end:'2026-10-28',near:'RB2701',far:'RB2703',priceType:'close',view:'spread'};
+ for(const change of [{},{near:'RB2612'},{near:'RB2612',far:'RB2705'},{near:'RB2611',far:'RB2612',end:'2026-10-14'},{view:'month',near:'RB2612'},{product:'SC',near:'SC2611',far:'SC2909'},{product:'SC',near:'SC2903',far:'SC2909'}]){
+  renderToStaticMarkup(React.createElement(module.exports.default,{...props,...change}));
+  effects.splice(0).forEach(effect=>effect());
+ }
+ assert.deepEqual(queries.map(q=>['near_month','far_month','far_year_offset','anchor_year','end'].map(k=>q.get(k))),[
+  ['1','3','0','2027','2026-10-28'],['12','3','1','2026','2026-10-28'],['12','5','1','2026','2026-10-28'],
+  ['11','12','0','2026','2026-10-14'],['1','3','1','2026','2026-10-28'],
+  ['11','9','3','2026','2026-10-28'],['3','9','0','2029','2026-10-28'],
+ ]);
+});
 test('linked date charts restore late mounts, synchronize both ways and detach without echoes',()=>{
  const chart=()=>({range:{start:0,end:100},calls:0,handlers:new Map(),
   on(name,fn){this.handlers.set(name,fn);},off(name){this.handlers.delete(name);},
@@ -69,7 +91,7 @@ test('basis keeps one control row, meaningful units and compact formula hints',(
 
 test('radar starts with all-product controls and does not require choosing a product',()=>{
  const html=renderToStaticMarkup(React.createElement(RadarPanel,{onSelect(){}}));
- assert.match(html,/扫描全部品种/);
+ assert.match(html,/type="submit"[^>]*>.*刷新/);
  assert.match(html,/name="min_volume"/);
  assert.match(html,/name="min_position"/);
  assert.doesNotMatch(html,/name="product"/);

@@ -17,7 +17,7 @@ export function IvHistory({rows,spot,snapshot,monthId}) {
     fetch('/api/options/v1/iv-history?'+new URLSearchParams({code:id,window,snapshot_id:snapshot.snapshot_id}),{signal:c.signal})
       .then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.detail||'历史读取失败');return {...d,window};})
       .then(setData).catch(e=>{if(e.name!=='AbortError')setError(e.message);});return()=>c.abort();
-  },[id,window,snapshot.snapshot_id]);
+  },[id,window,snapshot]);
   useChart(ref,chart=>chart.setOption({animation:false,color:['#4e7fb9','#8d9a93'],
     grid:{left:48,right:16,top:32,bottom:28},legend:{top:0,textStyle:{color:'#505c6b',fontSize:11}},
     tooltip:{trigger:'axis',valueFormatter:v=>v==null?'—':`${Number(v).toFixed(2)}%`},

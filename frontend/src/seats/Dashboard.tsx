@@ -10,6 +10,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import styles from "./dashboard.module.css";
+import { RefreshButton } from "../charts.js";
 import { defaultAdapter as adapter, marketGroups } from "./adapter";
 import { usePreference, selectedProduct, rememberProduct } from "../preferences.js";
 import type {
@@ -405,10 +406,7 @@ function FilterBar({
       </div>
       <div className={styles.filterActions}>
         {snapshot && <SnapshotStatus meta={snapshot.meta} />}
-        <button className={styles.primaryAction} type="button" onClick={onRefresh} disabled={isRefreshing} data-tooltip="按当前筛选检查本页已发布数据；其他页切换时检查。">
-          <span aria-hidden="true">{isRefreshing ? "◌" : "↻"}</span>
-          {isRefreshing ? "更新中" : "刷新"}
-        </button>
+        <RefreshButton onClick={onRefresh} busy={isRefreshing} />
       </div>
     </section>
   );
@@ -459,7 +457,7 @@ function EmptyPageState({ state, onRetry }: { state: DataState; onRetry: () => v
       <div className={styles.emptyGlyph} aria-hidden="true">{state === "error" ? "!" : "—"}</div>
       <h2>{copy.label}</h2>
       <p>{copy.detail}</p>
-      <button className={styles.primaryAction} type="button" onClick={onRetry}>重新读取</button>
+      <RefreshButton onClick={onRetry} />
     </div>
   );
 }

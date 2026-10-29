@@ -1,6 +1,6 @@
 import { conditionalFetch as fetch } from './transport.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useChart, Metric, usePreference } from './charts.js';
+import { useChart, Metric, usePreference, RefreshButton } from './charts.js';
 import './options.css';
 import SurfaceComparison, { IvHistory } from './SurfaceComparison.jsx';
 import { holdingRows, putCallRatio } from './holdings.js';
@@ -388,7 +388,7 @@ function HoldingTab({ snapshot, rows, month, months, spot, metric, onMetric, onO
       }
     }).catch(error => { if (!controller.signal.aborted) setPreviousMessage(error.message); });
     return () => controller.abort();
-  }, [snapshot.snapshot_id]);
+  }, [snapshot]);
   const comparable = previous?.trade_date === snapshot.trade_date && Date.parse(previous.asof) < Date.parse(snapshot.asof) && previous.rows.some(row => Number.isFinite(row.oi) || Number.isFinite(row.volume));
   const basisLabel = basis === 'snapshot' ? (comparable ? `较上一截面 ${formatDateTime(previous.asof)}` : '同日上一截面') : '较前一交易日持仓';
   const monthRows = useMemo(() => holdingRows(getMonthRows(rows, month?.id), comparable ? previous : null, basis), [rows, month?.id, previous, basis, comparable]);
@@ -653,9 +653,7 @@ export default function Options() {
 
         </div>
         {snapshot ? <SnapshotMeta snapshot={snapshot} /> : <span className="options-meta-line">等待数据</span>}
-        <div className="options-top-actions">
-          <button className="options-refresh-button" disabled={snapshotStatus === 'loading'} onClick={() => loadSnapshot()} type="button">{snapshotStatus === 'loading' ? '读取中…' : '刷新数据'}</button>
-        </div>
+        <RefreshButton busy={snapshotStatus === 'loading'} onClick={() => loadSnapshot()} />
       </header>
       {snapshotStatus === 'error' && snapshot ? <div className="options-refresh-error">当前快照读取异常：{snapshotError}</div> : null}
       <main className="options-main">

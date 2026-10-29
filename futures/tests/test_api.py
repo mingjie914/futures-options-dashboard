@@ -453,10 +453,52 @@ def test_contract_history_modes_and_unchanged_source(setup):
 
 @pytest.mark.parametrize('query', ['years=11', 'near_month=13', 'metric=sql',
     'mode=spread&near_month=10&far_month=1&far_year_offset=0',
+    'far_year_offset=100', 'far_year_offset=-1',
+    'mode=spread&anchor_year=2026&far_year_offset=74', 'anchor_year=2024',
     'mode=unknown', 'price_type=last', 'anchor_year=2040'])
 def test_contract_history_guards(setup, query):
     client, _, _ = setup
     assert client.get('/api/contract-history?product=RB&end=2026-09-02&'+query).status_code == 422
+
+
+@pytest.mark.parametrize('future_near', [False, True])
+def test_contract_history_long_delivery_pairs_and_full_seasonal_window(setup, future_near):
+    client, store, _ = setup
+    offset = 0 if future_near else 3
+    month = 3 if future_near else 11
+    anchor = 2029 if future_near else 2026
+    for index, year in enumerate((2024, 2025, 2026)):
+        delivery = year + (3 if future_near else 0)
+        partition = store.root / f'year_month={year}-10'
+        partition.mkdir()
+        with duckdb.connect() as con:
+            con.execute("""CREATE TABLE daily AS SELECT 'INE' AS exchange, symbol,
+                CAST(? AS TIMESTAMP) AS trade_datetime, CAST(? AS DATE) AS trade_date,
+                price AS open, price+1 AS high, price-1 AS low, price AS close,
+                100.0 AS volume, 10000.0 AS amount, 200.0 AS position,
+                price AS settle_price, price AS pre_settle_price
+                FROM (VALUES (?, ?::DOUBLE), (?, ?::DOUBLE)) AS t(symbol,price)""",
+                [f'{year}-10-28', f'{year}-10-28', f'SC{delivery%100:02d}{month:02d}',
+                 500+index*100, f'SC{(delivery+offset)%100:02d}09', 460+index*90])
+            con.execute('COPY daily TO ? (FORMAT PARQUET)', [str(partition/'data.parquet')])
+    query = (f'/api/contract-history?product=SC&end=2026-10-28&mode=spread&years=3'
+             f'&anchor_year={anchor}&near_month={month}&far_month=9&far_year_offset={offset}')
+    response = client.get(query)
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result['meta']['read_start'] == '2022-01-01'
+    assert [line['points'][0]['value'] for line in result['lines']] == [40, 50, 60]
+    assert result['seasonal_summary']['current']['value'] == 60
+    assert [p['value'] for p in result['seasonal_summary']['samples']] == [40, 50]
+    assert client.get(query.replace(f'anchor_year={anchor}', 'anchor_year=2030')).status_code == 422
+
+
+def test_contract_history_empty_dates_do_not_invent_future_delivery_years(setup):
+    client, _, _ = setup
+    query = '/api/contract-history?product=CU&end=2026-09-01'
+    result = client.get(query)
+    assert result.status_code == 200 and result.json()['lines'] == []
+    assert client.get(query+'&anchor_year=2029').status_code == 422
 
 
 @pytest.mark.parametrize('query', [

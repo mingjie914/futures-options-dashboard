@@ -65,8 +65,9 @@ export default function HistoryPanel({product, end, near, far, priceType, revisi
   const spreadOnly=view==='spread',mode=spreadOnly?'spread':view==='month'?'same_month':'overview';
   const [years, setYears] = usePreference('futures.history.'+view+'.years',5);
   const [month, setMonth] = usePreference('futures.history.'+view+'.'+product+'.month',Number(near?.slice(-2)) || 10);
-  const [farMonth] = useState(Number(far?.slice(-2)) || 1);
-  const [offset] = useState(near && far && near.slice(-4,-2) === far.slice(-4,-2) ? 0 : 1);
+  const nearMonth = spreadOnly ? Number(near.slice(-2)) : month;
+  const farMonth = Number(far?.slice(-2)) || 1;
+  const offset = near && far ? Number(far.slice(-4,-2)) - Number(near.slice(-4,-2)) : 1;
   const [metric, setMetric] = usePreference('futures.history.metric','position');
   const [overviewMetric, setOverviewMetric] = usePreference('futures.history.overviewMetric','price');
   const [overviewStyle, setOverviewStyle] = usePreference('futures.history.overviewStyle','line');
@@ -77,14 +78,14 @@ export default function HistoryPanel({product, end, near, far, priceType, revisi
   useEffect(() => {
     const controller = new AbortController();
     setResult(null); setError('');
-    const query = new URLSearchParams({product, end, mode, years, near_month: month, far_month: farMonth, far_year_offset: offset, metric: effectiveMetric, price_type: priceType, anchor_year: anchorYear});
+    const query = new URLSearchParams({product, end, mode, years, near_month: nearMonth, far_month: farMonth, far_year_offset: offset, metric: effectiveMetric, price_type: priceType, anchor_year: anchorYear});
     fetch('/api/contract-history?' + query, {signal: controller.signal}).then(async response => {
       const data = await response.json();
       if (!response.ok) throw Error(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail));
       setResult(data);
     }).catch(e => {if (e.name !== 'AbortError') setError(e.message);});
     return () => controller.abort();
-  }, [product, end, mode, years, month, farMonth, offset, effectiveMetric, priceType, anchorYear, revision]);
+  }, [product, end, mode, years, nearMonth, farMonth, offset, effectiveMetric, priceType, anchorYear, revision]);
   const metricControl = mode === 'same_month' ? <select aria-label="对比指标" value={metric} onChange={e => setMetric(e.target.value)}><option value="position">持仓手数</option><option value="position_share">持仓占比</option><option value="price">合约价格</option><option value="volume">成交量</option></select> : mode === 'overview' ? <select aria-label="对比指标" value={overviewMetric} onChange={e => setOverviewMetric(e.target.value)}><option value="price">合约价格</option><option value="position">持仓手数</option><option value="position_share">持仓占比</option></select> : null;
   const yearsControl = <label>历史跨度<select value={years} onChange={e => setYears(Number(e.target.value))}>{[3,5,10].map(n => <option key={n} value={n}>{n}年</option>)}</select></label>;
   return <section className="panel history-panel">

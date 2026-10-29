@@ -2,6 +2,11 @@ import { createElement, useEffect, useId, useLayoutEffect, useRef, useState } fr
 
 export { usePreference } from './preferences.js';
 
+export function RefreshButton({busy=false, onClick, type='button'}) {
+  return createElement('button', {className:'board-refresh', type, onClick, disabled:busy},
+    createElement('span', {'aria-hidden':true}, busy ? '◌' : '↻'), busy ? '更新中' : '刷新');
+}
+
 export function ChartFrame({children}) {
   const ref=useRef(), [expanded,setExpanded]=useState(false), [error,setError]=useState('');
   useEffect(()=>{const change=()=>setExpanded(document.fullscreenElement===ref.current);document.addEventListener('fullscreenchange',change);return()=>document.removeEventListener('fullscreenchange',change);},[]);

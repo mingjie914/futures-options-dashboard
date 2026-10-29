@@ -39,3 +39,8 @@
 .unified-shell .board-content input[role=combobox]{padding-right:24px}
 
 .board-update{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:12px;width:min(1320px,calc(100% - 28px));margin:0 auto 16px;color:var(--muted);font-size:13px}.board-update button{padding:0;border:0;background:none;color:inherit;font:inherit;cursor:pointer}.board-update button:is(:hover,:focus-visible){color:var(--ink)}
+
+.unified-shell .board-content .board-refresh{order:99;flex-shrink:0;min-height:36px;margin-left:auto;padding:0 12px;border:0;border-radius:6px;background:#20252d;color:#fff;font:500 15px/24px Inter,"PingFang SC","Microsoft YaHei",sans-serif}
+.unified-shell .board-content .board-refresh:hover:not(:disabled){background:#446d9c;color:#fff}.unified-shell .board-content .board-refresh:disabled{opacity:.55;cursor:not-allowed}.board-refresh>span{margin-right:5px;font-size:14px;font-weight:500}
+.futures-module .board-refresh,.options-module .board-refresh{margin-right:20px}
+@media(max-width:640px){.futures-module .board-refresh,.options-module .board-refresh{margin-right:12px}}
