@@ -35,7 +35,7 @@ export default function SpreadPanel({data,revision,controls}) {
    dataZoom:[{type:'inside',xAxisIndex:panels.map((_,i)=>i)},{type:'slider',xAxisIndex:panels.map((_,i)=>i),bottom:8,height:17}],series});
 
  },[result,ma,legs,rank,data.near,data.far]);
- const spanControl=<label>历史跨度<select value={span} onChange={e=>setSpan(e.target.value)}>{[['1m','近1月'],['3m','近3月'],['1y','近1年'],['all','共同有效历史']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>;
+ const spanControl=<label>跨度<select aria-label="历史跨度" value={span} onChange={e=>setSpan(e.target.value)}>{[['1m','近1月'],['3m','近3月'],['1y','近1年'],['all','共同有效历史']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>;
  return <section className="panel" id="spread-history"><div className="filters">{controls(spanControl)}
    {[[ma,setMa,'20期均线'],[legs,setLegs,'两腿价格联动'],[rank,setRank,'历史分位']].map(([v,fn,label])=><label className="check" key={label}><input type="checkbox" checked={v} onChange={e=>fn(e.target.checked)}/>{label}</label>)}
   </div>

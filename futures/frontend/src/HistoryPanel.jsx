@@ -87,13 +87,13 @@ export default function HistoryPanel({product, end, near, far, priceType, revisi
     return () => controller.abort();
   }, [product, end, mode, years, nearMonth, farMonth, offset, effectiveMetric, priceType, anchorYear, revision]);
   const metricControl = mode === 'same_month' ? <select aria-label="对比指标" value={metric} onChange={e => setMetric(e.target.value)}><option value="position">持仓手数</option><option value="position_share">持仓占比</option><option value="price">合约价格</option><option value="volume">成交量</option></select> : mode === 'overview' ? <select aria-label="对比指标" value={overviewMetric} onChange={e => setOverviewMetric(e.target.value)}><option value="price">合约价格</option><option value="position">持仓手数</option><option value="position_share">持仓占比</option></select> : null;
-  const yearsControl = <label>历史跨度<select value={years} onChange={e => setYears(Number(e.target.value))}>{[3,5,10].map(n => <option key={n} value={n}>{n}年</option>)}</select></label>;
+  const yearsControl = <label>跨度<select aria-label="历史跨度" value={years} onChange={e => setYears(Number(e.target.value))}>{[3,5,10].map(n => <option key={n} value={n}>{n}年</option>)}</select></label>;
   return <section className="panel history-panel">
     <div className="filters history-toolbar">{title&&<h2 className="section-label">{title}</h2>}{controls?controls(spreadOnly?yearsControl:metricControl):metricControl}
       {(!spreadOnly||!controls)&&yearsControl}
-      {!spreadOnly && mode !== 'overview' && <label>交割月份<select value={month} onChange={e => setMonth(Number(e.target.value))}>{Array.from({length:12}, (_,i) => <option key={i+1} value={i+1}>{i+1}月</option>)}</select></label>}
+      {!spreadOnly && mode !== 'overview' && <label>交割月<select aria-label="交割月份" value={month} onChange={e => setMonth(Number(e.target.value))}>{Array.from({length:12}, (_,i) => <option key={i+1} value={i+1}>{i+1}月</option>)}</select></label>}
       {mode === 'overview' && overviewMetric !== 'price' && <label>呈现方式<select value={overviewStyle} onChange={e => setOverviewStyle(e.target.value)}><option value="line">各合约曲线</option><option value="heatmap">持仓热力图</option></select></label>}
-      {info}{result&&<span className="sub">{anchorYear-years+1}—{anchorYear} · {result.lines.length}条{result.missing.length?` · 缺${result.missing.length}组`:""}{result.meta.stale?" · 缓存降级":""}</span>}
+      {info}{result&&<span className="sub" title={result.missing.length?'缺少序列：'+result.missing.join('、'):undefined}>{anchorYear-years+1}—{anchorYear}{mode==='overview'?` · ${result.lines.length}合约`:result.missing.length?` · 缺${result.missing.length}年`:""}{result.meta.stale?" · 缓存降级":""}</span>}
     </div>
     {error ? <p className="error" role="alert">{error}</p> : !result ? <p className="empty" role="status">正在读取历史合约…</p> : <>
       {result.lines.length ? <HistoryChart result={result} heatmap={mode === 'overview' && effectiveMetric !== 'price' && overviewStyle === 'heatmap'}/> : <p className="empty">所选月份组合在当前数据中没有可比较序列</p>}

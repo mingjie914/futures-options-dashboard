@@ -104,11 +104,12 @@
 }
 
 .filterBar{
+  position: relative;
   display: flex;
   align-items: end;
   flex-wrap: wrap;
   margin-top: 10px;
-  padding: 12px 20px;
+  padding: 12px 116px 12px 20px;
   background: var(--surface);
   gap: 20px;
 }
@@ -172,6 +173,8 @@
   align-items: center;
   gap: 16px;
 }
+
+.filterActions :global(.board-refresh){position:absolute;top:35px;right:20px;margin:0}
 
 
 .snapshotStatus{
@@ -1726,7 +1729,8 @@ to{ opacity: 0.9; }
 .filterField input[type="date"]{ width: 148px; line-height: normal; font-variant-numeric: tabular-nums; }
 
 .matrixSort:hover{ background: var(--surface-soft); }
-@media (max-width: 640px) {.filterBar{ padding-inline: 12px; }
+@media (max-width: 640px) {.filterBar{ padding-inline: 12px 108px; }
+.filterActions :global(.board-refresh){right:12px}
 
 .filterField input, .filterField select, .tableControls select, .matrixSort{ font-size: 14px; padding: 7px 6px; }
 
