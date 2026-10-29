@@ -372,8 +372,9 @@ def create_app(store=None):
                 raise HTTPException(503, '库存仓单单位或频率尚未确认')
             item = series.setdefault(key, dict(id=key,name=row['name'],kind=row['category'],unit=row['unit'],
                 frequency=row['freq'],source='交易所公开报表 · RDS',points=[]))
-            if (item['name'],item['kind'],item['unit'],item['frequency']) != (row['name'],row['category'],row['unit'],row['freq']):
+            if (item['kind'],item['unit'],item['frequency']) != (row['category'],row['unit'],row['freq']):
                 raise HTTPException(503, '同一库存序列存在口径冲突')
+            item['name'] = row['name']  # Exchange display-name changes do not change the series identity.
             if item['points'] and item['points'][-1]['date'] == row['observation_date']:
                 raise HTTPException(503, '库存仓单存在重复日期')
             item['points'].append({'date':row['observation_date'],'value':row['value']})

@@ -1270,7 +1270,7 @@ def test_inventory_publication_scope_units_and_revision(setup):
         con.execute('CREATE TABLE inventory(indicator VARCHAR,name VARCHAR,category VARCHAR,freq VARCHAR,unit VARCHAR,product VARCHAR,trade_date DATE,value DOUBLE)')
         con.executemany('INSERT INTO inventory VALUES(?,?,?,?,?,?,?,?)', [
             ('F_WR_RB_W','螺纹仓库仓单','仓单','D','吨','rb','2026-09-01',0),
-            ('F_WR_RB_W','螺纹仓库仓单','仓单','D','吨','rb','2026-09-02',None),
+            ('F_WR_RB_W','螺纹钢仓库仓单','仓单','D','吨','rb','2026-09-02',None),
             ('F_WR_RB_W','螺纹仓库仓单','仓单','D','吨','rb','2026-09-05',999),
             ('F_WR_RB_F','螺纹厂库仓单','仓单','D','吨','rb','2026-09-01',20),
             ('F_ST_RB_W','仓库库存','库存','W','吨','rb','2026-09-04',30),
@@ -1283,6 +1283,7 @@ def test_inventory_publication_scope_units_and_revision(setup):
         data = first.json()
         series = {s['id']:s for s in data['series']}
         assert len(series) == 3 and data['preview'] is False
+        assert series['F_WR_RB_W']['name'] == '螺纹钢仓库仓单'
         assert series['F_WR_RB_W']['points'] == [{'date':'2026-09-01','value':0},{'date':'2026-09-02','value':None}]
         assert series['F_ST_RB_W']['frequency'] == 'W'
         assert client.get('/api/inventory?product=CF').json()['series'][0]['unit'] == '张'
