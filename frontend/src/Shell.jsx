@@ -70,7 +70,7 @@ export default function Shell() {
         onPointerEnter={event=>{if(!touch&&event.pointerType==='mouse')menu.current.open=true;}}
         onPointerLeave={event=>{if(!touch&&event.pointerType==='mouse')menu.current.open=false;}}
         onFocus={()=>{if(!touch)menu.current.open=true;}}
-        onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))menu.current.open=false;}}
+        onBlur={event=>{if(event.relatedTarget&&!event.currentTarget.contains(event.relatedTarget))menu.current.open=false;}}
         onKeyDown={event => { if (event.key === 'Escape') { menu.current.querySelector(touch ? 'summary' : 'summary a').focus(); menu.current.open=false; event.preventDefault(); } }}>
         <summary tabIndex={touch ? undefined : -1} aria-label={touch ? '切换看板' : undefined}>{touch ? '看板' : <a href={`${BASE}${modules[0][0]}/`} aria-label="切换看板" onClick={event=>select(event, modules[0][0])}>看板</a>}</summary>
         <div className="board-menu__items">{modules.map(([id, label]) => <a key={id} href={`${BASE}${id}/`} aria-current={active === id ? 'page' : undefined} onClick={event => select(event, id)}><span>{label}</span></a>)}</div>
