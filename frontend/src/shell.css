@@ -18,7 +18,7 @@
 .board-menu__items{position:absolute;top:100%;left:-12px;display:flex;flex-direction:column;gap:2px;width:160px;padding:10px 0;background:#fff}
 .board-menu__items a{display:flex;flex-direction:column;gap:0;padding:7px 12px 9px;color:#737373}.board-menu__items a>span{font-size:16px;font-weight:480;line-height:24px}.board-menu__items a:is(:hover,:focus-visible){background:none;outline:none}.board-menu__items a:is(:hover,:focus-visible)>span{font-weight:550}.board-menu__items [aria-current]{color:var(--ink)}
 .module-frame{min-height:calc(100vh - 76px)}.module-error,.module-loading{width:min(1320px,100% - 64px);margin:32px auto;color:var(--muted);overflow-wrap:anywhere}.module-error h2{font-size:18px;font-weight:500}.module-error button{padding:9px 16px;border:0;border-radius:8px;background:#20252d;color:white}
-@media(max-width:600px){.unified-topbar{height:68px}.unified-topbar>nav{width:calc(100% - 28px);padding:0;gap:16px}.unified-topbar .unified-brand{font-size:24px}.board-menu__items{left:auto;right:-12px;width:200px}.module-error,.module-loading{width:calc(100% - 28px)}}
+@media(max-width:600px){.unified-topbar{height:68px}.unified-topbar>nav{width:calc(100% - 28px);padding:0;gap:16px}.unified-topbar .unified-brand{font-size:24px}.board-menu__items{width:max-content;min-width:120px}.module-error,.module-loading{width:calc(100% - 28px)}}
 
 /* Inter license: /inter-OFL.txt */
 
