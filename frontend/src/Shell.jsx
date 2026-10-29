@@ -1,3 +1,4 @@
+import { watchVersion } from './version-check.js';
 import { selectedProduct } from './preferences.js';
 import { Component, lazy, Suspense, useEffect, useRef, useState } from 'react';
 
@@ -23,6 +24,11 @@ class ModuleErrorBoundary extends Component {
 
 export default function Shell() {
   const [active, setActive] = useState(currentModule);
+  const [versionState, setVersionState] = useState({ updated: false, failed: false });
+  useEffect(() => {
+    setVersionState({ updated: false, failed: false });
+    return watchVersion(active, setVersionState);
+  }, [active]);
   const menu = useRef(null);
   const lastView = useRef({});
   useEffect(() => {
@@ -70,6 +76,10 @@ export default function Shell() {
         <ActiveModule />
       </Suspense></ModuleErrorBoundary>
     </div>
+    {(versionState.updated || versionState.failed) && <div className="board-update" role="status">
+      {versionState.updated && <button type="button" onClick={() => location.reload()}>数据已更新 · 更新</button>}
+      {versionState.failed && <span>更新检查暂不可用</span>}
+    </div>}
     <site-footer lang="zh-CN" />
   </div>;
 }

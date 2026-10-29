@@ -1161,3 +1161,21 @@ def test_configured_public_host_preserves_origin_guard(setup, monkeypatch):
     monkeypatch.setenv('DASHBOARD_ALLOWED_HOSTS', '*')
     with pytest.raises(ValueError, match='explicit hostnames'):
         create_app(store)
+
+def test_version_uses_metadata_without_querying_history(setup, monkeypatch):
+    client, store, path = setup
+    monkeypatch.setattr(store, '_query', lambda *a, **k: pytest.fail('version must not query history'))
+    first = client.get('/api/version')
+    assert first.status_code == 200
+    assert first.headers['cache-control'] == 'no-store'
+    assert client.get('/api/version').json() == first.json()
+    # Both market revisions and basis source publication must be visible.
+    path.touch()
+    second = client.get('/api/version').json()
+    assert second != first.json()
+    folder = store.runtime / 'fundamental_lab'
+    folder.mkdir(parents=True)
+    (folder / 'accepted_review.json').write_text('{}')
+    assert client.get('/api/version').json() != second
+    path.unlink()
+    assert client.get('/api/version').status_code == 503

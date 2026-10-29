@@ -142,3 +142,21 @@ def test_public_readonly_blocks_retired_actions_and_hides_shared_records(monkeyp
             assert client.post('/api/'+path).status_code==403
         assert called==[]
         assert client.get('/api/options/v1/snapshot').headers['x-snapshot-state']=='empty'
+
+def test_version_detects_publication_without_normalizing_snapshot(tmp_path, monkeypatch):
+    folder = tmp_path / 'snapshot'
+    folder.mkdir()
+    monkeypatch.setattr(app_module, '_active_folder', lambda: folder)
+    monkeypatch.setattr(app_module, 'normalize', lambda *_: pytest.fail('version must not parse a snapshot'))
+    client = TestClient(app)
+    assert client.get('/api/options/v1/version').status_code == 503
+    path = folder / 'chain.json'
+    path.write_text('{}')
+    first = client.get('/api/options/v1/version')
+    assert first.status_code == 200
+    assert first.headers['cache-control'] == 'no-store'
+    assert client.get('/api/options/v1/version').json() == first.json()
+    path.write_text('{"updated":true}')
+    assert client.get('/api/options/v1/version').json() != first.json()
+    path.unlink()
+    assert client.get('/api/options/v1/version').status_code == 503

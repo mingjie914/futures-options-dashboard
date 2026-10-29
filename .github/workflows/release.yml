@@ -1,0 +1,80 @@
+name: Tested dashboard release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: dashboard-release
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.25.0'
+      - name: Test independent Python environments
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.lock.txt
+          .venv/bin/python -m pytest tests -q
+          python -m venv .venv-futures
+          .venv-futures/bin/pip install -r requirements.futures.lock.txt
+          (cd futures && ../.venv-futures/bin/python -m pytest tests -q)
+          python -m venv .venv-seats
+          .venv-seats/bin/pip install -r seats/backend/requirements.lock -e seats/backend
+          (cd seats/backend && ../../.venv-seats/bin/python -m pytest -q)
+      - name: Build and test unified frontend
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+          pnpm typecheck
+          pnpm test
+      - name: Package immutable artifacts
+        run: python tools/freeze_backend.py --release-dir "$RUNNER_TEMP/dashboard-release" --commit "$GITHUB_SHA"
+      - name: Upload, verify, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="deploy-$GITHUB_SHA"
+          local_dir="$RUNNER_TEMP/dashboard-release"
+          # A queued obsolete run must not replace a newer main release.
+          test "$(gh api "repos/$GH_REPO/commits/main" --jq .sha)" = "$GITHUB_SHA"
+          if ! gh release view "$tag" --json targetCommitish,isDraft,assets > "$RUNNER_TEMP/release.json"; then
+            gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" --notes "Tested dashboard code and unified web build." --draft
+            gh release view "$tag" --json targetCommitish,isDraft,assets > "$RUNNER_TEMP/release.json"
+          fi
+          test "$(jq -r .targetCommitish "$RUNNER_TEMP/release.json")" = "$GITHUB_SHA"
+          # Existing assets are immutable, including assets in an interrupted draft.
+          for name in dashboard-code.tar.gz dashboard-web.tar.gz dashboard-release.json; do
+            if jq -e --arg name "$name" '.assets[] | select(.name == $name)' "$RUNNER_TEMP/release.json" > /dev/null; then
+              remote_dir=$(mktemp -d)
+              gh release download "$tag" --pattern "$name" --dir "$remote_dir"
+              cmp "$local_dir/$name" "$remote_dir/$name"
+            else
+              test "$(jq -r .isDraft "$RUNNER_TEMP/release.json")" = true
+              gh release upload "$tag" "$local_dir/$name"
+            fi
+          done
+          verified_dir=$(mktemp -d)
+          gh release download "$tag" --dir "$verified_dir"
+          for name in dashboard-code.tar.gz dashboard-web.tar.gz dashboard-release.json; do
+            cmp "$local_dir/$name" "$verified_dir/$name"
+          done
+          test "$(gh api "repos/$GH_REPO/commits/main" --jq .sha)" = "$GITHUB_SHA"
+          gh release edit "$tag" --draft=false --latest

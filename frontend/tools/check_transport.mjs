@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {applyDelta, conditionalFetch} from '../src/transport.js';
+import {applyDelta, conditionalFetch, createConditionalFetch} from '../src/transport.js';
 
 test('conditional requests reconstruct corrections, deletions and empty 304', async () => {
   const originalFetch = globalThis.fetch, received = [];
@@ -43,4 +43,32 @@ test('array append and root replacement preserve values and reject unsafe paths'
   assert.equal(applyDelta({},[['set',[],0]]),0);
   assert.throws(()=>applyDelta({},[['set',['__proto__','polluted'],true]]),/Invalid delta path/);
   assert.throws(()=>applyDelta({},[['remove',['missing']]]),/Invalid delta operation/);
+});
+
+
+test('cold starts revalidate HTTP bodies; delta bases and forced recovery bypass HTTP storage', async () => {
+  const originalFetch = globalThis.fetch, requests = [];
+  const body = {rows:[1,2]}, tag = 'W/"v1"';
+  globalThis.fetch = async (_, init) => {
+    requests.push(init);
+    return init.headers.has('A-IM') ? new Response(null,{status:304,headers:{etag:tag}})
+      : new Response(JSON.stringify(body),{headers:{etag:tag}});
+  };
+  try {
+    const firstPage = createConditionalFetch();
+    assert.deepEqual(await (await firstPage('/reload')).json(),body);
+    assert.deepEqual(await (await firstPage('/reload')).json(),body);
+    // A new page has no JS baseline. Native HTTP revalidation supplies its full 200 body.
+    assert.deepEqual(await (await createConditionalFetch()('/reload')).json(),body);
+    assert.deepEqual(requests.map(r=>r.cache),['no-cache','no-store','no-cache']);
+    assert.equal(requests[2].headers.has('If-None-Match'),false);
+    assert.equal(requests[2].headers.has('A-IM'),false);
+    await firstPage('/reload',{},true);
+    assert.equal(requests.at(-1).cache,'no-store');
+    assert.equal(requests.at(-1).headers.has('If-None-Match'),false);
+    assert.equal(requests.at(-1).headers.has('A-IM'),false);
+    // Rollbacks are ordinary version changes, not monotonic timestamp comparisons.
+    globalThis.fetch = async()=>new Response('{"rows":[0]}',{headers:{etag:'W/"older"'}});
+    assert.deepEqual(await (await firstPage('/reload')).json(),{rows:[0]});
+  } finally {globalThis.fetch=originalFetch;}
 });

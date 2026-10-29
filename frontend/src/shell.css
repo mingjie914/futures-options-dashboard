@@ -37,3 +37,5 @@
 @media(max-width:600px){.unified-shell .board-content{width:calc(100% - 28px)}.board-tabs{gap:20px}}
 
 .unified-shell .board-content input[role=combobox]{padding-right:24px}
+
+.board-update{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:12px;width:min(1320px,calc(100% - 28px));margin:0 auto 16px;color:var(--muted);font-size:13px}.board-update button{padding:0;border:0;background:none;color:inherit;font:inherit;cursor:pointer}.board-update button:is(:hover,:focus-visible){color:var(--ink)}

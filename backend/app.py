@@ -224,6 +224,17 @@ async def origin_check(request:Request,call_next):
     return await call_next(request)
 
 
+@app.get('/api/options/v1/version')
+def version():
+    try:
+        if not any(_active_folder().glob('*.json')):
+            raise HTTPException(503, '数据版本暂不可用')
+        value=hashlib.sha256((code_version+source_version('/snapshot')).encode()).hexdigest()
+        return JSONResponse({'version':value},headers={'Cache-Control':'no-store'})
+    except (OSError,ValueError,TypeError) as exc:
+        raise HTTPException(503,'数据版本暂不可用') from exc
+
+
 @app.get('/api/options/v1/health')
 def health():return {'status':'ok'}
 

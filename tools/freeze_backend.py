@@ -1,9 +1,54 @@
 """Explicit import of a stable futures backend; never modify its source/runtime."""
 from pathlib import Path
-import argparse,hashlib,json,os,shutil,sqlite3,socket,uuid
+import argparse,gzip,hashlib,io,json,os,re,shutil,sqlite3,socket,tarfile,uuid
 
 ROOT=Path(__file__).resolve().parents[1]
 SOURCE=ROOT/'futures'
+LOCKS=('requirements.futures.lock.txt','requirements.lock.txt','seats/backend/requirements.lock')
+
+
+def release_archives(output,commit):
+    """Package tested code/web without data, environments or local publication."""
+    if not re.fullmatch(r'[0-9a-f]{40}',commit):raise ValueError('Full commit SHA required')
+    output=Path(output);output.mkdir(parents=True,exist_ok=True)
+    code={}
+    for folder,suffixes in [('backend',{'.py'}),('futures/backend',{'.py'}),
+                            ('seats/backend/src',{'.py','.sql'}),('seats/config',{'.csv','.json'})]:
+        for path in sorted((ROOT/folder).rglob('*')):
+            relative=path.relative_to(ROOT)
+            if path.is_file() and path.suffix in suffixes and '__pycache__' not in relative.parts:
+                if path.is_symlink():raise ValueError(f'Symlink in code: {relative}')
+                code[relative.as_posix()]=path.read_bytes()
+    for name in (*LOCKS,'seats/backend/pyproject.toml','seats/backend/README.md'):
+        code[name]=(ROOT/name).read_bytes()
+    code['seats/backend/src/dashboard_json_delta.py']=code['futures/backend/dashboard_json_delta.py']
+    for required in ('backend/app.py','backend/gateway.py','futures/backend/api.py',
+                     'seats/backend/src/seat_dashboard/main.py'):
+        if required not in code:raise ValueError(f'Missing entrypoint: {required}')
+    source=ROOT/'frontend/dist'
+    hashes=review_hashes(source)
+    if 'index.html' not in hashes or not any(Path(name).parts[0]=='assets' for name in hashes):
+        raise ValueError('Build the unified frontend first')
+    web={}
+    for name in hashes:
+        path=source/name
+        if path.is_symlink():raise ValueError(f'Symlink in web: {name}')
+        web[Path(name).as_posix()]=path.read_bytes()
+    if review_hashes(source)!=hashes:raise RuntimeError('Web build changed while packaging')
+    assets={}
+    for kind,files in [('code',code),('web',web)]:
+        name=f'dashboard-{kind}.tar.gz'
+        with (output/name).open('wb') as raw,gzip.GzipFile(fileobj=raw,mode='wb',filename='',mtime=0) as zipped:
+            with tarfile.open(fileobj=zipped,mode='w') as archive:
+                for path,body in sorted(files.items()):
+                    info=tarfile.TarInfo(path);info.size=len(body);info.mode=0o644
+                    archive.addfile(info,io.BytesIO(body))
+        body=(output/name).read_bytes()
+        assets[kind]={'name':name,'sha256':hashlib.sha256(body).hexdigest(),'bytes':len(body)}
+    manifest={'schema':1,'commit':commit,'assets':assets,
+              'dependencies':{name:hashlib.sha256(code[name]).hexdigest() for name in LOCKS}}
+    (output/'dashboard-release.json').write_text(json.dumps(manifest,sort_keys=True,indent=2)+'\n',encoding='utf-8')
+    return manifest
 
 
 def runtime_root():
@@ -88,10 +133,17 @@ def refresh_reviews(target):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--release-dir',type=Path,help='只生成 CI 部署包，不切换本地指针')
+    parser.add_argument('--commit',help='部署包对应的完整提交 SHA')
     parser.add_argument('--refresh-data',action='store_true',help='同步已保存的期货审阅数据，备份旧版本，不覆盖自选数据库')
     parser.add_argument('--frontend',action='store_true',help='同时冻结完整前端并原子切换指针')
     parser.add_argument('--rollback-frontend',action='store_true',help='只回滚完整前端，不改变 API 或数据')
     args=parser.parse_args()
+    if args.release_dir:
+        if not args.commit or args.refresh_data or args.frontend or args.rollback_frontend:
+            parser.error('--release-dir requires --commit and cannot publish local runtime')
+        print(json.dumps(release_archives(args.release_dir,args.commit)))
+        return
     for port in [8790,8794,8795,8796]:
         with socket.socket() as sock:
             if sock.connect_ex(('127.0.0.1',port))==0:

@@ -256,6 +256,17 @@ def create_app(store=None):
         return clean({**result, 'items':[{**r, 'name':PRODUCT_NAMES.get(r['product'], '')} for r in result['items']],
                       'as_of':as_of, 'years':5, 'snapshot_id':snapshot['snapshot_id']})
 
+    @app.get('/api/version')
+    def version():
+        try:
+            if not store._files() and not any((store.runtime/'snapshots').glob('*.json')):
+                raise HTTPException(503, '数据版本暂不可用')
+            # Metadata stats only: reuse the API fingerprint, including basis inputs.
+            value = sha256(repr([code_version, source_version('/api/basis-reference')]).encode()).hexdigest()
+            return JSONResponse({'version': value}, headers={'Cache-Control': 'no-store'})
+        except (OSError, ValueError) as exc:
+            raise HTTPException(503, '数据版本暂不可用') from exc
+
     @app.get('/api/health')
     def health():
         return {'status': 'ok', 'mode': 'eod_readonly', 'daily_source_exists': store.root.is_dir(),

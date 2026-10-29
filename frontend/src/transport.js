@@ -1,4 +1,4 @@
-// Transport-only memory cache: never persisted in sessionStorage or localStorage.
+// Delta bases stay in memory; full responses use the browser private HTTP cache.
 const deltaType = 'dashboard-json-delta';
 
 export function applyDelta(before, ops) {
@@ -25,9 +25,9 @@ export function createConditionalFetch(limit = 8 * 1024 * 1024) {
  return async function conditionalFetch(url, options = {}, full = false) {
   if (options.method && options.method.toUpperCase() !== 'GET') return fetch(url, options);
   const previous = full ? null : cache.get(url), headers = new Headers(options.headers);
-  if (full) { headers.delete('If-None-Match'); headers.delete('A-IM'); }
+  if (!previous) { headers.delete('If-None-Match'); headers.delete('A-IM'); }
   if (previous) { headers.set('If-None-Match', previous.tag); headers.set('A-IM', deltaType); }
-  const response = await fetch(url, {...options, headers, cache:'no-store'});
+  const response = await fetch(url, {...options, headers, cache:previous || full ? 'no-store' : 'no-cache'});
   if (response.status === 304 && !previous) {
     if (full) throw Error('Missing response body');
     return conditionalFetch(url, options, true);
