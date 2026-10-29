@@ -406,8 +406,6 @@
 
 .matrixSort{ flex-shrink: 0; padding: 8px 9px; border: 0; border-radius: 5px; color: var(--text-secondary); background: transparent; font-size: 15px;  font-weight: 400;}
 
-.matrixSortControl{ display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--text-secondary); font-size: 14px; }
-
 .matrixTableTransposed .matrixSortMetric{ display: block; margin-top: 4px; color: var(--accent); font-size: 12px; font-weight: 600; white-space: nowrap; }
 
 .matrixTableTransposed thead th{ position: sticky; top: 0; z-index: 2; background: var(--surface); }

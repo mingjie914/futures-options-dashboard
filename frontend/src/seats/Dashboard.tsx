@@ -630,7 +630,7 @@ function PanelHeader({ title, subtitle, action }: { title: string; subtitle?: st
 }
 
 function CombinationMatrix({ combinations, rows, onProduct }: { combinations: CombinationRow[]; rows: DashboardSnapshot["combinationMatrix"]; onProduct: (code: string) => void }) {
-  const [sort, setSort] = usePreference("seats.matrix.sort", "change");
+  const [sort, setSort] = usePreference("seats.matrix.sort", "signals");
   const sortedRows = useMemo(() => {
     const ranked = rows.map((row, index) => {
       let count = 0, change: number | null = null;
@@ -653,10 +653,10 @@ function CombinationMatrix({ combinations, rows, onProduct }: { combinations: Co
     <section className={styles.panel}>
       <PanelHeader
         title="席位分组"
-        action={<label className={styles.matrixSortControl}>行排序<select className={styles.matrixSort} aria-label="组合矩阵排序" data-tooltip={sortDescription} value={sort} onChange={(event) => {
+        action={<select className={styles.matrixSort} aria-label="组合矩阵排序" data-tooltip={sortDescription} value={sort} onChange={(event) => {
           setSort(event.target.value);
           tableScroll.current?.scrollTo({ top: 0 });
-        }}><option value="change">净变化幅度：大 → 小</option><option value="signals">全员同向组数：多 → 少</option><option value="original">数据源顺序</option></select></label>}
+        }}><option value="signals">全员同向组数：多 → 少</option><option value="change">净变化幅度：大 → 小</option><option value="original">数据源顺序</option></select>}
       />
       <div ref={tableScroll} className={styles.matrixTableWrap} tabIndex={0} aria-label="席位分组表，可横向及纵向滚动">
         <table className={`${styles.matrixTable} ${styles.matrixTableTransposed}`}>
