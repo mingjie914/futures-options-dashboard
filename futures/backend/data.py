@@ -55,13 +55,20 @@ INDEX_SERIES = {
     'IM': ('000852.SH', '中证1000'), 'IC': ('000905.SH', '中证500'),
 }
 
-def contract_terms(product, symbols=(), as_of=None):
-    """Current reviewed equity-futures terms, not historical PIT or final expiry notices."""
+def contract_terms(product, symbols=(), as_of=None, store=None):
+    """Published RDS contract dates and separate equity rule estimates; not historical PIT."""
     rules = {'IM': (200,'zz1000/'), 'IC': (200,'cn/zz500.html'),
              'IF': (300,'hs300/'), 'IH': (300,'sz50/')}
-    if product not in rules:
+    path = store.root.parent/'cfuturesdescription/part.parquet' if store else None
+    recorded = {}
+    if path and path.is_file() and symbols:
+        rows = store._query([path], 'SELECT * FROM read_parquet(?) WHERE product=? AND symbol IN ('+','.join('?' for _ in symbols)+')', [product,*symbols])
+        if len({r['symbol'] for r in rows}) != len(rows):
+            raise ValueError('合约日期存在重复代码')
+        recorded = {r['symbol']:r for r in rows}
+    if product not in rules and not recorded:
         return None
-    multiplier, path = rules[product]
+    multiplier, source_path = rules.get(product, (None,''))
     # CFFEX 2026 holiday notice; weekend make-up workdays remain non-trading days.
     closures = [('2026-01-01','2026-01-03'),('2026-02-15','2026-02-23'),
         ('2026-04-04','2026-04-06'),('2026-05-01','2026-05-05'),
@@ -72,21 +79,30 @@ def contract_terms(product, symbols=(), as_of=None):
             raise ValueError('合约规则只接受当前品种的真实月份合约')
         first = date(2000+int(symbol[-4:-2]),int(symbol[-2:]),1)
         expected = None
-        if first.year == 2026:
+        if product in rules and first.year == 2026:
             expected = first + timedelta(days=(4-first.weekday())%7+14)
             while expected.weekday() >= 5 or any(a<=expected.isoformat()<=b for a,b in closures):
                 expected += timedelta(days=1)
         contracts.append({'symbol':symbol, 'expected_last_trade_date':expected.isoformat() if expected else None,
             'calendar_days_remaining':(expected-date.fromisoformat(as_of)).days if expected and as_of else None,
-            'last_trade_date':None, 'status':'rule_derived' if expected else 'calendar_unverified'})
+            'last_trade_date':None, 'last_delivery_date':None, 'status':'rule_derived' if expected else 'calendar_unverified'})
+        if symbol in recorded:
+            row = recorded[symbol]
+            contracts[-1].update({k:row[k] for k in ('listed_date','last_trade_date','last_delivery_date','source_code')},
+                status=row['date_status'], source='RDS.cfuturesdescription',
+                calendar_days_remaining=(date.fromisoformat(row['last_trade_date'])-date.fromisoformat(as_of)).days if as_of else None)
+    if product not in rules:
+        return {'product':product,'contracts':contracts,'as_of':as_of,'execution_eligible':False,
+                'warnings':['最后交易日与最后交割日分别读取；当前RDS修订版，不是历史时点档案或最终交割公告']}
     return {'product':product,'exchange':'CFFEX','multiplier':multiplier,'multiplier_unit':'元/指数点/手',
         'tick_size':0.2,'tick_value':multiplier*0.2,'price_unit':'指数点','settlement':'现金交割',
-        'reviewed_on':'2026-09-12','source_url':'https://www.cffex.com.cn/'+path,
+        'reviewed_on':'2026-09-12','source_url':'https://www.cffex.com.cn/'+source_path,
         'calendar_source_url':'https://www.cffex.com.cn/en_new/Notices/20251217/46426.html',
         'expiry_rule':'交割月第三个周五；法定假日或异常休市顺延至下一交易日',
         'contracts':contracts,'as_of':as_of,'account_margin_rate':None,'total_cost':None,
         'execution_eligible':False,'version':'cffex-equity-terms-20260912',
-        'warnings':['预计到期仅由规则与2026年休市安排推算，未逐合约核对最终公告或异常休市；其他年份留空',
+        'warnings':['last_trade_date/last_delivery_date读取当前RDS修订版；expected_last_trade_date仅为2026规则估计，二者不混用',
+            'calendar_conflict为源日期与RDS交易日历不符，calendar_uncovered为日历未覆盖；已入库日期不等于最终公告或历史时点档案',
             '剩余日数相对期货源截止日，为自然日，不是从今天算起；到期日不表示当前仍可交易',
             '当前核验版本不是历史当时可得规则；不据此计算年化、放宽雷达到期拦截或产生下单建议',
             '账户保证金、手续费、滑点、资金和分红仍需另行核验；不将合约表最低保证金当作账户要求']}

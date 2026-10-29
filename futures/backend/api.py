@@ -110,6 +110,8 @@ def create_app(store=None):
             files += list((store.root.parent/'aindexeodprices').glob('year_month=*/*.parquet'))
             files += [p for name in ('fundamental_lab', 'ceic_lab')
                       for p in (store.runtime/name).rglob('*') if p.is_file()]
+        if path in ('/api/dashboard','/api/basis-reference'):
+            files += list((store.root.parent/'cfuturesdescription').glob('*.parquet'))
         return [date.today().isoformat(), fingerprint(files)]
     code_version = sha256(b''.join(p.read_bytes() for p in sorted(Path(__file__).parent.glob('*.py')))).hexdigest()
     app.add_middleware(ResearchHTTP, version=source_version, cache=store.cache, code_version=code_version, session=store.read_session,
@@ -185,8 +187,9 @@ def create_app(store=None):
                 opportunities.append({'near': a['symbol'], 'far': b['symbol'], **pair['summary'],
                     'trend':[{'trade_date':p['trade_date'],'spread':p['spread']} for p in trend]})
             result['opportunities'] = opportunities
+        if view in ('all','curve'):
+            result['contract_terms'] = contract_terms(snapshot['product'],sorted({r['symbol'] for r in contracts}|{s for s in (near,far) if s}),meta['as_of'],store)
         if view == 'all':
-            result['contract_terms'] = contract_terms(snapshot['product'],[s for s in (near,far) if s],meta['as_of'])
             result['warnings'] = ['仅日终研究，非实时可成交报价', '合约目录来自已观测日线，未覆盖无成交挂牌合约',
                 '基差页分列股指日收盘基差与CU周频参考价差；均非实时套利信号', '费用、保证金、到期日须逐品种核验']
         return clean(result)
@@ -446,7 +449,7 @@ def create_app(store=None):
             item=next(i for i in review['indicators'] if i['product']==product)
             result=analytics.index_basis(snapshot['rows'],review['points'],symbol)
             return clean(dict(result,status='index_close_basis',product=product,symbol=symbol,
-                contract_terms=contract_terms(product,[symbol],snapshot['meta']['as_of']),
+                contract_terms=contract_terms(product,[symbol],snapshot['meta']['as_of'],store),
                 contracts=sorted({r['symbol'] for r in snapshot['rows']}),price_type='close',meta=snapshot['meta'],
                 reference=item,reference_snapshot=review['sha256'],
                 warnings=['基差 = 指数收盘 S − 期货收盘 F；正值为期货贴水，负值为期货升水',

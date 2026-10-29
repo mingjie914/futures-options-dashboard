@@ -1126,6 +1126,43 @@ def test_index_contract_terms_scope_calendar_and_cost_boundaries():
             contract_terms('IM',[bad],'2026-09-11')
 
 
+def test_published_contract_dates_keep_delivery_separate_and_invalidate_cache(setup):
+    from backend.data import contract_terms
+    client, store, _ = setup
+    folder = store.root.parent/'cfuturesdescription'
+    folder.mkdir()
+    path = folder/'part.parquet'
+    url = '/api/dashboard?product=RB&view=curve'
+    before = client.get(url)
+    version = client.get('/api/version').json()['version']
+    symbols = [r['symbol'] for r in before.json()['contracts']]
+    with duckdb.connect() as con:
+        con.execute('CREATE TABLE terms(symbol VARCHAR, product VARCHAR, exchange VARCHAR, source_code VARCHAR, listed_date DATE, last_trade_date DATE, last_delivery_date DATE, date_status VARCHAR)')
+        con.executemany('INSERT INTO terms VALUES(?,?,?,?,?,?,?,?)', [
+            (s,'RB','SHFE',s+'.SHF','2025-01-01','2026-11-16','2026-11-18','rds_recorded') for s in symbols]+[
+            ('IM2703','IM','CFFEX','IM2703.CFE','2026-07-20','2027-03-19','2027-03-19','rds_recorded'),
+            ('SH2611','SH','CZCE','SH611.CZC','2025-11-17','2026-11-13','2026-11-18','rds_recorded'),
+            ('CU2709','CU','SHFE','CU2709.SHF','2026-09-16','2027-09-15','2027-09-17','calendar_conflict')])
+        con.execute('COPY terms TO ? (FORMAT PARQUET)',[str(path)])
+        first = client.get(url, headers={'If-None-Match':before.headers['etag']})
+        assert first.status_code == 200 and first.headers['etag'] != before.headers['etag']
+        dates = first.json()['contract_terms']['contracts']
+        assert dates and all(r['last_trade_date']=='2026-11-16' and r['last_delivery_date']=='2026-11-18' for r in dates)
+        assert client.get('/api/version').json()['version'] != version
+        assert client.get(url,headers={'If-None-Match':first.headers['etag']}).status_code == 304
+        im = contract_terms('IM',['IM2703','IM2706'],'2026-10-29',store)['contracts']
+        assert im[0]['last_trade_date']==im[0]['last_delivery_date']=='2027-03-19'
+        assert im[0]['expected_last_trade_date'] is None and im[1]['last_trade_date'] is None
+        assert contract_terms('SH',['SH2611'],None,store)['contracts'][0]['source_code']=='SH611.CZC'
+        assert contract_terms('CU',['CU2709'],None,store)['contracts'][0]['status']=='calendar_conflict'
+        con.execute("UPDATE terms SET last_trade_date='2026-11-17' WHERE product='RB'")
+        revised = folder/'revised.tmp'
+        con.execute('COPY terms TO ? (FORMAT PARQUET)',[str(revised)])
+        revised.replace(path)
+        updated = client.get(url,headers={'If-None-Match':first.headers['etag']})
+        assert updated.status_code==200 and updated.json()['contract_terms']['contracts'][0]['last_trade_date']=='2026-11-17'
+
+
 def test_bad_pairs_and_removed_export(setup):
     client, _, _ = setup
     assert client.get('/api/dashboard?near=RB9999&far=RB2701').status_code == 422
@@ -1200,7 +1237,7 @@ def test_position_peaks_endpoint_cutoff_and_source_invalidation(setup):
     assert next(p for p in client.get('/api/products').json()['products'] if p['product']=='RB')['name']=='螺纹钢'
 
 
-@pytest.mark.parametrize('view,sections', [('catalog',[]),('spread',['spread','risk']),('curve',['curve']),('rollover',['spread','rollover']),('scan',['opportunities'])])
+@pytest.mark.parametrize('view,sections', [('catalog',[]),('spread',['spread','risk']),('curve',['curve','contract_terms']),('rollover',['spread','rollover']),('scan',['opportunities'])])
 def test_dashboard_view_preserves_values_and_omits_unrelated_sections(setup, view, sections):
     client, _, _ = setup
     full = client.get('/api/dashboard?product=RB').json()
