@@ -382,7 +382,7 @@
   table-layout: fixed;
 }
 
-.matrixTableWrap{ max-height: 560px; overflow: auto; }
+.matrixTableWrap{ max-height: clamp(640px, 72vh, 900px); overflow: auto; }
 
 .matrixSort{ flex-shrink: 0; padding: 8px 9px; border: 0; border-radius: 5px; color: var(--text-secondary); background: transparent; font-size: 15px;  font-weight: 400;}
 
@@ -744,6 +744,7 @@
 .treemap{
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(144px, 1fr));
+  grid-auto-rows: 1fr;
   gap: 12px;
 }
 
@@ -751,15 +752,15 @@
   display: flex;
   min-width: 0;
   align-items: flex-start;
-  justify-content: center;
+  justify-content: flex-start;
   flex-direction: column;
-  min-height: 100px;
-  padding: 16px;
+  min-height: 88px;
+  padding: 12px 14px;
   border: 0;
   border-radius: 8px;
   color: var(--text);
   text-align: left;
-  gap: 10px;
+  gap: 4px;
 }
 
 .treeTile:hover{
@@ -1615,7 +1616,9 @@ to{ opacity: 0.9; }
 
 .marketGroups{ padding: 0 16px 20px; gap: 24px; }
 
-.treeTile{ padding: 14px 12px; }
+.treeTile{ padding: 10px 12px; }
+
+.matrixTableWrap{ max-height: 560px; }
 
 .treeLegend{ padding: 0 16px; gap: 9px; }
 

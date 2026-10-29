@@ -842,7 +842,7 @@ function MarketTreemap({ items, onProduct }: { items: DashboardSnapshot["treemap
   const groups = [...Object.keys(marketGroups), "未分类"].filter((group) => grouped[group]?.length);
   return (
     <section className={styles.panel}>
-      <PanelHeader title="持仓变动" action={<select className={styles.matrixSort} aria-label="持仓变动指标" data-tooltip="仅统计有席位数据品种的真实合约。上市、到期或缺数会影响比较；持仓变化不等于资金流。" value={metric} onChange={(event) => setMetric(event.target.value)}><option value="interest" disabled={!hasInterest}>增仓比例{hasInterest ? "" : "（暂无数据）"}</option><option value="seat">净持仓变动</option></select>} />
+      <PanelHeader title="持仓变动" action={<select className={styles.matrixSort} aria-label="持仓变动指标" data-tooltip="按可用合约统计；合约范围变化会影响比较。" value={metric} onChange={(event) => setMetric(event.target.value)}><option value="interest" disabled={!hasInterest}>增仓比例{hasInterest ? "" : "（暂无数据）"}</option><option value="seat">净持仓变动</option></select>} />
       <div className={styles.marketGroups} aria-label="按品种属性分组的持仓变动">
         {groups.map((group) => (
           <section key={group}>
@@ -860,12 +860,12 @@ function MarketTreemap({ items, onProduct }: { items: DashboardSnapshot["treemap
                   type="button"
                   onClick={() => onProduct(item.productCode)}
                   style={{ "--intensity": value ? globalIntensity.get(Math.abs(value)) ?? 0 : 0 } as CSSProperties}
-                  data-tooltip={interestMode ? `${item.productCode} · 当前持仓 ${item.openInterest == null ? "缺失" : formatNumber(item.openInterest)} 手 / 前值 ${item.previousOpenInterest == null ? "缺失" : formatNumber(item.previousOpenInterest)} 手 · 对比日 ${item.previousInterestDate ?? "缺失"} · 合约数 ${item.interestContractCount ?? "—"}/${item.previousInterestContractCount ?? "—"}${item.interestContractsChanged ? " · 合约范围有变动" : ""}` : `${item.productCode} · 净持仓变化 ${formatNumber(item.change)} 手`}
+                  data-tooltip={interestMode ? `${item.productCode} · 持仓 ${item.openInterest == null ? "缺失" : formatCompact(item.openInterest)} 手；前值 ${item.previousOpenInterest == null ? "缺失" : formatCompact(item.previousOpenInterest)} 手（${item.previousInterestDate ?? "日期缺失"}）${item.interestContractsChanged ? " · 合约范围变动" : ""}` : item.productCode}
                   aria-label={`${item.label}，${interestMode ? "增仓比例" : "净持仓变动"} ${value == null ? "不可用" : interestMode ? `${(value * 100).toFixed(2)}%` : `${formatNumber(value)} 手`}，点击查看`}
                 >
                   <strong>{item.label}</strong>
                   <span>{value == null ? "—" : interestMode ? `${value > 0 ? "+" : ""}${(value * 100).toFixed(2)}%` : formatSigned(value)}{!interestMode && <small> 手</small>}</span>
-                  {interestMode && <small>{value == null ? "缺少可比数据" : `持仓 ${formatCompact(item.openInterest ?? 0)} 手`}{item.interestContractsChanged ? " · 范围变动" : ""}</small>}
+                  {interestMode && (value == null || item.interestContractsChanged) && <small>{value == null ? "缺少可比数据" : "范围变动"}</small>}
                 </button>
               ); })}
             </div>
