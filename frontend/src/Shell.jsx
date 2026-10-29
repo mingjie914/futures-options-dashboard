@@ -52,6 +52,7 @@ export default function Shell() {
   }
   const ActiveModule = modules.find(([id]) => id === active)[2];
   return <div className="unified-shell">
+    <script async src={new URL('site-footer.js', HOME).href} />
     <header className="unified-topbar"><nav aria-label="站点导航">
       <a className="unified-brand" href={HOME}>MINGJIE</a><a href={HOME}>策略</a>
       <details ref={menu} className="board-menu"
@@ -69,5 +70,6 @@ export default function Shell() {
         <ActiveModule />
       </Suspense></ModuleErrorBoundary>
     </div>
+    <site-footer lang="zh-CN" />
   </div>;
 }
