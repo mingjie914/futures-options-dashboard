@@ -44,7 +44,7 @@ interface ApiMeta {
 
 interface ApiEnvelope<T> {
   meta: ApiMeta;
-  data: T & { main_contract_coverage?: Array<{ price_status: string; seat_status: string }> };
+  data: T & { main_contract_coverage?: Array<{ product_code?: string; symbol?: string | null; price_status: string; seat_status: string }> };
 }
 
 interface ApiProduct {
@@ -686,10 +686,15 @@ function mapMeta(meta: ApiMeta, selectedDate: string, productLabel: string, metr
   const priceGaps = coverage.filter(row => row.price_status !== "ready").length;
   const seatGaps = coverage.filter(row => row.seat_status !== "ready").length;
   const notices = [];
-  if (priceGaps || seatGaps) notices.push(`所选日主力缺口：${[priceGaps && `价格 ${priceGaps} 个品种`, seatGaps && `席位 ${seatGaps} 个品种`].filter(Boolean).join("、")}`);
+  if (priceGaps || seatGaps) {
+    const gaps = coverage.filter(row => row.price_status !== "ready" || row.seat_status !== "ready");
+    const details = gaps.slice(0, 3).map(row => `${row.product_code ?? "未知品种"}/${row.symbol ?? "主力未确定"}`).join("、");
+    notices.push(`${selectedDate} 主力缺口：${[priceGaps && `价格 ${priceGaps} 个品种`, seatGaps && `席位 ${seatGaps} 个品种`].filter(Boolean).join("、")}（${details}${gaps.length > 3 ? "等" : ""}）`);
+  }
   for (const warning of meaningfulWarnings) {
-    if (warning === "P2 backfill provenance unavailable; not certified") notices.push("上游修订溯源缺失");
-    else if (/^main layer pending: price=\d+, seat=\d+$/.test(warning)) notices.push("全历史主力数据有缺口");
+    const history = /^main layer pending: price=(\d+), seat=(\d+)$/.exec(warning);
+    if (warning === "P2 backfill provenance unavailable; not certified") notices.push("本批次未关联上游修订凭证");
+    else if (history) notices.push(`历史主力覆盖缺口：价格 ${history[1]}、席位 ${history[2]} 个品种交易日（非当日，两项可能重叠）`);
     else notices.push("其他数据校验提示");
   }
   const state = metrics.length === 0

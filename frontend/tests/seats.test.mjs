@@ -30,17 +30,20 @@ test("seat notices separate selected-day coverage from full-history gaps and pro
   const ready = [{ price_status: "ready", seat_status: "ready" }];
   const history = map(ready);
   assert.deepEqual(history.warnings, warnings);
-  assert.match(history.notice, /上游修订溯源缺失/);
-  assert.match(history.notice, /全历史主力数据有缺口/);
-  assert.doesNotMatch(history.notice, /所选日|67|6196|pending|更新/);
-  const partial = map([...ready, { price_status: "ready", seat_status: "missing_seat" }]);
-  assert.match(partial.notice, /所选日主力缺口：席位 1 个品种/);
+  assert.match(history.notice, /本批次未关联上游修订凭证/);
+  assert.match(history.notice, /历史主力覆盖缺口：价格 67、席位 6196 个品种交易日（非当日，两项可能重叠）/);
+  assert.doesNotMatch(history.notice, /2026-10-28|pending|更新/);
+  const partial = map([...ready, { product_code: "BC.INE", symbol: "BC2612", price_status: "ready", seat_status: "missing_seat" }]);
+  assert.match(partial.notice, /2026-10-28 主力缺口：席位 1 个品种（BC.INE\/BC2612）/);
   assert.equal(partial.state, "partial");
   const unresolved = map([{ price_status: "main_unresolved", seat_status: "main_unresolved" }], []);
-  assert.equal(unresolved.notice, "所选日主力缺口：价格 1 个品种、席位 1 个品种");
+  assert.equal(unresolved.notice, "2026-10-28 主力缺口：价格 1 个品种、席位 1 个品种（未知品种/主力未确定）");
   assert.equal(unresolved.state, "partial");
   assert.equal(map(ready, []).state, "ready");
   assert.equal(map(ready, []).notice, "");
+  const many = map(["BC", "RR", "RS", "CY"].map(product_code => ({ product_code, symbol: null, price_status: "main_unresolved", seat_status: "main_unresolved" })), []);
+  assert.match(many.notice, /席位 4 个品种（BC\/主力未确定、RR\/主力未确定、RS\/主力未确定等）/);
+  assert.doesNotMatch(many.notice, /CY|undefined|null/);
 });
 
 test("requests only the active view and revalidates cached chunks; history follows the loaded date/version", async (t) => {
