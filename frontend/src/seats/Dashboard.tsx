@@ -271,8 +271,8 @@ export function Dashboard() {
           snapshot={snapshot}
         />
 
-        {loadState !== "ready" && (
-          <StateNotice state={loadState} detail={errorMessage ? `${errorMessage}${snapshot && loadedView === view ? "；下方保留上次成功读取的数据" : ""}` : loadState === "partial" ? snapshot?.meta.notice : undefined} onRetry={loadState === "error" ? refresh : undefined} />
+        {loadState !== "ready" && loadState !== "partial" && (
+          <StateNotice state={loadState} detail={errorMessage ? `${errorMessage}${snapshot && loadedView === view ? "；下方保留上次成功读取的数据" : ""}` : undefined} onRetry={loadState === "error" ? refresh : undefined} />
         )}
 
         {(!snapshot || loadedView !== view) && loadState === "loading" && <DashboardSkeleton />}
@@ -301,6 +301,7 @@ export function Dashboard() {
             )}
           </div>
         )}
+        {loadState === "partial" && <p className={styles.dataNotice} role="status">数据提示 · {snapshot?.meta.notice || stateCopy.partial.detail}</p>}
       </main>
 
       {selectedTag && <TagInspector tag={selectedTag} onClose={() => setSelectedTag(null)} />}

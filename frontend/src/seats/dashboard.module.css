@@ -258,6 +258,8 @@
   margin-top: 28px;
 }
 
+.dashboard .dataNotice{margin:28px 0 0;color:var(--text-muted);font-size:13px;line-height:1.6;}
+
 .pageStack{
   display: grid;
   gap: 32px;

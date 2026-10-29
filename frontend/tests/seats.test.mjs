@@ -128,7 +128,7 @@ test("lazy term loading retains reversal tags without fetching another page", ()
 
 test("unified static build keeps seats lazy and shares font/runtime", async () => {
   const html = await readFile(new URL("index.html", output), "utf8");
-  assert.match(html, /研究看板 · MINGJIE/);
+  assert.match(html, /<title>MINGJIE<\/title>/);
   const manifest = JSON.parse(await readFile(new URL(".vite/manifest.json", output), "utf8"));
   const seat = manifest["src/seats/Dashboard.tsx"];
   assert.ok(seat?.isDynamicEntry);
