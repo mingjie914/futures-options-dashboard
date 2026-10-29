@@ -212,7 +212,8 @@
 }
 
 .options-heading h2, .options-surface h2{
-  font-size: 19px;
+  font-size: 18px;
+  line-height: 1.6;
 }
 
 .options-heading h3, .options-surface h3{
@@ -686,8 +687,6 @@
 .options-time-context{border:0;background:none;padding:0;color:var(--options-muted)}
 
 .options-month-selected{background:#f5f7fa}
-
-.options-heading h2{font-size:18px;font-weight:500}
 
 .options-topbar{margin-bottom:14px}
 

@@ -2,7 +2,7 @@ import { selectedProduct, rememberProduct } from '../../../frontend/src/preferen
 import { conditionalFetch as fetch } from '../../../frontend/src/transport.js';
 import { useChart, ChartFrame, Metric, usePreference, RefreshButton } from '../../../frontend/src/charts.js';
 import {useEffect,useMemo,useRef,useState} from 'react';
-import {ScanPanel,CurvePanel,RadarPanel,BasisPanel,ObservationDate} from './MarketPanels.jsx';
+import {ScanPanel,CurvePanel,RadarPanel,BasisPanel,ObservationDate,SpreadMatrix} from './MarketPanels.jsx';
 import SpreadPanel from './SpreadPanel.jsx';
 import HistoryPanel, {HistoryChart, InventoryPanel} from './HistoryPanel.jsx';
 const fmt=v=>v==null?'—':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:2});
@@ -52,11 +52,12 @@ export function App(){
  useEffect(()=>{if(tab!=='持仓换月'||!q.focus_symbol||!d)return;const focus=q.focus_symbol,other=d.near===focus?d.far:d.near;if(d.contracts.some(c=>c.symbol===focus)&&other){const [near,far]=[focus,other].sort();Q(p=>({...p,near,far,focus_symbol:undefined}));}else{N('原合约不在当前日期目录，已选择当前活跃组合');Q(p=>({...p,focus_symbol:undefined}));}},[tab,q.focus_symbol,d]);
  const latest=d?.spread?.summary.latest||{};
  function pair(near,far){Q({...q,near,far});setSpreadMode('annual');T('跨期分析');}
+ const matrix=d&&<SpreadMatrix data={d} onPair={(near,far)=>{Q({...q,near,far});if(spreadMode==='curve')setSpreadMode('annual');}}/>;
 
  function chooseContract(k,value){if(!value){Q({...q,near:undefined,far:undefined,focus_symbol:undefined});return;}const pair=[k==='near'?value:q.near||d?.near,k==='far'?value:q.far||d?.far].sort();Q({...q,near:pair[0],far:pair[1],focus_symbol:undefined});}
 
  const spreadModeControl=<select aria-label="图表" className="view-select" value={spreadMode} onChange={e=>setSpreadMode(e.target.value)}><option value="annual">价差季节性</option><option value="current">价差走势</option><option value="curve">期限曲线</option></select>;
- const spreadQuote=<div className="spread-quote">{[['跨期价差',fmt(latest.spread),'近月 − 远月'],['前次变动',fmt(latest.change),'本次 − 前次有效价差，可能跨日']].map(([label,value,hint])=><Metric key={label} label={label} value={value} hint={hint+'；配对日 '+(latest.trade_date||'无')}/>)}</div>;
+ const spreadQuote=<div className="spread-quote">{[['跨期价差',latest.spread],['前日变动',latest.change]].map(([label,value])=><span className="research-metric" key={label}><span>{label}</span><strong>{fmt(value)}</strong></span>)}</div>;
  const filters=(metricControl,latestDate,loading=false)=><>{tab==='跨期分析'&&spreadModeControl}<select aria-label="品种" className="product-select" value={q.product} onChange={e=>Q({product:e.target.value,end:q.end})}>{!products.length&&<option value={q.product}>{q.product}</option>}{products.map(p=><option key={p.product} value={p.product}>{p.product}{p.name?'/'+p.name:''}</option>)}</select>{tab!=='跨期分析'&&metricControl}{pairPage&&['near','far'].map((k,i)=><label key={k}>{i?'远月':'近月'}<select value={q[k]||d?.[k]||''} onChange={e=>chooseContract(k,e.target.value)}><option value="">自动选取</option>{d?.contracts.filter(c=>c.symbol!==(k==='near'?(q.far||d.far):(q.near||d.near))).map(c=><option key={c.symbol}>{c.symbol}</option>)}</select></label>)}<ObservationDate value={q.end||''} latest={latestDate||d?.meta.as_of} onChange={e=>Q({...q,end:e.target.value})}/>{tab==='跨期分析'&&metricControl}{tab==='跨期分析'&&spreadMode!=='curve'&&d?.near&&d?.far&&spreadQuote}<RefreshButton busy={busy||loading} onClick={()=>R(rev+1)}/></>,dataInfo=d?.meta.as_of&&(q.end&&q.end!==d.meta.as_of||d.spread&&pairPage&&latest.trade_date!==d.meta.as_of||d.meta.stale)&&<span className="status"><span>{q.end&&q.end!==d.meta.as_of&&<>数据日期 {d.meta.as_of}</>}{d.spread&&pairPage&&latest.trade_date!==d.meta.as_of&&<> · 配对 {latest.trade_date||'无'}</>}</span><span>{d.meta.stale?'缓存降级':''}</span></span>;
 
  return <div className="shell"><main className="board-content"><nav className="board-tabs section-nav" aria-label="期货分析">{tabs.map(t=><button key={t} aria-pressed={tab===t} className={tab===t?'active':''} onClick={()=>T(t)}>{tabLabel(t)}</button>)}</nav><h1 className="sr-only">{tabLabel(tab)}</h1>
@@ -68,8 +69,8 @@ export function App(){
 {d&&<>
  {!d.meta.as_of&&['持仓季节性','历史合约'].includes(tab)&&<p className="empty">所选日期前暂无该品种数据</p>}
  {tab==='机会扫描'&&<ScanPanel data={d} onPair={pair}/>}
- {tab==='跨期分析'&&(spreadMode==='curve'?<CurvePanel Chart={Chart} data={d} onPair={pair} controls={<>{filters()}{dataInfo}</>}/>:d.near&&d.far?<>
- {spreadMode==='annual'?<HistoryPanel controls={filters} info={dataInfo} key={[d.product,d.near,d.far].join(':')} product={d.product} end={d.meta.as_of} near={d.near} far={d.far} priceType={d.price_type} revision={rev} view="spread">{seasonal=><SpreadStatistics risk={d.risk} near={d.near} far={d.far} seasonal={seasonal}/>}</HistoryPanel>:<><SpreadPanel controls={spanControl=><>{filters(spanControl)}{dataInfo}</>} key={`${d.product}-${d.near}-${d.far}`} data={d} revision={rev}/><SpreadStatistics risk={d.risk} near={d.near} far={d.far}/></>}</>:<p className="empty">当前窗口不足两个合约</p>)}
+ {tab==='跨期分析'&&(spreadMode==='curve'?<CurvePanel Chart={Chart} data={d} onPair={pair} beforeChart={matrix} controls={<>{filters()}{dataInfo}</>}/>:d.near&&d.far?<>
+ {spreadMode==='annual'?<HistoryPanel controls={filters} info={dataInfo} beforeChart={matrix} key={[d.product,d.near,d.far].join(':')} product={d.product} end={d.meta.as_of} near={d.near} far={d.far} priceType={d.price_type} revision={rev} view="spread">{seasonal=><SpreadStatistics risk={d.risk} near={d.near} far={d.far} seasonal={seasonal}/>}</HistoryPanel>:<><SpreadPanel controls={spanControl=><>{filters(spanControl)}{dataInfo}</>} beforeChart={matrix} key={`${d.product}-${d.near}-${d.far}`} data={d} revision={rev}/><SpreadStatistics risk={d.risk} near={d.near} far={d.far}/></>}</>:<>{matrix}<p className="empty">当前窗口不足两个合约</p></>)}
  {tab==='持仓换月'&&<PairPosition data={d} end={q.end||d.meta.as_of} revision={rev}/>}
  {tab==='持仓季节性'&&d.meta.as_of&&<><HistoryPanel title="同月持仓" controls={filters} info={dataInfo} key={d.product} product={d.product} end={d.meta.as_of} near={d.near} far={d.far} priceType={d.price_type} revision={rev} view="month"/><SeasonalPosition product={d.product} end={d.meta.as_of} revision={rev}/></>}
  {tab==='历史合约'&&d.meta.as_of&&<HistoryPanel controls={filters} info={dataInfo} key={d.product} product={d.product} end={d.meta.as_of} near={d.near} far={d.far} priceType={d.price_type} revision={rev}/>}

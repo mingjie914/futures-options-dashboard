@@ -7,7 +7,7 @@ const quantity = value => value == null ? '—' : Number(value).toLocaleString('
 const historyHeight = 'clamp(380px, 56vh, 600px)';
 const inventoryHeight = 'clamp(320px, 44vh, 460px)';
 const inventoryLabel = s => (s.id.endsWith('_W')?'仓库':s.id.endsWith('_F')?'厂库':s.kind==='库存'?'交易所':'')+s.kind;
-function InventoryTrend({rows, unit, name, frequency}) {
+function InventoryTrend({rows, unit, name}) {
   const ref = useRef();
   useChart(ref, chart => chart.setOption({animation:false,
     legend:{type:'scroll',top:0,left:0,right:0,itemWidth:18,itemHeight:9,itemGap:16,textStyle:{fontSize:12},data:[{name,icon:'path://M0,3 L18,3 L18,5 L0,5 Z',itemStyle:{color:'#4e7fb9'}},{name:'增加',icon:'rect',itemStyle:{color:'#b64d49'}},{name:'减少',icon:'rect',itemStyle:{color:'#2b8167'}}]},grid:{left:85,right:85,top:45,bottom:60},
@@ -17,7 +17,7 @@ function InventoryTrend({rows, unit, name, frequency}) {
     dataZoom:[{type:'inside'},{type:'slider',height:20,bottom:10}],
     series:[{name,type:'line',showSymbol:false,connectNulls:false,z:3,lineStyle:{width:2.4,color:'#4e7fb9'},itemStyle:{color:'#4e7fb9'},areaStyle:{color:'#4e7fb9',opacity:0.035},data:rows.map(p=>p.value)},
       ...[['增加','#b64d49',1],['减少','#2b8167',-1]].map(([label,color,sign])=>({name:label,type:'bar',yAxisIndex:1,barGap:'-100%',itemStyle:{color,opacity:0.7},data:rows.map(p=>p.change!=null&&p.change*sign>0?p.change:null)}))]
-  }),[rows,unit,name,frequency]);
+  }),[rows,unit,name]);
   return <ChartFrame><div ref={ref} className="chart" style={{height:inventoryHeight}} role="img" aria-label={name+'走势与增减'}/></ChartFrame>;
 }
 
@@ -28,16 +28,16 @@ export function InventoryPanel({product,end,revision,controls}) {
     fetch('/api/inventory?'+new URLSearchParams({product,...(end?{end}:{})}),{signal:c.signal}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.detail||'库存仓单读取失败');return d;}).then(d=>{if(!c.signal.aborted)setData(d);}).catch(e=>{if(e.name!=='AbortError')setError(e.message);});
     return()=>c.abort();
   },[product,end,revision]);
-  const series=data?.series.find(s=>s.id===indicator)||data?.series.find(s=>s.kind==='仓单'&&s.id.endsWith('_W'))||data?.series[0];
+  const series=data?.series.find(s=>s.id===indicator)||data?.series.find(s=>s.kind==='仓单'&&s.id.endsWith('_W'))||data?.series.find(s=>s.kind==='仓单')||data?.series[0];
   const history=useMemo(()=>inventoryHistory(series?.points||[],end,years),[series,end,years]),last=history.rows.at(-1);
-  const selection=<><select aria-label="库存仓单指标" value={data?.series.some(s=>s.id===indicator)?indicator:''} disabled={!data?.series.length} onChange={e=>setIndicator(e.target.value)}><option value="">仓单库存</option>{data?.series.map(s=><option key={s.id} value={s.id}>{inventoryLabel(s)}</option>)}</select><select aria-label="历史跨度" value={years} onChange={e=>setYears(Number(e.target.value))}><option value={5}>近5年</option><option value={0}>全部年份</option></select></>;
+  const selection=<>{data?.series.length>1&&<select aria-label="库存仓单指标" value={series.id} onChange={e=>setIndicator(e.target.value)}>{data.series.map(s=><option key={s.id} value={s.id}>{inventoryLabel(s)}</option>)}</select>}<select aria-label="历史跨度" value={years} onChange={e=>setYears(Number(e.target.value))}><option value={5}>近5年</option><option value={0}>全部年份</option></select></>;
   return <><div className="filters page-filters">{controls(selection,last?.date||data?.as_of,!data&&!error)}</div>
     {error?<p className="error" role="alert">{error}</p>:!data?<p className="empty" role="status">读取库存仓单…</p>:!history.rows.length?<p className="empty">{product} 暂无所选日期前的库存仓单数据</p>:<>
       <section className="panel history-panel"><div className="filters history-toolbar"><h2 className="section-label">{inventoryLabel(series)}季节性 / {series.unit}</h2></div>
         <HistoryChart result={{...history,mode:'seasonal',metric:'price',unit:series.unit,accessible_label:series.name+'历年季节性'}} showAllYears height={inventoryHeight}/>
       </section>
-      <section className="panel"><h2>走势与增减 / {series.unit}</h2><InventoryTrend rows={history.rows} unit={series.unit} name={inventoryLabel(series)} frequency={series.frequency}/></section>
-      <p className="sub">{data.preview?'预览样本 · ':''}{series.source} · {series.frequency==='W'?'周频':'日频'} · 最近公布 {last.date} · 已入库观测，未公布不补零；增减为相邻公布值之差</p>
+      <section className="panel"><h2>走势与增减 / {series.unit}</h2><InventoryTrend rows={history.rows} unit={series.unit} name={inventoryLabel(series)}/></section>
+      {data.preview&&<p className="sub">预览样本</p>}
     </>}
   </>;
 }
@@ -48,7 +48,7 @@ export function HistoryChart({result, heatmap=false, showAllYears=false, height=
     const share = result.metric === 'position_share' && result.mode !== 'spread';
     const integer = !share && result.metric !== 'price' && result.mode !== 'spread';
     const display = value => value == null ? '—' : Number(value * (share ? 100 : 1)).toLocaleString('zh-CN', {maximumFractionDigits: integer ? 0 : 2}) + (share ? '%' : '');
-    const byLine = result.lines.map(line => new Map(line.points.map(point => [point.x, point])));
+    const byLine = heatmap ? [] : result.lines.map(line => new Map(line.points.map(point => [point.x, point])));
     const segments = heatmap ? [] : lineSegments(result.axis, result.lines);
     let selected = result.mode === 'seasonal' ? seasonalSelection(result.lines, showAllYears) : {};
     const palette = ['#4e7fb9', '#568f84', '#a48b59', '#8c7b9f', '#b36c73', '#505c6b', '#4e7fb9', '#65a30d', '#c026d3', '#b45309'];
@@ -73,8 +73,8 @@ export function HistoryChart({result, heatmap=false, showAllYears=false, height=
       series: [{type: 'heatmap', data: cells, progressive: 4000, emphasis: {itemStyle: {borderColor: '#a48b59', borderWidth: 1}}}],
     } : {
       ...common,
-      color: ['#4e7fb9', '#568f84', '#a48b59', '#8c7b9f', '#b36c73', '#505c6b', '#4e7fb9', '#65a30d', '#c026d3', '#b45309'],
-      legend: {type: 'scroll', orient: 'horizontal', left: 0, right: 0, top: 0, height: 24, itemWidth: 18, itemHeight: 9, itemGap: 16, pageIconSize: 10, textStyle: {fontSize: 12}, formatter: name => name === result.lines[currentIndex]?.label ? name+'（当前）' : name, data: result.lines.map(l => l.label), selected,
+      color: palette,
+      legend: {type: 'scroll', orient: 'horizontal', left: 'center', top: 0, height: 24, itemWidth: 18, itemHeight: 9, itemGap: 16, pageIconSize: 10, textStyle: {fontSize: 12}, formatter: name => name === result.lines[currentIndex]?.label ? name+'（当前）' : name, data: result.lines.map(l => l.label), selected,
         scrollDataIndex: result.mode === 'seasonal' && !showAllYears ? Math.max(0,result.lines.length-5) : 0},
       tooltip: {trigger: 'axis', confine: true, renderMode: 'richText', formatter: params => {
         const list = Array.isArray(params) ? params : [params];
@@ -100,7 +100,7 @@ export function HistoryChart({result, heatmap=false, showAllYears=false, height=
   return <ChartFrame><div ref={ref} className="history-chart" style={{height: heatmap ? Math.min(850, Math.max(420, result.lines.length * 12)) : height}} role="img" aria-label={result.accessible_label || (result.mode === 'spread' ? '同月份组合历年价差对照图' : heatmap ? '全合约持仓热力图' : '历年合约对比图')}/></ChartFrame>;
 }
 
-export default function HistoryPanel({product, end, near, far, priceType, revision, controls, info, title, children, view='overview'}) {
+export default function HistoryPanel({product, end, near, far, priceType, revision, controls, info, title, children, beforeChart, view='overview'}) {
   const spreadOnly=view==='spread',mode=spreadOnly?'spread':view==='month'?'same_month':'overview';
   const [years, setYears] = usePreference('futures.history.'+view+'.years',5);
   const [month, setMonth] = usePreference('futures.history.'+view+'.'+product+'.month',Number(near?.slice(-2)) || 10);
@@ -134,6 +134,7 @@ export default function HistoryPanel({product, end, near, far, priceType, revisi
       {mode === 'overview' && overviewMetric !== 'price' && <label>呈现方式<select value={overviewStyle} onChange={e => setOverviewStyle(e.target.value)}><option value="line">各合约曲线</option><option value="heatmap">持仓热力图</option></select></label>}
       {info}{result&&<span className="sub" title={result.missing.length?'缺少序列：'+result.missing.join('、'):undefined}>{anchorYear-years+1}—{anchorYear}{mode==='overview'?` · ${result.lines.length}合约`:result.missing.length?` · 缺${result.missing.length}年`:""}{result.meta.stale?" · 缓存降级":""}</span>}
     </div>
+    {beforeChart}
     {error ? <p className="error" role="alert">{error}</p> : !result ? <p className="empty" role="status">正在读取历史合约…</p> : <>
       {result.lines.length ? <HistoryChart result={result} heatmap={mode === 'overview' && effectiveMetric !== 'price' && overviewStyle === 'heatmap'}/> : <p className="empty">所选月份组合在当前数据中没有可比较序列</p>}
       {children?.(summary)}

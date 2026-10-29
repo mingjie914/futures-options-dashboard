@@ -11,7 +11,51 @@ const ts=sharedRequire('typescript');
 const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const module={exports:{}};
 new Function('module','exports','require',code)(module,module.exports,id=>id.startsWith('react')?sharedRequire(id):createRequire(import.meta.url)(id));
-const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel}=module.exports;
+const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel,spreadMatrix,SpreadMatrix}=module.exports;
+
+test('spread matrix uses recorded last trading days, preserves missing values and marks valid extrema',()=>{
+ const trade_date='2026-10-29',row=(symbol,close)=>({symbol,close,trade_date});
+ const contracts=[row('IM2706',5986),row('IM2611',6354),row('IM2703',6151.2),row('IM2612',6304.4),row('IM9999',999),{...row('IM2610',6000),trade_date:'2026-10-16'}];
+ const terms={as_of:trade_date,contracts:['IM2611','IM2612','IM2703','IM2706'].map((symbol,i)=>({symbol,status:'rds_recorded',last_trade_date:['2026-11-20','2026-12-18','2027-03-19','2027-06-18'][i],last_delivery_date:'2028-01-01'}))};
+ const matrix=spreadMatrix(contracts,trade_date,terms);
+ assert.deepEqual(matrix.map(r=>r.symbol),['IM2611','IM2612','IM2703','IM2706']);
+ assert.deepEqual(matrix.map((r,i)=>r.cells[i].value),[6354,6304.4,6151.2,5986]);
+ assert.ok(Math.abs(matrix[0].cells[1].value-49.6)<1e-10);
+ assert.equal(matrix[1].cells[0].days,28);
+ assert.ok(Math.abs(matrix[1].cells[0].value-49.6/28)<1e-10);
+ assert.equal(matrix[3].cells[0].days,210);
+ assert.equal(matrix[3].cells[2].days,91);
+ assert.equal(matrix[3].cells[0].near,'IM2611');
+ assert.equal(matrix[3].cells[0].far,'IM2706');
+ assert.equal(matrix[3].cells[2].maximum,true);
+ assert.equal(matrix[2].cells[1].minimum,true);
+ assert.equal(matrix[0].cells[1].minimum,undefined);
+ const html=renderToStaticMarkup(React.createElement(SpreadMatrix,{data:{contracts,contract_terms:terms,meta:{as_of:trade_date},near:'IM2611',far:'IM2612'},onPair:()=>{}}));
+ assert.match(html,/最后交易日间隔/);
+ assert.doesNotMatch(html,/月距/);
+ assert.equal((html.match(/aria-pressed="true"/g)||[]).length,2);
+ assert.match(html,/1\.77/);
+ assert.equal((html.match(/class="matrix-extreme"/g)||[]).length,2);
+ assert.match(html,/title="IM2703 − IM2706；多头移仓参考"/);
+ const invalid=[undefined,{...terms,as_of:'2026-10-28'},...['calendar_conflict','calendar_uncovered'].map(status=>({...terms,contracts:terms.contracts.map(c=>({...c,status}))})),...['2026-11-20',null,'invalid'].map(last_trade_date=>({...terms,contracts:terms.contracts.map(c=>({...c,last_trade_date}))}))];
+ for(const t of invalid){
+  const rows=spreadMatrix(contracts,trade_date,t);
+  assert.equal(rows[1].cells[0].value,null);
+  assert.equal(rows[1].cells[0].days,null);
+  assert.ok(rows.flatMap(r=>r.cells).every(c=>!c.minimum&&!c.maximum));
+  assert.ok(Math.abs(rows[0].cells[1].value-49.6)<1e-10);
+ }
+ const prices=[row('IM2611',0),row('IM2612',null),row('IM2703',10)];
+ const missing=spreadMatrix(prices,trade_date,terms);
+ assert.equal(missing[0].cells[0].value,0);
+ assert.equal(missing[1].cells[0].value,null);
+ assert.equal(missing[2].cells[0].value,-10/119);
+ assert.equal(missing[2].cells[0].maximum,true);
+ assert.equal(missing[2].cells[0].minimum,true);
+ const tied=spreadMatrix(prices.map(c=>({...c,close:100})),trade_date,terms);
+ assert.equal(tied.flatMap(r=>r.cells).filter(c=>c.maximum&&c.minimum).length,3);
+ assert.deepEqual(spreadMatrix(contracts,'2020-01-01',terms),[]);
+});
 
 test('seasonal spread follows selected legs and date despite a saved month preference',async()=>{
  const source=await readFile(new URL('../src/HistoryPanel.jsx',import.meta.url),'utf8');

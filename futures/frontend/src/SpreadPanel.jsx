@@ -3,7 +3,7 @@ import { useChart, usePreference } from '../../../frontend/src/charts.js';
 import {useEffect,useRef,useState} from 'react';
 const fmt=v=>v==null?'—':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:2});
 
-export default function SpreadPanel({data,revision,controls}) {
+export default function SpreadPanel({data,revision,controls,beforeChart}) {
  const [span,setSpan]=usePreference('futures.spread.span.default','3m'),[ma,setMa]=usePreference('futures.spread.ma',false),[legs,setLegs]=usePreference('futures.spread.legs',false),[rank,setRank]=usePreference('futures.spread.rank',false),[result,setResult]=useState(null),[error,setError]=useState('');
  const ref=useRef();
  useEffect(()=>{
@@ -39,6 +39,7 @@ export default function SpreadPanel({data,revision,controls}) {
  return <section className="panel" id="spread-history"><div className="filters">{controls(spanControl)}
    {[[ma,setMa,'20期均线'],[legs,setLegs,'两腿价格联动'],[rank,setRank,'历史分位']].map(([v,fn,label])=><label className="check" key={label}><input type="checkbox" checked={v} onChange={e=>fn(e.target.checked)}/>{label}</label>)}
   </div>
+  {beforeChart}
   {error?<p role="alert">{error}</p>:!result?<p role="status">读取所选两腿历史…</p>:<><p className="sub">有效配对 {result.first||'无'} 至 {result.last||'无'} · {result.paired_count}个样本</p>
    {!result.paired_count?<p className="empty">此范围无有效配对，尝试共同有效历史。</p>:<div ref={ref} style={{height:440+400*(Number(legs)+Number(rank))}} role="img" aria-label={`${data.near}减${data.far}价差时间序列，${result.paired_count}个有效配对；最新值${fmt(result.series.filter(r=>r.spread!=null).at(-1)?.spread)}`}/>}
    </>}
