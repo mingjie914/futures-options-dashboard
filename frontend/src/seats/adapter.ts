@@ -135,6 +135,7 @@ interface ApiSignal {
 }
 
 interface ApiCombinationView {
+  top_changes?: ApiSeatRow[];
   selected_date: string;
   metrics: ApiMetric[];
   net_position_top: ApiSeatRow[];
@@ -735,6 +736,7 @@ export function mapApiSnapshot(
   const products = productOptions(options);
   const productLabel = selectedProductLabel(products, filters.productCode);
   const signals = [...combination.signals, ...market.anomalies, ...(term.signals ?? [])];
+  const positionChanges = combination.top_changes ?? term.top_changes ?? [];
   const seatTags = tagsBySeat(signals, [
     ...combination.net_position_top,
     ...combination.long_top,
@@ -742,7 +744,7 @@ export function mapApiSnapshot(
     ...combination.signals,
     ...market.anomalies,
     ...term.opposite_seats,
-    ...(term.top_changes ?? []),
+    ...positionChanges,
   ]);
   return {
     meta: mapMeta(
@@ -783,7 +785,7 @@ export function mapApiSnapshot(
       threshold: term.min_leg_position,
       contracts: contractRows(term.contracts),
       oppositeSeats: oppositeRows(term.opposite_seats, seatTags),
-      topChanges: termChangeRows(term.top_changes, seatTags),
+      topChanges: termChangeRows(positionChanges, seatTags),
     },
     validation: validationRows(validation.rules),
   };
@@ -818,10 +820,10 @@ export function createApiAdapter(
         const query = buildQuery(resolved);
         const [options, combination, market, term, validation] = await Promise.all([
           optionsRequest,
-          view === "combination" ? requestJson<ApiEnvelope<ApiCombinationView>>(`${prefix}/views/combination?${query}`, { signal }) : undefined,
+          view === "combination" || view === "product" ? requestJson<ApiEnvelope<ApiCombinationView>>(`${prefix}/views/combination?${query}&detail=${view === "product" ? "positions" : "groups"}`, { signal }) : undefined,
           view === "market" ? requestJson<ApiEnvelope<ApiMarketView>>(`${prefix}/views/market-signals?${query}`, { signal }) : undefined,
-          view === "term" ? requestJson<ApiEnvelope<ApiTermView>>(`${prefix}/views/term-structure?${query}`, { signal }) : undefined,
-          view === "term" ? requestJson<ApiEnvelope<ApiValidationView>>(`${prefix}/views/validation?${query}&limit=1000`, { signal }) : undefined,
+          view === "term" ? requestJson<ApiEnvelope<ApiTermView>>(`${prefix}/views/term-structure?${query}&detail=contracts`, { signal }) : undefined,
+          view === "product" ? requestJson<ApiEnvelope<ApiValidationView>>(`${prefix}/views/validation?${query}&limit=1000`, { signal }) : undefined,
         ]);
         if ([combination, market, term, validation].some(result => result && version(result.meta) !== version(options.meta))) continue;
         ensureNotAborted(signal);

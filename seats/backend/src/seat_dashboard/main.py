@@ -127,6 +127,7 @@ def create_app(reader: DashboardReadPort | None = None, settings: Settings | Non
         scope: str,
         limit: int,
         min_leg_position: int = 300,
+        detail: str = "all",
     ) -> dict[str, Any]:
         try:
             result = active_reader.view(
@@ -136,6 +137,7 @@ def create_app(reader: DashboardReadPort | None = None, settings: Settings | Non
                 scope=scope,
                 limit=limit,
                 min_leg_position=min_leg_position,
+                detail=detail,
             )
             return _envelope(active_reader, result, result.get("selected_date", trade_date))
         except Exception as exc:
@@ -149,8 +151,9 @@ def create_app(reader: DashboardReadPort | None = None, settings: Settings | Non
         product_code: str | None = None,
         scope: str = "all",
         limit: int = Query(default=20, ge=1, le=100),
+        detail: str = Query(default="all", pattern="^(all|groups|positions)$"),
     ) -> dict[str, Any]:
-        return view_route("combination", trade_date, product_code, scope, limit)
+        return view_route("combination", trade_date, product_code, scope, limit, detail=detail)
 
     @router.get("/views/market-signals")
     @cached
@@ -172,8 +175,9 @@ def create_app(reader: DashboardReadPort | None = None, settings: Settings | Non
         scope: str = "all",
         limit: int = Query(default=50, ge=1, le=100),
         min_leg_position: int = Query(default=300, ge=0, le=10_000_000),
+        detail: str = Query(default="all", pattern="^(all|contracts)$"),
     ) -> dict[str, Any]:
-        return view_route("term-structure", trade_date, product_code, scope, limit, min_leg_position)
+        return view_route("term-structure", trade_date, product_code, scope, limit, min_leg_position, detail)
 
     @router.get("/views/validation")
     @cached

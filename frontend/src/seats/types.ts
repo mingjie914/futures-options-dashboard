@@ -2,6 +2,7 @@
 export type DashboardView =
   | "combination"
   | "market"
+  | "product"
   | "term";
 
 export type DataState =

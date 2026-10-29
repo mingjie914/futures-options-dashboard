@@ -494,7 +494,7 @@
   padding: 2px 0;
 }
 
-.netRow.netHeader { min-height: 30px; color: var(--text-muted); font-size: 12px; }
+.netRow.netHeader, .termChangeRow.netHeader { min-height: 30px; color: var(--text-muted); font-size: 12px; }
 .netHeader > :nth-child(4), .netHeader > :nth-child(5) { text-align: right; }
 
 .netRow, .termChangeRow{
@@ -959,13 +959,13 @@
 .termChangeRow{
   padding: 0;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 14px;
 }
 
 .termChangeRow .seatButton, .termChangeRow > span:not(.rankNumber):not(.reversalLabel):not(.reversalPlaceholder){
-  font-size: 12px;
-  text-align: right;
+  font-size: inherit;
 }
+.termChangeRow > :nth-child(4){text-align:right}
 
 .termChangeRow .rowTags{
   justify-content: flex-end;
@@ -1332,9 +1332,9 @@ to{ opacity: 0.9; }
 .toneNeutral{ color: var(--text-muted); }
 
 .divergenceCards{
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 16px;
   padding: 0 20px;
 }
 
@@ -1428,7 +1428,6 @@ to{ opacity: 0.9; }
   scroll-margin-top: 90px;
 }
 
-.comparisonGrid{ align-items: start; }
 
 .researchSummary .panelHeader{ min-height: 0; padding-top: 0; padding-bottom: 12px; }
 
@@ -1535,8 +1534,9 @@ to{ opacity: 0.9; }
 .termTotals span{ white-space: nowrap; }
 
 .termChangeRow{
-  grid-template-columns: 28px 100px minmax(120px, 1fr) 80px 40px 110px;
-  min-height: 54px;
+  grid-template-columns: 24px minmax(75px, 1fr) minmax(55px, 1fr) 64px 36px 68px;
+  min-height: 38px;
+  gap: 6px;
 }
 
 .termChangeBarTrack{
@@ -1609,7 +1609,7 @@ to{ opacity: 0.9; }
 
 .netRow{ grid-template-columns: 25px minmax(0, 1fr) 22px 62px 58px; padding: 0 16px; }
 
-.netRow .rowTags{ display: none; }
+.netRow .rowTags, .netRow.netHeader > :last-child{ display: none; }
 
 .treemap{ grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
 

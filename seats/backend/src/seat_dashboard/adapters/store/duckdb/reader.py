@@ -26,7 +26,7 @@ def _one(rows: Iterable[dict[str, Any]]) -> dict[str, Any] | None:
 class DuckDBReader(DashboardReadPort):
     """Read-only page queries against the published DuckDB snapshot."""
 
-    QUERY_VERSION = "seat-queries-v6-group-identities"
+    QUERY_VERSION = "seat-queries-v7-page-details"
     COMBINATION_ORDER = (
         "ORDER BY CASE c.combination_id WHEN 'industrial_major' THEN 1 "
         "WHEN 'brokerage_proprietary' THEN 2 WHEN 'capital_strike' THEN 3 "
@@ -241,9 +241,16 @@ class DuckDBReader(DashboardReadPort):
         scope: str = "all",
         limit: int = 20,
         min_leg_position: int = 300,
+        detail: str = "all",
     ) -> dict[str, Any]:
         if view_name not in self.ALLOWED_VIEWS:
             raise InvalidDashboardQuery(f"unknown view: {view_name}")
+        if detail not in {"combination": {"all", "groups", "positions"}, "term-structure": {"all", "contracts"}}.get(view_name, {"all"}):
+            raise InvalidDashboardQuery("unknown view detail")
+        if detail == "groups":
+            product_code = None
+        if detail == "positions" and (not product_code or product_code.upper() in {"ALL", "*"}):
+            raise InvalidDashboardQuery("positions requires a product")
         limit = self._safe_limit(limit, 1_000)
         if min_leg_position < 0 or min_leg_position > 10_000_000:
             raise InvalidDashboardQuery("min_leg_position is invalid")
@@ -252,12 +259,12 @@ class DuckDBReader(DashboardReadPort):
             selected_date = self._resolve_date(connection, trade_date)
             metrics = self._metrics(connection, selected_date, product_code)
             if view_name == "combination":
-                data = self._combination(connection, selected_date, product_code, metrics, limit)
+                data = self._combination(connection, selected_date, product_code, metrics, limit, detail)
             elif view_name == "market-signals":
                 data = self._market_signals(connection, selected_date, product_code, metrics, limit)
             elif view_name == "term-structure":
                 data = self._term_structure(
-                    connection, selected_date, product_code, metrics, limit, min_leg_position
+                    connection, selected_date, product_code, metrics, limit, min_leg_position, detail
                 )
             else:
                 data = self._validation(connection, selected_date, product_code, metrics, limit)
@@ -270,19 +277,7 @@ class DuckDBReader(DashboardReadPort):
         finally:
             connection.close()
 
-    def _combination(
-        self,
-        connection: duckdb.DuckDBPyConnection,
-        selected_date: date,
-        product_code: str | None,
-        metrics: list[dict[str, Any]],
-        limit: int,
-    ) -> dict[str, Any]:
-        normalized_product = (
-            product_code.strip().upper()
-            if product_code and product_code.strip().upper() not in {"ALL", "*"}
-            else None
-        )
+    def _seat_positions(self, connection, selected_date, normalized_product, order, limit, total=False):
         date_sql, date_params = self._date_filter(selected_date)
         product_sql, product_params = self._product_filter(normalized_product)
         if normalized_product:
@@ -307,31 +302,46 @@ class DuckDBReader(DashboardReadPort):
                 + " GROUP BY seat_id"
             )
         params = [*date_params, *product_params]
-        net = _as_dicts(
-            connection.execute(top_sql + " ORDER BY abs_net_position DESC, seat_name LIMIT ?", [*params, limit])
+        top_sql = f"SELECT *{', sum(abs(net_position)) OVER () AS total_abs_net' if total else ''} FROM ({top_sql}) ranked"
+        return _as_dicts(connection.execute(top_sql + f" ORDER BY {order} LIMIT ?", [*params, limit]))
+
+    def _combination(
+        self,
+        connection: duckdb.DuckDBPyConnection,
+        selected_date: date,
+        product_code: str | None,
+        metrics: list[dict[str, Any]],
+        limit: int,
+        detail: str = "all",
+    ) -> dict[str, Any]:
+        normalized_product = (
+            product_code.strip().upper()
+            if product_code and product_code.strip().upper() not in {"ALL", "*"}
+            else None
         )
-        long_rows = _as_dicts(
-            connection.execute(
-                top_sql + " ORDER BY long_position DESC, seat_name LIMIT ?", [*params, limit]
-            )
-        )
-        short_rows = _as_dicts(
-            connection.execute(
-                top_sql + " ORDER BY short_position DESC, seat_name LIMIT ?", [*params, limit]
-            )
-        )
-        total_abs_net = connection.execute(
-            f"SELECT sum(abs(net_position)) FROM ({top_sql}) ranked", params
-        ).fetchone()[0] or 0
-        total_long = sum((metric.get("total_long") or 0) for metric in metrics)
-        total_short = sum((metric.get("total_short") or 0) for metric in metrics)
-        for row in net:
-            row["net_share"] = abs(row["net_position"]) / total_abs_net if total_abs_net else None
-        for row in long_rows:
-            row["position_share"] = row["long_position"] / total_long if total_long else None
-        for row in short_rows:
-            row["position_share"] = row["short_position"] / total_short if total_short else None
-        signal_rows = self._signals(connection, selected_date, normalized_product, max(limit, 50))
+        net, long_rows, short_rows, signal_rows, top_changes = [], [], [], [], []
+        if detail != "groups":
+            net = self._seat_positions(connection, selected_date, normalized_product, "abs_net_position DESC, seat_name", limit, total=True)
+            long_rows = self._seat_positions(connection, selected_date, normalized_product, "long_position DESC, seat_name", limit)
+            short_rows = self._seat_positions(connection, selected_date, normalized_product, "short_position DESC, seat_name", limit)
+            total_abs_net = net[0]["total_abs_net"] if net else 0
+            total_long = sum((metric.get("total_long") or 0) for metric in metrics)
+            total_short = sum((metric.get("total_short") or 0) for metric in metrics)
+            for row in net:
+                row.pop("total_abs_net")
+                row["net_share"] = abs(row["net_position"]) / total_abs_net if total_abs_net else None
+            for row in long_rows:
+                row["position_share"] = row["long_position"] / total_long if total_long else None
+            for row in short_rows:
+                row["position_share"] = row["short_position"] / total_short if total_short else None
+            signal_rows = self._signals(connection, selected_date, normalized_product, max(limit, 50))
+            if detail == "positions":
+                top_changes = self._seat_positions(connection, selected_date, normalized_product, "abs(net_position_change) DESC, seat_name", min(limit, 10))
+            all_rows = [*net, *long_rows, *short_rows, *signal_rows, *top_changes]
+            self._attach_static_tags(all_rows, self._static_tags(connection, selected_date, normalized_product, (row.get("seat_id", "") for row in all_rows)))
+        rankings = {"net_position_top": net, "long_top": long_rows, "short_top": short_rows, "signals": signal_rows, "top_changes": top_changes}
+        if detail == "positions":
+            return {**rankings, "metrics": metrics, "combinations": [], "combination_signals": [], "combination_signal_product_count": 0, "divergence_cards": [], "insight": self._insight(metrics, signal_rows)}
         combinations = _as_dicts(
             connection.execute(
                 "SELECT c.combination_id, c.name, c.scope, c.is_system, "
@@ -419,43 +429,34 @@ class DuckDBReader(DashboardReadPort):
                 if (row.get("member_count") or 0) > 1
             }
         )
-        validation_summary = _one(
-            _as_dicts(
-                connection.execute(
-                    "SELECT max(current_percentile) FILTER (WHERE rule_code = 'f2_position_ratio') "
-                    "AS f2_percentile, max(current_percentile) FILTER "
-                    "(WHERE rule_code = 'net_cr5_concentration') AS net_cr5_percentile, "
-                    "max(library_cutoff) AS library_cutoff "
-                    "FROM seat_dash_rule_result_daily WHERE trade_date = ?"
-                    + (" AND product_code = ?" if normalized_product else ""),
-                    [selected_date, *([normalized_product] if normalized_product else [])],
+        validation_summary, term_count, anomaly_count = {}, 0, 0
+        if detail == "all":
+            validation_summary = _one(
+                _as_dicts(
+                    connection.execute(
+                        "SELECT max(current_percentile) FILTER (WHERE rule_code = 'f2_position_ratio') "
+                        "AS f2_percentile, max(current_percentile) FILTER "
+                        "(WHERE rule_code = 'net_cr5_concentration') AS net_cr5_percentile, "
+                        "max(library_cutoff) AS library_cutoff "
+                        "FROM seat_dash_rule_result_daily WHERE trade_date = ?"
+                        + (" AND product_code = ?" if normalized_product else ""),
+                        [selected_date, *([normalized_product] if normalized_product else [])],
+                    )
                 )
-            )
-        ) or {}
-        term_count = connection.execute(
-            "SELECT count(*) FROM seat_dash_term_signal_daily WHERE trade_date = ?"
-            + (" AND product_code = ?" if normalized_product else ""),
-            [selected_date, *([normalized_product] if normalized_product else [])],
-        ).fetchone()[0]
-        anomaly_count = connection.execute(
-            "SELECT count(*) FROM seat_dash_seat_signal_daily WHERE trade_date = ?"
-            + (" AND product_code = ?" if normalized_product else ""),
-            [selected_date, *([normalized_product] if normalized_product else [])],
-        ).fetchone()[0]
-        all_rows = [*net, *long_rows, *short_rows, *signal_rows]
-        static_tags = self._static_tags(
-            connection,
-            selected_date,
-            normalized_product,
-            (row.get("seat_id", "") for row in all_rows),
-        )
-        self._attach_static_tags(all_rows, static_tags)
+            ) or {}
+            term_count = connection.execute(
+                "SELECT count(*) FROM seat_dash_term_signal_daily WHERE trade_date = ?"
+                + (" AND product_code = ?" if normalized_product else ""),
+                [selected_date, *([normalized_product] if normalized_product else [])],
+            ).fetchone()[0]
+            anomaly_count = connection.execute(
+                "SELECT count(*) FROM seat_dash_seat_signal_daily WHERE trade_date = ?"
+                + (" AND product_code = ?" if normalized_product else ""),
+                [selected_date, *([normalized_product] if normalized_product else [])],
+            ).fetchone()[0]
         return {
             "metrics": metrics,
-            "net_position_top": net,
-            "long_top": long_rows,
-            "short_top": short_rows,
-            "signals": signal_rows,
+            **rankings,
             "combinations": combinations,
             "combination_signals": combination_signals,
             "combination_positions": combination_positions,
@@ -567,6 +568,7 @@ class DuckDBReader(DashboardReadPort):
         metrics: list[dict[str, Any]],
         limit: int,
         min_leg_position: int,
+        detail: str = "all",
     ) -> dict[str, Any]:
         normalized_product = (
             product_code.strip().upper()
@@ -594,37 +596,8 @@ class DuckDBReader(DashboardReadPort):
                 [selected_date, min_leg_position, *([normalized_product] if normalized_product else []), min(limit, 10)],
             )
         )
-        date_sql, date_params = self._date_filter(selected_date)
-        change_product_sql, change_product_params = self._product_filter(normalized_product)
-        if normalized_product:
-            top_change_sql = (
-                "SELECT product_code, seat_id, seat_name, long_position, long_change, "
-                "short_position, short_change, net_position, net_change, abs_net_position, "
-                "previous_net_position, net_position_change, entry_state "
-                "FROM seat_dash_product_seat_daily WHERE 1=1"
-                + date_sql
-                + change_product_sql
-            )
-            top_change_order = "abs(net_position_change) DESC, seat_name"
-        else:
-            top_change_sql = (
-                "SELECT 'ALL' AS product_code, seat_id, max(seat_name) AS seat_name, "
-                "sum(long_position) AS long_position, sum(long_change) AS long_change, "
-                "sum(short_position) AS short_position, sum(short_change) AS short_change, "
-                "sum(net_position) AS net_position, sum(net_change) AS net_change, "
-                "abs(sum(net_position)) AS abs_net_position, NULL AS previous_net_position, "
-                "sum(net_position_change) AS net_position_change, 'aggregate' AS entry_state "
-                "FROM seat_dash_product_seat_daily WHERE 1=1"
-                + date_sql
-                + " GROUP BY seat_id"
-            )
-            top_change_order = "abs(sum(net_position_change)) DESC, max(seat_name)"
-        top_changes = _as_dicts(
-            connection.execute(
-                top_change_sql + f" ORDER BY {top_change_order} LIMIT ?",
-                [*date_params, *change_product_params, min(limit, 10)],
-            )
-        )
+        top_changes = [] if detail == "contracts" else self._seat_positions(
+            connection, selected_date, normalized_product, "abs(net_position_change) DESC, seat_name", min(limit, 10))
         static_tags = self._static_tags(
             connection,
             selected_date,

@@ -22,6 +22,7 @@ class DashboardReadPort(Protocol):
         scope: str = "all",
         limit: int = 20,
         min_leg_position: int = 300,
+        detail: str = "all",
     ) -> dict[str, Any]: ...
 
     def history(

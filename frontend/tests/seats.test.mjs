@@ -61,6 +61,7 @@ test("requests only the active view and revalidates cached chunks; history follo
   const filters = { productCode: "RB.SHFE", tradeDate: "", scope: "all" };
   const first = await adapter.loadSnapshot(filters, undefined, "combination");
   assert.deepEqual(requests.map(url => url.pathname), ["/api/seats/v1/meta/options", "/api/seats/v1/views/combination"]);
+  assert.equal(requests.at(-1).searchParams.get("detail"), "groups");
   assert.deepEqual(await adapter.loadSnapshot(filters, undefined, "combination"), first);
   requests.length = 0;
   const market = await adapter.loadSnapshot({ ...filters, productCode: "all" }, undefined, "market");
@@ -73,7 +74,13 @@ test("requests only the active view and revalidates cached chunks; history follo
   assert.equal(requests.at(-1).searchParams.get("end_date"), "2026-07-28");
   requests.length = 0;
   await adapter.loadSnapshot(filters, undefined, "term");
-  assert.deepEqual(requests.map(url => url.pathname), ["/api/seats/v1/meta/options", "/api/seats/v1/views/term-structure", "/api/seats/v1/views/validation"]);
+  assert.deepEqual(requests.map(url => url.pathname), ["/api/seats/v1/meta/options", "/api/seats/v1/views/term-structure"]);
+  assert.equal(requests.at(-1).searchParams.get("detail"), "contracts");
+  requests.length = 0;
+  await adapter.loadSnapshot(filters, undefined, "product");
+  assert.deepEqual(requests.map(url => url.pathname), ["/api/seats/v1/meta/options", "/api/seats/v1/views/combination", "/api/seats/v1/views/validation"]);
+  assert.equal(requests[1].searchParams.get("detail"), "positions");
+  assert.ok(requests.slice(1).every(url => url.searchParams.get("product_code") === "RB.SHFE"));
   await adapter.loadSeatHistory("seat-a");
   assert.equal(requests.at(-1).searchParams.get("end_date"), "2026-07-28");
   assert.equal(requests.at(-1).searchParams.get("product_code"), "RB.SHFE");

@@ -58,6 +58,36 @@ def test_all_product_alias_and_local_cors(demo_reader):
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
 
 
+def test_page_details_preserve_rankings_and_skip_unneeded_sections(demo_reader, monkeypatch):
+    client = TestClient(create_app(reader=demo_reader))
+    base = "/api/v1/views/"
+    def get(view, **params):
+        response = client.get(base + view, params=params)
+        assert response.status_code == 200, response.text
+        return response.json()["data"]
+    legacy = get("combination", product_code="RB.SHFE", limit=1)
+    positions = get("combination", product_code="RB.SHFE", limit=1, detail="positions")
+    for key in ("metrics", "net_position_top", "long_top", "short_top", "signals"):
+        assert positions[key] == legacy[key]
+    assert positions["net_position_top"][0]["net_share"] == pytest.approx(900 / 1300)
+    assert positions["top_changes"][0]["product_code"] == "RB.SHFE"
+    assert not positions["combinations"] and not positions["divergence_cards"]
+    term = get("term-structure", product_code="RB.SHFE", limit=1)
+    assert positions["top_changes"] == term["top_changes"]
+    lean_term = get("term-structure", product_code="RB.SHFE", limit=1, detail="contracts")
+    assert not lean_term["top_changes"]
+    for key in ("contracts", "opposite_seats", "signals"):
+        assert lean_term[key] == term[key]
+    all_groups = get("combination")
+    monkeypatch.setattr(demo_reader, "_seat_positions", lambda *a, **kw: pytest.fail("group page queried member rankings"))
+    groups = get("combination", detail="groups", product_code="RB.SHFE")
+    for key in ("metrics", "combinations", "combination_positions", "divergence_cards"):
+        assert groups[key] == all_groups[key]
+    assert not groups["net_position_top"] and not groups["long_top"] and not groups["short_top"]
+    assert client.get(base + "combination", params={"detail": "positions"}).status_code == 400
+    assert client.get(base + "combination", params={"detail": "invalid"}).status_code == 422
+
+
 def test_unsupported_read_store_is_fail_closed(tmp_path):
     settings = Settings(
         project_root=tmp_path,

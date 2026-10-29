@@ -35,6 +35,7 @@ import type {
 const views: Array<{ id: DashboardView; label: string }> = [
   { id: "combination", label: "席位动向" },
   { id: "market", label: "市场信号" },
+  { id: "product", label: "品种持仓" },
   { id: "term", label: "跨期持仓" },
 ];
 
@@ -105,7 +106,7 @@ function readFilters(): DashboardFilters {
     scope: scope === "main" || scope === "retail" ? scope : "all" };
 }
 
-const readView = () => { const view = new URLSearchParams(window.location.search).get("view"); return view === "validation" ? "term" : views.find((item) => item.id === view)?.id ?? "combination"; };
+const readView = () => { const view = new URLSearchParams(window.location.search).get("view"); return view === "validation" ? "product" : views.find((item) => item.id === view)?.id ?? "combination"; };
 
 export function Dashboard() {
   const [view, setView] = useState<DashboardView>(readView);
@@ -133,7 +134,8 @@ export function Dashboard() {
     }
     if (url.href !== window.location.href) window.history.replaceState(null, "", url);
   }, [filters]);
-  const productCode = view === "term" ? filters.productCode : "all";
+  const productView = view === "product" || view === "term";
+  const productCode = productView ? filters.productCode : "all";
   const requestFilters = useMemo(() => ({ productCode, tradeDate: filters.tradeDate, scope: filters.scope }), [productCode, filters.tradeDate, filters.scope]);
   const [loadedView, setLoadedView] = useState(view);
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
@@ -210,16 +212,19 @@ export function Dashboard() {
   );
 
   const changeView = useCallback((nextView: DashboardView) => {
+    if (nextView === view) return;
     const url = new URL(window.location.href);
     url.searchParams.set("view", nextView);
     url.hash = "";
     if (url.href !== window.location.href) window.history.pushState(null, "", url);
+    setLoadState("loading");
+    setIsRefreshing(true);
     setView(nextView);
-  }, []);
+  }, [view]);
 
   const openProduct = useCallback((productCode: string) => {
     setFilters((current) => ({ ...current, productCode }));
-    changeView("term");
+    changeView("product");
   }, [changeView]);
 
   const handleTabKeyDown = useCallback(
@@ -263,7 +268,7 @@ export function Dashboard() {
         </nav>
 
         <FilterBar
-          showProduct={view === "term"}
+          showProduct={productView}
           filters={filters}
           products={snapshot?.products.filter((product) => product.code !== "all") ?? []}
           isRefreshing={isRefreshing}
@@ -283,8 +288,6 @@ export function Dashboard() {
             {view === "combination" && (
               <CombinationView
                 snapshot={snapshot}
-                onSeat={openHistory}
-                onTag={setSelectedTag}
                 onProduct={openProduct}
               />
             )}
@@ -299,6 +302,9 @@ export function Dashboard() {
             )}
             {view === "term" && (
               <TermView snapshot={snapshot} onSeat={openHistory} onTag={setSelectedTag} />
+            )}
+            {view === "product" && (
+              <ProductView snapshot={snapshot} onSeat={openHistory} onTag={setSelectedTag} />
             )}
           </div>
         )}
@@ -464,13 +470,9 @@ function EmptyPageState({ state, onRetry }: { state: DataState; onRetry: () => v
 
 function CombinationView({
   snapshot,
-  onSeat,
-  onTag,
   onProduct,
 }: {
   snapshot: DashboardSnapshot;
-  onSeat: (seatId: string) => void;
-  onTag: (tag: SeatTag) => void;
   onProduct: (productCode: string) => void;
 }) {
   return (
@@ -482,17 +484,7 @@ function CombinationView({
         onProduct={onProduct}
       />
 
-      <section className={styles.productSection} aria-label={`${snapshot.meta.selectedProductLabel}席位概览`}>
-      <div className={`${styles.twoColumnGrid} ${styles.comparisonGrid}`}>
-        <NetPositionPanel rows={snapshot.netTop} onSeat={onSeat} onTag={onTag} />
-        <DivergenceCards cards={snapshot.divergenceCards} pair={snapshot.divergencePair} onProduct={onProduct} />
-      </div>
-
-      <div className={styles.twoColumnGrid}>
-        <SeatRankingPanel title="多头 Top20" rows={snapshot.longTop} onSeat={onSeat} onTag={onTag} />
-        <SeatRankingPanel title="空头 Top20" rows={snapshot.shortTop} onSeat={onSeat} onTag={onTag} />
-      </div>
-      </section>
+      <DivergenceCards cards={snapshot.divergenceCards} pair={snapshot.divergencePair} onProduct={onProduct} />
     </div>
   );
 }
@@ -829,9 +821,9 @@ function InlineEmpty({ label }: { label: string }) {
 function MarketView({ snapshot, scope, onSeat, onTag, onProduct }: { snapshot: DashboardSnapshot; scope: Scope; onSeat: (seatId: string, productCode?: string) => void; onTag: (tag: SeatTag) => void; onProduct: (productCode: string) => void }) {
   return (
     <div className={styles.pageStack}>
+      <MarketTreemap items={snapshot.treemap} onProduct={onProduct} />
       <SignalRibbon counts={snapshot.overview.signalCounts} />
       <AnomalyTable rows={snapshot.anomalies} scope={scope} onSeat={onSeat} onTag={onTag} />
-      <MarketTreemap items={snapshot.treemap} onProduct={onProduct} />
     </div>
   );
 }
@@ -885,17 +877,31 @@ function MarketTreemap({ items, onProduct }: { items: DashboardSnapshot["treemap
   );
 }
 
-function TermView({ snapshot, onSeat, onTag }: { snapshot: DashboardSnapshot; onSeat: (seatId: string) => void; onTag: (tag: SeatTag) => void }) {
+function ProductView({ snapshot, onSeat, onTag }: { snapshot: DashboardSnapshot; onSeat: (seatId: string) => void; onTag: (tag: SeatTag) => void }) {
   return (
     <div className={`${styles.pageStack} ${styles.productSection}`}>
       <div className={styles.productOverview}>
         <PanelHeader title={`${snapshot.meta.selectedProductLabel}概览`} />
         {snapshot.meta.selectedProductLabel !== "全市场" && <MetricGrid metrics={snapshot.overview.metrics} />}
       </div>
+      <div className={styles.twoColumnGrid}>
+        <NetPositionPanel rows={snapshot.netTop} onSeat={onSeat} onTag={onTag} />
+        <TermChangePanel rows={snapshot.termStructure.topChanges} onSeat={onSeat} onTag={onTag} />
+      </div>
+      <div className={styles.twoColumnGrid}>
+        <SeatRankingPanel title="多头 Top20" rows={snapshot.longTop} onSeat={onSeat} onTag={onTag} />
+        <SeatRankingPanel title="空头 Top20" rows={snapshot.shortTop} onSeat={onSeat} onTag={onTag} />
+      </div>
       <ResearchSummary snapshot={snapshot} />
+    </div>
+  );
+}
+
+function TermView({ snapshot, onSeat, onTag }: { snapshot: DashboardSnapshot; onSeat: (seatId: string) => void; onTag: (tag: SeatTag) => void }) {
+  return (
+    <div className={`${styles.pageStack} ${styles.productSection}`}>
       {snapshot.meta.selectedProductLabel !== "全市场" ? <TermChart contracts={snapshot.termStructure.contracts} productLabel={snapshot.termStructure.productLabel} /> : <InlineEmpty label="选择单一品种查看合约结构，避免混合不同合约单位" />}
       <OppositeSeatPanel rows={snapshot.termStructure.oppositeSeats} onSeat={onSeat} onTag={onTag} threshold={snapshot.termStructure.threshold} />
-      <TermChangePanel rows={snapshot.termStructure.topChanges} onSeat={onSeat} onTag={onTag} />
     </div>
   );
 }
@@ -977,6 +983,7 @@ function TermChangePanel({ rows, onSeat, onTag }: { rows: TermChangeRow[]; onSea
     <section className={styles.panel}>
       <PanelHeader title="净持仓变化 Top10" />
       <div className={styles.termChangeList}>
+        <div className={`${styles.termChangeRow} ${styles.netHeader}`}><span>#</span><span>席位</span><span /><span>净变动</span><span>状态</span><span>特点</span></div>
         {rows.map((row) => (
           <div className={`${styles.termChangeRow} ${row.isReversal ? styles.termReversal : ""}`} key={row.seatId}>
             <span className={styles.rankNumber}>{String(row.rank).padStart(2, "0")}</span>
