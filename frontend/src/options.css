@@ -3,9 +3,7 @@
   --options-ink: var(--ink);
   --options-muted: var(--muted);
   --options-border: var(--line);
-  --options-border-soft: #eef0f3;
   --options-blue: #4e7fb9;
-  --options-blue-soft: #fff;
   --options-red: #b64d49;
   --options-green: #2b8167;
   min-height: 100%;
@@ -160,10 +158,6 @@
   color: var(--options-muted);
 }
 
-.options-months{
-  grid-template-columns: repeat(6, minmax(125px, 1fr));
-}
-
 .options-month{
   min-width: 0;
   color: #181b20;
@@ -191,7 +185,6 @@
 .options-month small, .options-month em{
   display: block;
   margin-top: 5px;
-  font-size:14px;
   font-style: normal;
 }
 
@@ -200,10 +193,8 @@
 }
 
 .options-segment button{
-  color: #505c6b;
   background: transparent;
   border: 0;
-  border-radius: 4px;
 }
 
 .options-segment button:hover{
@@ -211,8 +202,6 @@
 }
 
 .options-segment .options-segment-on{
-  color: #4e7fb9;
-  background: #fff;
   box-shadow: none;
 }
 
@@ -316,8 +305,6 @@
 }
 
 .options-mini-table th{
-  color: #505c6b;
-  background: #fff;
   font-weight: 500;
 }
 
@@ -567,8 +554,6 @@
   position: sticky;
   z-index: 3;
   top: 0;
-  color: #505c6b;
-  background: #fff;
   border: 0;
   font-weight: 500;
 }
@@ -576,8 +561,6 @@
 .options-chain-table thead tr:first-child th{
   top: 0;
   padding: 11px 8px;
-  color: #505c6b;
-  background: #fff;
   font-weight:500;
   text-align: center;
 }
@@ -657,11 +640,6 @@
 @media (max-width: 1180px) {.options-module{
     padding: 20px;
   }
-
-.options-months{
-    overflow-x: auto;
-    grid-template-columns: repeat(6, 142px);
-  }
 }
 
 @media (max-width: 900px) {.options-topbar{
@@ -670,10 +648,6 @@
   }
 
 .options-top-actions{
-    justify-content: flex-start;
-  }
-
-.options-meta-line{
     justify-content: flex-start;
   }
 
@@ -774,8 +748,6 @@
 
 .options-pcr{display:flex;flex-wrap:wrap;gap:12px 32px;margin:14px 0}
 
-.options-pcr h3{font-weight:500}
-
 @media(max-width:620px){.options-pcr{gap:14px}}
 
 .options-iv-layout{display:flex;flex-direction:column;gap:14px;align-items:stretch}
@@ -783,8 +755,6 @@
 .options-iv-layout>div{min-width:0}
 
 .options-iv-stats{display:flex;flex-wrap:wrap;gap:12px 32px}
-
-.options-iv-stats small{display:block;font-size:12px;color:var(--options-muted)}
 
 .options-iv-sparkline{height:210px;min-width:0}
 
@@ -794,9 +764,7 @@
 
 .options-iv-history .options-analysis-tools{flex-wrap:wrap}
 
-.options-iv-history details p{line-height:1.8}
-
-@media(max-width:760px){.options-iv-layout{grid-template-columns:minmax(0,1fr);gap:12px}
+@media(max-width:760px){.options-iv-layout{gap:12px}
 
 .options-iv-history .options-heading{display:block}}
 

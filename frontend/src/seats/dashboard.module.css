@@ -13,7 +13,6 @@
   --gold: #667b96;
   --gold-soft: #f0f3f7;
   --positive: #b64d49;
-  --positive-soft: #faf0ef;
   --negative: #2b8167;
   --negative-soft: #eef6f2;
   --warning: #8b6d35;
@@ -524,7 +523,6 @@
   display: grid;
   align-items: center;
   grid-template-columns: 32px minmax(100px, 1fr) 24px 75px 65px 90px;
-  min-height: 45px;
   padding: 0 22px;
   gap: 8px;
 }
@@ -650,7 +648,6 @@
 
 .rankingScroll{
   max-height: 540px;
-  scrollbar-color: var(--line-strong) transparent;
 }
 
 .rankingTable{
@@ -706,7 +703,7 @@
   font-weight: 500;
 }
 
-.anomalyTableWrap{ max-height: min(540px, 65vh); scrollbar-color: var(--line-strong) transparent; }
+.anomalyTableWrap{ max-height: min(540px, 65vh);  }
 
 .anomalyTable thead th{ position: sticky; top: 0; z-index: 1; background: var(--surface); }
 
@@ -1667,8 +1664,6 @@ to{ opacity: 0.9; }
 .validationSummary{ grid-template-columns: 1fr 1fr; }
 
 .validationSummary > div{ padding: 14px; }
-
-.validationSummary strong{ font-size: 21px; }
 
 .inspector{ right: 12px; bottom: 12px; width: calc(100vw - 24px); }
 
