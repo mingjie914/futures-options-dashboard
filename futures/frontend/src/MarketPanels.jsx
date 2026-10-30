@@ -157,7 +157,7 @@ export function RolloverProgress({data}) {
   dataZoom:[{type:'inside',startValue:-180,endValue:0},{type:'slider',bottom:4,height:18,startValue:-180,endValue:0}],
   series:rounds.filter(r=>r.series.length).flatMap(r=>['outgoing','incoming',...(r.name==='current'?['spread']:[])].map((key,i)=>({
    name:key==='spread'?'价差':r[key]+(r.name==='previous'?' · 上轮':''),type:'line',yAxisIndex:key==='spread'?1:0,showSymbol:false,connectNulls:false,
-   lineStyle:{type:r.name==='previous'?'dashed':'solid',width:key==='spread'?1.4:2},itemStyle:{color:['#4e7fb9','#568f84','#222222'][i]},
+   lineStyle:{type:r.name==='previous'?'dashed':'solid',width:key==='spread'?1.8:2},itemStyle:{color:['#4e7fb9','#568f84','#222222'][i]},
    data:r.series.map(p=>({value:[p.day,p[key]],trade_date:p.trade_date}))
   }))).sort((a,b)=>a.yAxisIndex-b.yAxisIndex)
  }),[data]);
