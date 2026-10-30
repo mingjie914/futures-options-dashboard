@@ -9,9 +9,9 @@ const React=sharedRequire('react'), {renderToStaticMarkup}=sharedRequire('react-
 const source=await readFile(new URL('../src/MarketPanels.jsx',import.meta.url),'utf8');
 const ts=sharedRequire('typescript');
 const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-const module={exports:{}};
-new Function('module','exports','require',code)(module,module.exports,id=>id.startsWith('react')?sharedRequire(id):createRequire(import.meta.url)(id));
-const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel,spreadMatrix,SpreadMatrix}=module.exports;
+const module={exports:{}},chartDraws=[];
+new Function('module','exports','require',code)(module,module.exports,id=>id.startsWith('react')?sharedRequire(id):id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),useChart:(_ref,draw)=>chartDraws.push(draw)}:createRequire(import.meta.url)(id));
+const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel,spreadMatrix,SpreadMatrix,SeasonalSpreadChart}=module.exports;
 
 test('spread matrix uses recorded last trading days, preserves missing values and marks valid extrema',()=>{
  const trade_date='2026-10-29',row=(symbol,close)=>({symbol,close,trade_date});
@@ -31,7 +31,7 @@ test('spread matrix uses recorded last trading days, preserves missing values an
  assert.equal(matrix[2].cells[1].minimum,true);
  assert.equal(matrix[0].cells[1].minimum,undefined);
  const html=renderToStaticMarkup(React.createElement(SpreadMatrix,{data:{contracts,contract_terms:terms,meta:{as_of:trade_date},near:'IM2611',far:'IM2612'},onPair:()=>{}}));
- assert.match(html,/最后交易日间隔/);
+ assert.doesNotMatch(html,/最后交易日间隔/);
  assert.doesNotMatch(html,/月距/);
  assert.equal((html.match(/aria-pressed="true"/g)||[]).length,2);
  assert.match(html,/1\.77/);
@@ -55,6 +55,28 @@ test('spread matrix uses recorded last trading days, preserves missing values an
  const tied=spreadMatrix(prices.map(c=>({...c,close:100})),trade_date,terms);
  assert.equal(tied.flatMap(r=>r.cells).filter(c=>c.maximum&&c.minimum).length,3);
  assert.deepEqual(spreadMatrix(contracts,'2020-01-01',terms),[]);
+});
+
+test('seasonal comparison keeps individual observations, zero and current separate from the historical median',()=>{
+ const summary={samples:[{year:2024,label:'SH2401 − SH2403',trade_date:'2023-10-27',value:0},{year:2025,label:'SH2501 − SH2503',trade_date:'2024-10-28',value:null},{year:2026,label:'SH2601 − SH2603',trade_date:'2025-10-29',value:-20}],current:{year:2027,label:'SH2701 − SH2703',trade_date:'2026-10-29',value:80},median:-10};
+ const html=renderToStaticMarkup(React.createElement(SeasonalSpreadChart,{summary}));
+ let option;chartDraws.pop()({setOption:value=>{option=value;}});
+ assert.deepEqual(option.yAxis.data,['2027 当前','2026','2024']);
+ assert.deepEqual(option.series[0].data.map(p=>p.value),[[80,0],[-20,1],[0,2]]);
+ assert.equal(option.series[0].markLine.data[0].xAxis,-10);
+ assert.equal(option.series[0].lineStyle.opacity,0);
+ assert.equal(option.yAxis.axisLabel.interval,0);
+ assert.equal(option.series[0].showAllSymbol,true);
+ assert.equal(option.series[0].data[0].itemStyle.color,'#4e7fb9');
+ assert.equal(option.tooltip.formatter({dataIndex:1}),'SH2601 − SH2603\n2025-10-29：-20');
+ assert.match(html,/>90<\/strong>/);
+ assert.equal(option.series[0].data[0].symbol,'diamond');
+ const tenYears=renderToStaticMarkup(React.createElement(SeasonalSpreadChart,{summary:{...summary,samples:Array.from({length:9},(_,i)=>({...summary.samples[0],year:2018+i,value:i}))}}));
+ assert.match(tenYears,/class="seasonal-spread-chart"/);
+ chartDraws.pop();
+ assert.doesNotMatch(html,/<table/);
+ const empty=renderToStaticMarkup(React.createElement(SeasonalSpreadChart,{summary:{samples:[],current:null,median:null}}));
+ assert.match(empty,/暂无同期历史样本/);assert.doesNotMatch(empty,/role="img"/);
 });
 
 test('seasonal spread follows selected legs and date despite a saved month preference',async()=>{

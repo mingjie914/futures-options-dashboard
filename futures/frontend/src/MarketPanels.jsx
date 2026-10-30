@@ -1,6 +1,6 @@
 import { conditionalFetch as fetch } from '../../../frontend/src/transport.js';
-import {Metric,usePreference,RefreshButton} from '../../../frontend/src/charts.js';
-import {useEffect,useMemo,useState} from 'react';
+import {Metric,usePreference,RefreshButton,useChart} from '../../../frontend/src/charts.js';
+import {useEffect,useMemo,useRef,useState} from 'react';
 const fmt=v=>v==null?'—':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:2});
 const weak=(p,k)=>p?.['near_'+k]==null||p?.['far_'+k]==null?null:Math.min(p['near_'+k],p['far_'+k]);
 export const passesScan=(o,minHistory=0,minVolume=0)=>(minHistory<=0||(o.latest?.history_n??-1)>=minHistory)&&(minVolume<=0||(weak(o.latest,'volume')??-1)>=minVolume);
@@ -126,7 +126,7 @@ export function SpreadMatrix({data,onPair}) {
  const rows=useMemo(()=>spreadMatrix(data.contracts,data.meta.as_of,data.contract_terms),[data.contracts,data.meta.as_of,data.contract_terms]);
  if(!rows.length)return null;
  return <section className="spread-matrix" aria-label="跨期价差矩阵">
-  <div className="matrix-heading"><h2>跨期矩阵</h2><Metric label="对角收盘 / 右上价差 / 左下日均" hint="价差 = 近月 − 远月；日均 = 价差 ÷ 最后交易日间隔（自然日）。采用 RDS 当前修订日期，缺失或冲突不折算。点击切换组合。"/><span>{data.meta.as_of} · 最后交易日间隔</span></div>
+  <h2>跨期矩阵</h2>
   <div className="table-wrap"><table style={{'--matrix-width':`${64+rows.length*72}px`}}><colgroup><col style={{width:64}}/>{rows.map(row=><col key={row.symbol}/>)}</colgroup><thead><tr><th scope="col">合约</th>{rows.map(row=><th scope="col" key={row.symbol}>{row.symbol}</th>)}</tr></thead><tbody>{rows.map((row,i)=><tr key={row.symbol}><th scope="row">{row.symbol}</th>{row.cells.map((cell,j)=>{
    const diagonal=i===j,selected=!diagonal&&cell.near===data.near&&cell.far===data.far,mark=[cell.maximum?'多':'',cell.minimum?'空':''].filter(Boolean).join('/');
    return <td key={rows[j].symbol} className={(diagonal?'matrix-price':i<j?'matrix-spread':'matrix-daily')+(selected?' matrix-selected':'')}>
@@ -136,6 +136,20 @@ export function SpreadMatrix({data,onPair}) {
    </td>;
   })}</tr>)}</tbody></table></div>
  </section>;
+}
+
+export function SeasonalSpreadChart({summary}) {
+ const ref=useRef(),samples=summary.samples.filter(p=>Number.isFinite(p.value)),current=summary.current;
+ const rows=[...samples,...(Number.isFinite(current?.value)?[{...current,current:true}]:[])].sort((a,b)=>b.year-a.year);
+ useChart(ref,chart=>chart.setOption({
+  grid:{left:66,right:60,top:4,bottom:24},
+  tooltip:{trigger:'item',confine:true,renderMode:'richText',formatter:p=>{const row=rows[p.dataIndex];return `${row.label}\n${row.trade_date}：${fmt(row.value)}`;}},
+  xAxis:{type:'value',scale:true,axisLabel:{hideOverlap:true},splitLine:{lineStyle:{color:'#eef0f3'}}},
+  yAxis:{type:'category',inverse:true,axisLabel:{interval:0},data:rows.map(p=>`${p.year}${p.current?' 当前':''}`),axisLine:{show:false},axisTick:{show:false}},
+  series:[{type:'line',showSymbol:true,showAllSymbol:true,lineStyle:{opacity:0},data:rows.map((p,i)=>({value:[p.value,i],symbol:p.current?'diamond':'circle',symbolSize:p.current?11:8,itemStyle:{color:p.current?'#4e7fb9':'#aebdce'},label:{show:true,position:'right',distance:6,formatter:()=>fmt(p.value),color:p.current?'#315f94':'#505c6b'}})),
+   ...(Number.isFinite(summary.median)?{markLine:{silent:true,symbol:'none',label:{show:false},lineStyle:{color:'#7c8590',type:'dashed'},data:[{xAxis:summary.median}]}}:{})}]
+ }),[summary]);
+ return samples.length?<><div className="metrics"><Metric label="中位数" value={fmt(summary.median)} hint="同月日向前7日匹配，每年一个样本，不含当前交割年。"/><Metric label="偏离" value={fmt(Number.isFinite(current?.value)&&Number.isFinite(summary.median)?current.value-summary.median:null)} hint="当前价差 − 同期历史中位数。"/></div><div ref={ref} className="seasonal-spread-chart" role="img" aria-label="历年同期价差点图，当前年份在上，蓝色菱形为当前组合，虚线为历史中位数"/></>:<p className="empty">暂无同期历史样本</p>;
 }
 
 export function CurvePanel({data,onPair,Chart,controls,beforeChart}) {

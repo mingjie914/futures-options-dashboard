@@ -2,7 +2,7 @@ import { selectedProduct, rememberProduct } from '../../../frontend/src/preferen
 import { conditionalFetch as fetch } from '../../../frontend/src/transport.js';
 import { useChart, ChartFrame, Metric, usePreference, RefreshButton } from '../../../frontend/src/charts.js';
 import {useEffect,useMemo,useRef,useState} from 'react';
-import {ScanPanel,CurvePanel,RadarPanel,BasisPanel,ObservationDate,SpreadMatrix} from './MarketPanels.jsx';
+import {ScanPanel,CurvePanel,RadarPanel,BasisPanel,ObservationDate,SpreadMatrix,SeasonalSpreadChart} from './MarketPanels.jsx';
 import SpreadPanel from './SpreadPanel.jsx';
 import HistoryPanel, {HistoryChart, InventoryPanel} from './HistoryPanel.jsx';
 const fmt=v=>v==null?'—':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:2});
@@ -26,11 +26,11 @@ function SeasonalPosition({product,end,revision}){
 function SpreadStatistics({risk,near,far,seasonal}) {
  if (!risk) return null;
  return <section className="spread-statistics" aria-label="价差统计">
-  <div className="filters"><h2>价差统计</h2><span className="sub">{near} − {far} · 与价差同单位</span></div>
+  <div className="filters"><h2>价差统计</h2><span className="sub">{near} − {far}</span></div>
   <div className="spread-stat-grid">
   {seasonal&&<div><div className="stats-heading"><h3>历年同期</h3><span>{seasonal.n} 个历史年份</span></div>
    {seasonal.current?.lag_days>0&&<p className="sub">当前观测 {seasonal.current.trade_date}（距截止日 {seasonal.current.lag_days} 天）</p>}
-   <table className="seasonal-stats"><tbody>{[['同期中位数',seasonal.median,'同期历史价差中位数'],['偏离中位数',seasonal.current&&seasonal.median!=null?seasonal.current.value-seasonal.median:null,'当前价差 − 同期历史中位数'],['同期最低',seasonal.min,'同期历史价差最小值'],['同期最高',seasonal.max,'同期历史价差最大值']].map(([label,value,hint])=><tr key={label}><th><Metric label={label} hint={hint+'；同月日向前7日匹配，每年一个样本，不含当前交割年。'}/></th><td className="num">{fmt(value)}</td></tr>)}</tbody></table>
+   <SeasonalSpreadChart summary={seasonal}/>
   </div>}
   <div><div className="stats-heading"><h3>当前组合波动</h3><span>{risk.start||'—'} 至 {risk.as_of||'—'}</span></div>
   <div className="metrics">{risk.volatility.map(v=><Metric key={v.window} label={v.window+'日标准差'} value={fmt(v.value)} hint={'最近'+v.window+'次价差变动的样本标准差，非年化、非百分比；有效 '+v.n+'/'+v.window+(v.value==null?'，窗口不足或有缺口':'')}/>)}</div>
