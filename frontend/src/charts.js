@@ -3,6 +3,12 @@ import { conditionalFetch } from './transport.js';
 
 export { usePreference } from './preferences.js';
 
+export function observedRows(rows, keys) {
+  const valid = row => keys.some(key => Number.isFinite(row[key]));
+  const first = rows.findIndex(valid);
+  return first < 0 ? [] : rows.slice(first, rows.findLastIndex(valid) + 1);
+}
+
 // Keep the last matching view in place while its next selection is fetched.
 export function useResource(url, revision=0, scope='') {
   const [result,setResult]=useState({data:null});

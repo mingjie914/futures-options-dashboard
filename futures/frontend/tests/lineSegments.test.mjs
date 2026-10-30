@@ -1,6 +1,7 @@
+import {observedRows} from '../../../frontend/src/charts.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {lineSegments, tooltipRows, seasonalSelection, inventoryHistory, observedRows} from '../src/lineSegments.mjs';
+import {lineSegments, tooltipRows, seasonalSelection, inventoryHistory} from '../src/lineSegments.mjs';
 
 test('observed ranges trim only empty edges, keeping zero, interior gaps and original dates',()=>{
   const rows=[null,0,null,3,null].map((value,i)=>({date:i,value}));

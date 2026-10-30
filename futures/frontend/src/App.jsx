@@ -1,10 +1,9 @@
 import { selectedProduct, rememberProduct } from '../../../frontend/src/preferences.js';
 import { conditionalFetch as fetch } from '../../../frontend/src/transport.js';
-import { useChart, ChartFrame, Metric, usePreference, useResource, RefreshButton } from '../../../frontend/src/charts.js';
+import { useChart, ChartFrame, Metric, usePreference, observedRows, useResource, RefreshButton } from '../../../frontend/src/charts.js';
 import {useEffect,useMemo,useRef,useState} from 'react';
 import {ScanPanel,CurvePanel,RadarPanel,BasisPanel,ObservationDate,SpreadMatrix,SeasonalSpreadChart,RolloverProgress} from './MarketPanels.jsx';
 import SpreadPanel from './SpreadPanel.jsx';
-import {observedRows} from './lineSegments.mjs';
 import HistoryPanel, {HistoryChart, InventoryPanel} from './HistoryPanel.jsx';
 const fmt=v=>v==null?'—':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:2});
 async function api(url,options){const r=await fetch(url,options),d=await r.json();if(!r.ok)throw Error(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail));return d;}

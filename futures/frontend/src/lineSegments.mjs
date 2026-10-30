@@ -1,10 +1,4 @@
 // Calendar padding is skipped, but an explicit missing observation breaks a line.
-export function observedRows(rows, keys) {
-  const valid = row => keys.some(key => Number.isFinite(row[key]));
-  const first = rows.findIndex(valid);
-  return first < 0 ? [] : rows.slice(first, rows.findLastIndex(valid) + 1);
-}
-
 export function inventoryHistory(points, end = '', years = 5) {
   const all = points.filter(p => !end || p.date <= end).slice().sort((a,b) => a.date.localeCompare(b.date));
   const firstYear = Number(all.at(-1)?.date.slice(0,4)) - years + 1;
@@ -34,7 +28,7 @@ export function lineSegments(axis, lines) {
       if (!points.length) return;
       const data = Array(axis.length).fill(null);
       points.forEach(p => { data[index.get(p.x)] = p.value; });
-      segments.push({name: line.label, lineIndex, data});
+      segments.push({name: line.label, lineIndex, count: points.length, data});
       points = [];
     };
     for (const point of line.points) {

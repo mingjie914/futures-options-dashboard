@@ -1,5 +1,4 @@
-import {observedRows} from './lineSegments.mjs';
-import {Metric,usePreference,useResource,RefreshButton,useChart,ChartFrame} from '../../../frontend/src/charts.js';
+import {Metric,usePreference,observedRows, useResource,RefreshButton,useChart,ChartFrame} from '../../../frontend/src/charts.js';
 import {useMemo,useRef,useState} from 'react';
 const fmt=v=>v==null?'—':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:2});
 const weak=(p,k)=>p?.['near_'+k]==null||p?.['far_'+k]==null?null:Math.min(p['near_'+k],p['far_'+k]);

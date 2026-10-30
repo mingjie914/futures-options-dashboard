@@ -275,3 +275,17 @@ test('chart updates reuse the instance and dispose only when the DOM node leaves
   assert.equal(created,2);h.unmount();assert.equal(disposed,2);
  }finally{globalThis.IntersectionObserver=oldIntersection;globalThis.ResizeObserver=oldResize;}
 });
+
+
+test('single published inventory observation is visible in both charts without invented changes',async()=>{
+ const source=await readFile(new URL('../src/HistoryPanel.jsx',import.meta.url),'utf8');
+ const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const module={exports:{}},draws=[],data={series:[{id:'SI_W',kind:'仓单',name:'工业硅仓单',unit:'手',points:[{date:'2026-10-29',value:31327}]}]};
+ new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),usePreference:(_key,value)=>[value,()=>{}],useResource:()=>({data}),useChart:(_ref,draw)=>draws.push(draw)}:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/HistoryPanel.jsx',import.meta.url))(id));
+ renderToStaticMarkup(React.createElement(module.exports.InventoryPanel,{product:'SI',end:'',controls:()=>null}));
+ const options=draws.map(draw=>{let option;draw({setOption:value=>option=value,on(){},off(){}});return option;});
+ assert.equal(options.length,2);
+ for(const option of options){assert.equal(option.series[0].showSymbol,true);assert.equal(option.series[0].symbolSize,6);assert.deepEqual(option.series[0].data.filter(Number.isFinite),[31327]);}
+ assert.equal(options[0].series[0].showAllSymbol,true);
+ assert.deepEqual(options[1].series.slice(1).map(s=>s.data),[[null],[null]]);
+});

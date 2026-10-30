@@ -1,4 +1,4 @@
-import { useChart, ChartFrame, usePreference, useResource } from '../../../frontend/src/charts.js';
+import { useChart, ChartFrame, usePreference, observedRows, useResource } from '../../../frontend/src/charts.js';
 import {useMemo, useRef} from 'react';
 import {lineSegments, tooltipRows, seasonalSelection, inventoryHistory} from './lineSegments.mjs';
 
@@ -6,7 +6,8 @@ const quantity = value => value == null ? '—' : Number(value).toLocaleString('
 const historyHeight = 'clamp(380px, 56vh, 600px)';
 const inventoryHeight = 'clamp(320px, 44vh, 460px)';
 const inventoryLabel = s => (s.id.endsWith('_W')?'仓库':s.id.endsWith('_F')?'厂库':s.kind==='库存'?'交易所':'')+s.kind;
-function InventoryTrend({rows, unit, name}) {
+function InventoryTrend({rows:sourceRows, unit, name}) {
+  const rows=useMemo(()=>observedRows(sourceRows,['value','change']),[sourceRows]);
   const ref = useRef();
   useChart(ref, chart => chart.setOption({animation:false,
     legend:{type:'scroll',top:0,left:0,right:0,itemWidth:18,itemHeight:9,itemGap:16,textStyle:{fontSize:12},data:[{name,icon:'path://M0,3 L18,3 L18,5 L0,5 Z',itemStyle:{color:'#4e7fb9'}},{name:'增加',icon:'rect',itemStyle:{color:'#b64d49'}},{name:'减少',icon:'rect',itemStyle:{color:'#2b8167'}}]},grid:{left:85,right:85,top:45,bottom:60},
@@ -14,7 +15,7 @@ function InventoryTrend({rows, unit, name}) {
     xAxis:{type:'category',data:rows.map(p=>p.date),boundaryGap:false},
     yAxis:[{type:'value',scale:true,splitLine:{lineStyle:{color:'#eef0f3'}}},{type:'value',scale:true,splitLine:{show:false}}],
     dataZoom:[{type:'inside'},{type:'slider',height:20,bottom:10}],
-    series:[{name,type:'line',showSymbol:false,connectNulls:false,z:3,lineStyle:{width:2.4,color:'#4e7fb9'},itemStyle:{color:'#4e7fb9'},areaStyle:{color:'#4e7fb9',opacity:0.035},data:rows.map(p=>p.value)},
+    series:[{name,type:'line',showSymbol:rows.length===1,symbolSize:6,connectNulls:false,z:3,lineStyle:{width:2.4,color:'#4e7fb9'},itemStyle:{color:'#4e7fb9'},areaStyle:{color:'#4e7fb9',opacity:0.035},data:rows.map(p=>p.value)},
       ...[['增加','#b64d49',1],['减少','#2b8167',-1]].map(([label,color,sign])=>({name:label,type:'bar',yAxisIndex:1,barGap:'-100%',itemStyle:{color,opacity:0.7},data:rows.map(p=>p.change!=null&&p.change*sign>0?p.change:null)}))]
   }, true),[rows,unit,name]);
   return <ChartFrame><div ref={ref} className="chart" style={{height:inventoryHeight}} role="img" aria-label={name+'走势与增减'}/></ChartFrame>;
@@ -84,7 +85,7 @@ export function HistoryChart({result, heatmap=false, showAllYears=false, height=
           ...(rows.length ? [] : ['暂无数据'])].join('\n');
       }},
       yAxis: {type: 'value', scale: true, axisLabel: {formatter: display}, splitLine: {lineStyle: {color: '#eef0f3'}}},
-      series: segments.map(({name, lineIndex, data}) => ({name, type: 'line', showSymbol: result.mode !== 'overview', symbolSize: 3, connectNulls: true, emphasis: {focus: 'series'},
+      series: segments.map(({name, lineIndex, count, data}) => ({name, type: 'line', showSymbol: result.mode !== 'overview' || count === 1, showAllSymbol: count === 1, symbolSize: count === 1 ? 6 : 3, connectNulls: true, emphasis: {focus: 'series'},
         itemStyle: {color: palette[lineIndex % palette.length]},
         lineStyle: {color: palette[lineIndex % palette.length], width: lineIndex === (result.mode === 'spread' ? currentIndex : result.lines.length-1) ? 2.8 : 1.3},
         ...(lineIndex === currentIndex && currentPoint && data[axisIndex.get(currentPoint.x)] != null ? {markPoint:{symbol:'circle',symbolSize:7,label:{position:'top',formatter:'当前 '+display(currentPoint.value)},data:[{coord:[axisIndex.get(currentPoint.x),currentPoint.value]}]},markLine:{silent:true,symbol:'none',label:{show:false},lineStyle:{color:'#7c8590',width:1},data:[{xAxis:axisIndex.get(currentPoint.x)}]}} : {}), data})),

@@ -1,5 +1,5 @@
 import { useMemo, useRef } from 'react';
-import { useChart, ChartFrame, Metric, usePreference, useResource } from './charts.js';
+import { useChart, ChartFrame, Metric, usePreference, observedRows, useResource } from './charts.js';
 import { surfaceMetrics } from './surfaceMetrics.js';
 
 const colors = ['#4e7fb9', '#8c7b9f', '#568f84', '#a48b59', '#505c6b', '#a17589'];
@@ -12,12 +12,13 @@ export function IvHistory({rows,spot,snapshot,monthId}) {
   const selected=ordered.find(r=>r.code===code)||ordered.reduce((best,row)=>!best||Math.abs(row.strike-spot)<Math.abs(best.strike-spot)?row:best,null);
   const id=selected?.code;
   const {data:result,error,busy}=useResource(id?'/api/options/v1/iv-history?'+new URLSearchParams({code:id,window,snapshot_id:snapshot.snapshot_id}):null);
+  const points=useMemo(()=>observedRows(result?.points||[],['iv','hv20']),[result]);
   useChart(ref,chart=>chart.setOption({animation:false,color:['#4e7fb9','#8d9a93'],
     grid:{left:48,right:16,top:32,bottom:28},legend:{top:0,textStyle:{color:'#505c6b',fontSize:11}},
     tooltip:{trigger:'axis',valueFormatter:v=>v==null?'—':`${Number(v).toFixed(2)}%`},
-    xAxis:{type:'category',boundaryGap:false,data:result.points.map(p=>p.date),axisLabel:{formatter:v=>v.slice(5)}},
+    xAxis:{type:'category',boundaryGap:false,data:points.map(p=>p.date),axisLabel:{formatter:v=>v.slice(5)}},
     yAxis:{type:'value',scale:true,axisLabel:{formatter:'{value}%'},splitLine:{lineStyle:{color:'#eef0f3'}}},
-    series:[['iv','合约收盘 IV'],['hv20','指数 HV20']].map(([key,name])=>({name,type:'line',showSymbol:false,connectNulls:false,data:result.points.map(p=>p[key]==null?null:p[key]*100)}))}, true),[result]);
+    series:[['iv','合约收盘 IV'],['hv20','指数 HV20']].map(([key,name])=>({name,type:'line',showSymbol:false,connectNulls:false,data:points.map(p=>p[key]==null?null:p[key]*100)}))}, true),[points]);
   const latest=result?.latest, gap=latest?.iv!=null&&latest?.hv20!=null?(latest.iv-latest.hv20)*100:null;
   return <section className="options-surface options-iv-history" aria-busy={busy}>
     <div className="options-heading"><h2>隐含波动率 · 历史位置</h2><div className="options-analysis-tools"><label>合约<select value={id||''} onChange={e=>setCode(e.target.value)}>{ordered.map(r=><option key={r.code} value={r.code}>{r.code}</option>)}</select></label><label>观察窗口<select value={window} onChange={e=>setWindow(Number(e.target.value))}><option value={20}>近20个交易日</option><option value={60}>近60个交易日</option></select></label></div></div>
@@ -26,7 +27,7 @@ export function IvHistory({rows,spot,snapshot,monthId}) {
       <Metric label="收盘 IV" value={latest?.iv==null?'—':`${fmt(latest.iv*100,2)}%`} hint={'由收盘价反解；利率1.5%，ACT/365。观测日 '+(latest?.date||'无')}/>
       <Metric label="历史分位" value={result?.percentile==null?'—':`${fmt(result.percentile)}%`} hint={'(低于当前IV的样本数＋相等数÷2) ÷ 有效样本数 ×100%；含当前值，'+(result?.n??0)+'/'+window+' 个有效交易日。'}/>
       <Metric label="IV − HV20" value={gap==null?'—':`${fmt(gap,2)} pp`} hint={'同日收盘IV − HV20（百分点）。HV20＝20日对数收益样本标准差×√252；两者期限不同。'}/>
-    </div><div>{error?<p role="alert">{error}</p>:!result?<p role="status">读取已保存历史…</p>:result.points.length?<ChartFrame><div ref={ref} className="options-iv-sparkline" role="img" aria-label="所选合约历史隐含波动率与指数历史波动率"/></ChartFrame>:<p>{result.reason}</p>}</div></div>
+    </div><div>{error?<p role="alert">{error}</p>:!result?<p role="status">读取已保存历史…</p>:points.length?<ChartFrame><div ref={ref} className="options-iv-sparkline" role="img" aria-label="所选合约历史隐含波动率与指数历史波动率"/></ChartFrame>:<p>{result.reason||'暂无有效观测'}</p>}</div></div>
     <p className="options-note">{result?.range_min!=null?`窗口 IV 范围 ${fmt(result.range_min*100,2)}%–${fmt(result.range_max*100,2)}%。`:''}</p>
 
   </section>;
