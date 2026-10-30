@@ -1316,6 +1316,8 @@ def test_inventory_publication_scope_units_and_revision(setup):
             ('F_WR_RB_F','螺纹厂库仓单','仓单','D','吨','rb','2026-09-01',20),
             ('F_ST_RB_W','仓库库存','库存','W','吨','rb','2026-09-04',30),
             ('F_WR_CF','棉花仓单','仓单','D','张','cf','2026-09-04',40),
+            ('F_WR_M','豆粕仓单','仓单','D','手','m','2026-09-04',12),
+            ('F_ST_M','豆粕库存','库存','W','吨','m','2026-09-04',15),
             ('LEGACY','未核实指标','库存','D','','rb','2026-09-04',888)])
         con.execute('COPY inventory TO ? (FORMAT PARQUET)', [str(path)])
         first = client.get(url)
@@ -1327,6 +1329,11 @@ def test_inventory_publication_scope_units_and_revision(setup):
         assert series['F_WR_RB_W']['name'] == '螺纹钢仓库仓单'
         assert series['F_WR_RB_W']['points'] == [{'date':'2026-09-01','value':0},{'date':'2026-09-02','value':None}]
         assert series['F_ST_RB_W']['frequency'] == 'W'
+        assert all(s['source']=='交易所公开报表 · RDS' for s in series.values())
+        dce = {s['id']:s for s in client.get('/api/inventory?product=M').json()['series']}
+        assert dce['F_WR_M']['source']=='东方财富转引 · RDS' and dce['F_WR_M']['unit']=='手'
+        assert dce['F_WR_M']['points']==[{'date':'2026-09-04','value':12}]
+        assert dce['F_ST_M']['source']=='交易所公开报表 · RDS'
         assert client.get('/api/inventory?product=CF').json()['series'][0]['unit'] == '张'
         assert client.get('/api/inventory?product=I').json()['series'] == []
         assert client.get('/api/inventory?product=RB&end=bad').status_code == 422

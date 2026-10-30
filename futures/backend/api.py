@@ -27,6 +27,10 @@ from . import analytics
 from .data import PRODUCT_NAMES, CONTRACT, FIELDS, INDEX_SERIES, DailyStore, clean, validate_product, fundamental_review, fundamental_analysis, fundamental_update_status, fundamental_candidates, index_daily, contract_terms
 
 
+# This published-series source list must change together with any upstream source replacement.
+EASTMONEY_WARRANTS = {"F_WR_"+code for code in "A B M Y P C CS JD RR L V PP J JM I EG EB PG BB FB LG BZ LH".split()}
+
+
 class Watch(BaseModel):
     model_config = ConfigDict(extra='forbid')
     product: str = Field(pattern=r'^[A-Z]{1,3}$')
@@ -392,7 +396,7 @@ def create_app(store=None):
             if not row['unit'] or row['freq'] not in ('D','W'):
                 raise HTTPException(503, '库存仓单单位或频率尚未确认')
             item = series.setdefault(key, dict(id=key,name=row['name'],kind=row['category'],unit=row['unit'],
-                frequency=row['freq'],source='交易所公开报表 · RDS',points=[]))
+                frequency=row['freq'],source=('东方财富转引 · RDS' if key in EASTMONEY_WARRANTS else '交易所公开报表 · RDS'),points=[]))
             if (item['kind'],item['unit'],item['frequency']) != (row['category'],row['unit'],row['freq']):
                 raise HTTPException(503, '同一库存序列存在口径冲突')
             item['name'] = row['name']  # Exchange display-name changes do not change the series identity.
