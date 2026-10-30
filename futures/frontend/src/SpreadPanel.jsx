@@ -9,8 +9,8 @@ export default function SpreadPanel({data,revision,controls,beforeChart}) {
  const shownNear=result?.near||data.near,shownFar=result?.far||data.far;
  useChart(ref,c=>{
   const rows=result.series, dates=rows.map(r=>r.trade_date);
-  const panels=[{title:'价差 / 原始报价单位',keys:[['spread',`${shownNear} − ${shownFar}`],...(ma?[['ma20','20期均线']]:[])]},
-   ...(legs?[{title:'两腿价格 / 原始报价单位',keys:[['near_price',shownNear],['far_price',shownFar]]}]:[]),
+  const panels=[{title:'价差',keys:[['spread',`${shownNear} − ${shownFar}`],...(ma?[['ma20','20期均线']]:[])]},
+   ...(legs?[{title:'两腿价格',keys:[['near_price',shownNear],['far_price',shownFar]]}]:[]),
    ...(rank?[{title:'历史分位 / %（不含当日）',keys:[['historical_percentile','历史分位']]}]:[])];
   const series=panels.flatMap((panel,i)=>panel.keys.map(([key,name])=>({name,type:'line',xAxisIndex:i,yAxisIndex:i,
    data:rows.map(r=>r[key]),connectNulls:false,showSymbol:rows.length<20,symbolSize:5,

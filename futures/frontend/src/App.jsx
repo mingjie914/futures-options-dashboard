@@ -40,7 +40,7 @@ function SpreadStatistics({risk,near,far,seasonal}) {
  </div></div></section>;
 }
 const tabs=['持仓季节性','跨期分析','库存仓单','全市场雷达','机会扫描','持仓换月','历史合约','基差分析'];
-const tabLabel=t=>({'持仓季节性':'季节持仓','全市场雷达':'市场雷达','机会扫描':'价差筛选','持仓换月':'移仓进度','历史合约':'合约走势','跨期分析':'跨期价差','基差分析':'基差'})[t]||t;
+const tabLabel=t=>({'持仓季节性':'季节持仓','全市场雷达':'市场雷达','机会扫描':'价差筛选','持仓换月':'移仓进度','历史合约':'合约走势','跨期分析':'跨期价差','基差分析':'基差走势'})[t]||t;
 export function App(){
  const [spreadMode,setSpreadMode]=useState(()=>{const p=new URLSearchParams(location.search);return p.get('tab')==='期限结构'||p.get('spread_mode')==='curve'?'curve':p.get('spread_mode')==='current'||!p.has('spread_mode')&&p.get('spread_view')==='history'?'current':'annual';});
  const [tab,T]=useState(()=>{const p=new URLSearchParams(location.search),t=p.get('tab');return t==='期限结构'||t==='持仓季节性'&&p.get('season_view')==='spread'?'跨期分析':tabs.includes(t)?t:tabs[0];}),[q,Q]=useState(()=>({product:selectedProduct('IM'),...Object.fromEntries([...new URLSearchParams(location.search)].filter(([k])=>['product','near','far','end','focus_symbol'].includes(k)))})),[products,P]=useState([]),[productError,E]=useState(''),[rev,R]=useState(0),[note,N]=useState('');
@@ -77,7 +77,7 @@ export function App(){
  {displayMode==='annual'?<HistoryPanel controls={filters} info={dataInfo} beforeChart={matrix} product={d.product} end={d.meta.as_of} near={d.near} far={d.far} priceType={d.price_type} revision={rev} view="spread">{seasonal=><SpreadStatistics risk={d.risk} near={d.near} far={d.far} seasonal={seasonal}/>}</HistoryPanel>:<><SpreadPanel controls={(spanControl,loading)=><>{filters(spanControl,undefined,loading)}{dataInfo}</>} beforeChart={matrix} data={d} revision={rev}/><SpreadStatistics risk={d.risk} near={d.near} far={d.far}/></>}</>:<>{matrix}<p className="empty">当前窗口不足两个合约</p></>)}
  {tab==='持仓换月'&&<PairPosition data={d}/>}
  {tab==='持仓季节性'&&d.meta.as_of&&<><HistoryPanel title="同月持仓" controls={filters} info={dataInfo} product={d.product} end={d.meta.as_of} near={d.near} far={d.far} priceType={d.price_type} revision={rev} view="month"/><SeasonalPosition product={d.product} end={d.meta.as_of} revision={rev}/></>}
- {tab==='历史合约'&&d.meta.as_of&&<HistoryPanel controls={filters} info={dataInfo} product={d.product} end={d.meta.as_of} near={d.near} far={d.far} priceType={d.price_type} revision={rev}/>}
+ {tab==='历史合约'&&d.meta.as_of&&<HistoryPanel contracts={d.contracts} controls={filters} info={dataInfo} product={d.product} end={d.meta.as_of} near={d.near} far={d.far} priceType={d.price_type} revision={rev}/>}
 </>}
  {note&&<div className="toast" role="status">{note}<button onClick={()=>N('')}>关闭</button></div>}</main></div>;
 }

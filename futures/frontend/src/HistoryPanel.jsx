@@ -38,16 +38,20 @@ export function InventoryPanel({product,end,revision,controls}) {
   </>;
 }
 
-export function HistoryChart({result, heatmap=false, showAllYears=false, height=historyHeight}) {
+export function HistoryChart({result, heatmap=false, showAllYears=false, height=historyHeight,focusContract='',activeContract='',secondaryContract=''}) {
   const ref = useRef();
+  const zoomGroup=useMemo(()=>new Set(),[result]);
   useChart(ref, chart => {
     const share = result.metric === 'position_share' && result.mode !== 'spread';
     const integer = !share && result.metric !== 'price' && result.mode !== 'spread';
+    const unit = share || result.unit === '原始报价单位' ? '' : result.unit || (integer ? '手' : '');
     const display = value => value == null ? '—' : Number(value * (share ? 100 : 1)).toLocaleString('zh-CN', {maximumFractionDigits: integer ? 0 : 2}) + (share ? '%' : '');
     const byLine = heatmap ? [] : result.lines.map(line => new Map(line.points.map(point => [point.x, point])));
     const segments = heatmap ? [] : lineSegments(result.axis, result.lines);
     let selected = result.mode === 'seasonal' ? seasonalSelection(result.lines, showAllYears) : {};
     const palette = ['#4e7fb9', '#568f84', '#a48b59', '#8c7b9f', '#b36c73', '#505c6b', '#4e7fb9', '#65a30d', '#c026d3', '#b45309'];
+    const overview=result.mode==='overview',focus=overview?[...new Set([activeContract,secondaryContract,focusContract].filter(s=>result.lines.some(l=>l.label===s)))]:[];
+    const color=(name,i)=>overview?name===activeContract?'#4e7fb9':name===secondaryContract?'#568f84':name===focusContract?'#a48b59':'#b8c2ce':palette[i%palette.length];
     const currentIndex = result.mode === 'spread' ? result.lines.findIndex(line => line.year === result.meta?.anchor_year) : -1;
     const currentPoint = result.lines[currentIndex]?.points.filter(p => Number.isFinite(p.value)).at(-1);
     const axisIndex = new Map(result.axis.map((x, i) => [x, i]));
@@ -63,14 +67,14 @@ export function HistoryChart({result, heatmap=false, showAllYears=false, height=
     };
     const option = heatmap ? {
       ...common,
-      tooltip: {renderMode: 'richText', formatter: p => `${result.axis[p.value[0]]}\n${result.lines[p.value[1]].label}\n${display(p.value[2])} ${result.unit}`},
+      tooltip: {renderMode: 'richText', formatter: p => `${result.axis[p.value[0]]}\n${result.lines[p.value[1]].label}：${display(p.value[2])}${unit ? ' '+unit : ''}`},
       yAxis: {type: 'category', data: result.lines.map(l => l.label), axisLabel: {fontSize: 10}},
       visualMap: {min: 0, max: cells.reduce((max, p) => Math.max(max, p[2]), 1), calculable: true, orient: 'horizontal', left: 'center', bottom: 0, inRange: {color: ['#fff', '#e5e9ef', '#4e7fb9', '#181b20']}, formatter: display},
       series: [{type: 'heatmap', data: cells, progressive: 4000, emphasis: {itemStyle: {borderColor: '#a48b59', borderWidth: 1}}}],
     } : {
       ...common,
       color: palette,
-      legend: {type: 'scroll', orient: 'horizontal', left: 'center', top: 0, height: 24, itemWidth: 18, itemHeight: 9, itemGap: 16, pageIconSize: 10, textStyle: {fontSize: 12}, formatter: name => name === result.lines[currentIndex]?.label ? name+'（当前）' : name, data: result.lines.map(l => l.label), selected,
+      legend: {type: 'scroll', orient: 'horizontal', left: 'center', top: 0, height: 24, itemWidth: 18, itemHeight: 9, itemGap: 16, pageIconSize: 10, textStyle: {fontSize: 12}, formatter: name => overview?name+(name===activeContract?'（主力）':name===secondaryContract?'（次主力）':''):name === result.lines[currentIndex]?.label ? name+'（当前）' : name, data: overview?[...focus,...result.lines.map(l=>l.label).reverse().filter(s=>!focus.includes(s))]:result.lines.map(l => l.label), selected,
         scrollDataIndex: result.mode === 'seasonal' && !showAllYears ? Math.max(0,result.lines.length-5) : 0},
       tooltip: {trigger: 'axis', confine: true, renderMode: 'richText', formatter: params => {
         const list = Array.isArray(params) ? params : [params];
@@ -79,25 +83,25 @@ export function HistoryChart({result, heatmap=false, showAllYears=false, height=
         const present = new Set(rows.map(r => r.lineIndex));
         const absent = result.mode === 'overview' ? [] : result.lines.filter((line, i) => !present.has(i) && selected[line.label] !== false);
         return [heading, ...rows.map(({name, marker, point}) =>
-          `${marker} ${name===point.trade_date?.slice(0,4)?point.trade_date:name+' · '+point.trade_date}: ${display(point.value)}${share ? '' : ' '+(result.unit || '手')}` +
+          `${marker} ${point.trade_date===heading?name:name===point.trade_date?.slice(0,4)?point.trade_date:name+' · '+point.trade_date}：${display(point.value)}${unit ? ' '+unit : ''}` +
           (result.mode === 'spread' ? `（近 ${display(point.near_price)} / 远 ${display(point.far_price)}）` : '')),
           ...absent.map(line => `${line.label}: —`),
           ...(rows.length ? [] : ['暂无数据'])].join('\n');
       }},
       yAxis: {type: 'value', scale: true, axisLabel: {formatter: display}, splitLine: {lineStyle: {color: '#eef0f3'}}},
       series: segments.map(({name, lineIndex, count, data}) => ({name, type: 'line', showSymbol: result.mode !== 'overview' || count === 1, showAllSymbol: count === 1, symbolSize: count === 1 ? 6 : 3, connectNulls: true, emphasis: {focus: 'series'},
-        itemStyle: {color: palette[lineIndex % palette.length]},
-        lineStyle: {color: palette[lineIndex % palette.length], width: lineIndex === (result.mode === 'spread' ? currentIndex : result.lines.length-1) ? 2.8 : 1.3},
+        z:overview&&focus.includes(name)?3:2,itemStyle: {color: color(name,lineIndex)},
+        lineStyle: {color: color(name,lineIndex), width: overview?focus.includes(name)?2.6:1:lineIndex === (result.mode === 'spread' ? currentIndex : result.lines.length-1) ? 2.8 : 1.3,opacity:overview&&!focus.includes(name)?.55:1},
         ...(lineIndex === currentIndex && currentPoint && data[axisIndex.get(currentPoint.x)] != null ? {markPoint:{symbol:'circle',symbolSize:7,label:{position:'top',formatter:'当前 '+display(currentPoint.value)},data:[{coord:[axisIndex.get(currentPoint.x),currentPoint.value]}]},markLine:{silent:true,symbol:'none',label:{show:false},lineStyle:{color:'#7c8590',width:1},data:[{xAxis:axisIndex.get(currentPoint.x)}]}} : {}), data})),
     };
     chart.setOption(option, true);
     chart.off('legendselectchanged');
     chart.on('legendselectchanged', event => {selected = event.selected;});
-  }, [result, heatmap, showAllYears]);
+  }, [result, heatmap, showAllYears,focusContract,activeContract,secondaryContract],zoomGroup);
   return <ChartFrame><div ref={ref} className="history-chart" style={{height: heatmap ? Math.min(850, Math.max(420, result.lines.length * 12)) : height}} role="img" aria-label={result.accessible_label || (result.mode === 'spread' ? '同月份组合历年价差对照图' : heatmap ? '全合约持仓热力图' : '历年合约对比图')}/></ChartFrame>;
 }
 
-export default function HistoryPanel({product, end, near, far, priceType, revision, controls, info, title, children, beforeChart, view='overview'}) {
+export default function HistoryPanel({product, end, near, far, priceType, revision, controls, info, title, children, beforeChart, view='overview',contracts=[]}) {
   const spreadOnly=view==='spread',mode=spreadOnly?'spread':view==='month'?'same_month':'overview';
   const [years, setYears] = usePreference('futures.history.'+view+'.years',5);
   const [month, setMonth] = usePreference('futures.history.'+view+'.'+product+'.month',Number(near?.slice(-2)) || 10);
@@ -107,14 +111,18 @@ export default function HistoryPanel({product, end, near, far, priceType, revisi
   const [metric, setMetric] = usePreference('futures.history.metric','position');
   const [overviewMetric, setOverviewMetric] = usePreference('futures.history.overviewMetric','price');
   const [overviewStyle, setOverviewStyle] = usePreference('futures.history.overviewStyle','line');
+  const [chosen,setChosen]=usePreference('futures.history.'+product+'.contract','');
+  const activeContract=contracts.reduce((best,row)=>row.position>0&&(!best||row.position>best.position)?row:best,null)?.symbol||'';
+  const secondaryContract=contracts.reduce((best,row)=>row.symbol!==activeContract&&row.position>0&&(!best||row.position>best.position)?row:best,null)?.symbol||'';
   const anchorYear = mode === 'overview' ? Number(end.slice(0,4)) : 2000 + Number(near?.slice(-4,-2) || end.slice(2,4));
   const effectiveMetric = mode === 'spread' ? 'price' : mode === 'overview' ? overviewMetric : metric;
   const {data:result,error,busy}=useResource('/api/contract-history?'+new URLSearchParams({product,end,mode,years,near_month:nearMonth,far_month:farMonth,far_year_offset:offset,metric:effectiveMetric,price_type:priceType,anchor_year:anchorYear}),revision);
   const summary=result?.seasonal_summary;
+  const focusContract=result?.lines.some(l=>l.label===chosen)?chosen:result?.lines.some(l=>l.label===activeContract)?activeContract:result?.lines.at(-1)?.label||'';
   const metricControl = mode === 'same_month' ? <select aria-label="对比指标" value={metric} onChange={e => setMetric(e.target.value)}><option value="position">持仓手数</option><option value="position_share">持仓占比</option><option value="price">合约价格</option><option value="volume">成交量</option></select> : mode === 'overview' ? <select aria-label="对比指标" value={overviewMetric} onChange={e => setOverviewMetric(e.target.value)}><option value="price">合约价格</option><option value="position">持仓手数</option><option value="position_share">持仓占比</option></select> : null;
   const yearsControl = <label>跨度<select aria-label="历史跨度" value={years} onChange={e => setYears(Number(e.target.value))}>{[3,5,10].map(n => <option key={n} value={n}>{n}年</option>)}</select></label>;
   return <section className="panel history-panel" aria-busy={busy}>
-    <div className="filters history-toolbar">{title&&<h2 className="section-label">{title}</h2>}{controls?controls(spreadOnly?yearsControl:metricControl,undefined,busy):metricControl}
+    <div className="filters history-toolbar">{title&&<h2 className="section-label">{title}</h2>}{controls?controls(spreadOnly?yearsControl:<>{metricControl}{mode==='overview'&&(overviewMetric==='price'||overviewStyle==='line')&&!!result?.lines.length&&<select aria-label="重点合约" value={focusContract} onChange={e=>setChosen(e.target.value)}>{result.lines.slice().reverse().map(l=><option key={l.label} value={l.label}>{l.label}</option>)}</select>}</>,undefined,busy):metricControl}
       {(!spreadOnly||!controls)&&yearsControl}
       {!spreadOnly && mode !== 'overview' && <label>交割月<select aria-label="交割月份" value={month} onChange={e => setMonth(Number(e.target.value))}>{Array.from({length:12}, (_,i) => <option key={i+1} value={i+1}>{i+1}月</option>)}</select></label>}
       {mode === 'overview' && overviewMetric !== 'price' && <label>呈现方式<select value={overviewStyle} onChange={e => setOverviewStyle(e.target.value)}><option value="line">各合约曲线</option><option value="heatmap">持仓热力图</option></select></label>}
@@ -122,7 +130,7 @@ export default function HistoryPanel({product, end, near, far, priceType, revisi
     </div>
     {beforeChart}
     {error ? <p className="error" role="alert">{error}</p> : !result ? <p className="empty" role="status">正在读取历史合约…</p> : <>
-      {result.lines.length ? <HistoryChart result={result} heatmap={mode === 'overview' && effectiveMetric !== 'price' && overviewStyle === 'heatmap'}/> : <p className="empty">所选月份组合在当前数据中没有可比较序列</p>}
+      {result.lines.length ? <HistoryChart result={result} focusContract={focusContract} activeContract={activeContract} secondaryContract={secondaryContract} heatmap={mode === 'overview' && effectiveMetric !== 'price' && overviewStyle === 'heatmap'}/> : <p className="empty">所选月份组合在当前数据中没有可比较序列</p>}
       {children?.(summary)}
 
     </>}
