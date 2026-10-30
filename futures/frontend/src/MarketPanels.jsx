@@ -1,5 +1,5 @@
 import { conditionalFetch as fetch } from '../../../frontend/src/transport.js';
-import {Metric,usePreference,RefreshButton,useChart} from '../../../frontend/src/charts.js';
+import {Metric,usePreference,RefreshButton,useChart,ChartFrame} from '../../../frontend/src/charts.js';
 import {useEffect,useMemo,useRef,useState} from 'react';
 const fmt=v=>v==null?'—':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:2});
 const weak=(p,k)=>p?.['near_'+k]==null||p?.['far_'+k]==null?null:Math.min(p['near_'+k],p['far_'+k]);
@@ -136,6 +136,32 @@ export function SpreadMatrix({data,onPair}) {
    </td>;
   })}</tr>)}</tbody></table></div>
  </section>;
+}
+
+export function RolloverProgress({data}) {
+ const ref=useRef(),rounds=data?.rounds||[],available=rounds.some(r=>r.series.some(p=>p.outgoing!=null||p.incoming!=null));
+ useChart(ref,chart=>chart.setOption({animation:false,
+  legend:{type:'scroll',top:0},grid:{left:75,right:65,top:60,bottom:72},
+  tooltip:{trigger:'axis',confine:true,renderMode:'richText',formatter:params=>{
+   const visible=params.filter(p=>p.value[1]!=null),lines=[`距最后交易日 ${Math.abs(params[0]?.value[0])} 天`];
+   for(const previous of [false,true]){
+    const group=visible.filter(p=>p.seriesName.endsWith(' · 上轮')===previous);
+    if(group.length)lines.push(`${previous?'上轮':'本轮'} ${group[0].data.trade_date}`,...group.filter(p=>p.seriesName!=='价差').map(p=>`${p.seriesName.replace(' · 上轮','')}：${fmt(p.value[1])} 手`));
+   }
+   const spread=visible.find(p=>p.seriesName==='价差');
+   if(spread)lines.push(`价差：${fmt(spread.value[1])}`);
+   return lines.join('\n');
+  }},
+  xAxis:{type:'value',max:0,name:'距最后交易日 / 天',nameLocation:'middle',nameGap:28,axisLabel:{hideOverlap:true}},
+  yAxis:[{type:'value',position:'left',axisLine:{onZero:false,show:false},name:'持仓 / 手',splitLine:{lineStyle:{color:'#eef0f3'}}},{type:'value',position:'right',axisLine:{onZero:false,show:false},name:'价差',scale:true,splitLine:{show:false}}],
+  dataZoom:[{type:'inside',startValue:-180,endValue:0},{type:'slider',bottom:4,height:18,startValue:-180,endValue:0}],
+  series:rounds.filter(r=>r.series.length).flatMap(r=>['outgoing','incoming',...(r.name==='current'?['spread']:[])].map((key,i)=>({
+   name:key==='spread'?'价差':r[key]+(r.name==='previous'?' · 上轮':''),type:'line',yAxisIndex:key==='spread'?1:0,showSymbol:false,connectNulls:false,
+   lineStyle:{type:r.name==='previous'?'dashed':'solid',width:key==='spread'?1.4:2},itemStyle:{color:['#4e7fb9','#568f84','#222222'][i]},
+   data:r.series.map(p=>({value:[p.day,p[key]],trade_date:p.trade_date}))
+  }))).sort((a,b)=>a.yAxisIndex-b.yAxisIndex)
+ }),[data]);
+ return <section className="panel"><h2>移仓对比</h2>{available?<ChartFrame><div className="chart" ref={ref} role="img" aria-label="本轮与上一轮移仓持仓及价差，按距移出合约最后交易日的自然日对齐"/></ChartFrame>:<p className="empty">主力映射或最后交易日尚未齐备</p>}{available&&rounds.some(r=>!r.series.length)&&<p className="sub">上轮或本轮资料不全</p>}</section>;
 }
 
 export function SeasonalSpreadChart({summary}) {

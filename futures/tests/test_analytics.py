@@ -438,3 +438,38 @@ def test_fundamental_statistics_cutoff_zero_and_seasonal():
     assert result['historical_percentile'] == 0 and result['history_n'] == 21
     assert result['age_days'] == 0 and len(result['seasonal']['lines'][0]['points']) == 22
     assert fundamental_statistics(points,'2025-01-01','D')['latest'] is None
+
+
+def test_rollover_progress_fixed_pairs_expiry_alignment_and_missing_values():
+    from backend.analytics import rollover_progress
+    def row(day, symbol, oi, price):
+        return dict(trade_date=day,symbol=symbol,position=oi,close=price)
+    rows=[row('2026-09-17','IM2609',10,100),row('2026-09-17','IM2612',20,90),
+          row('2026-09-18','IM2609',0,101),row('2026-09-18','IM2612',30,None),
+          row('2026-10-29','IM2612',100,95),row('2026-10-29','IM2703',80,80),
+          row('2026-10-29','IM2706',80,75),row('2026-10-29','IM2611',900,100),
+          row('2026-10-30','IM2706',9999,80)]
+    terms={'contracts':[dict(symbol=s,last_trade_date=d,status='rds_recorded') for s,d in
+           [('IM2609','2026-09-18'),('IM2612','2026-12-18'),('IM2703','2027-03-19')]]}
+    result=rollover_progress(rows,'IM2612','IM2609',terms,'2026-10-29')
+    assert result['candidate']=='IM2703'  # Later month only; ties prefer nearest, no future observation.
+    current,previous=result['rounds']
+    assert current['series'][-1]==dict(day=-50,trade_date='2026-10-29',outgoing=100,incoming=80,spread=15)
+    assert previous['series'][-1]==dict(day=0,trade_date='2026-09-18',outgoing=0,incoming=30,spread=None)
+    assert previous['series'][0]['day']==-1 and previous['series'][0]['spread'] is None
+    assert all(p['trade_date']<='2026-10-29' for r in result['rounds'] for p in r['series'])
+    terms['contracts'][0]['status']='calendar_conflict'
+    assert rollover_progress(rows,'IM2612','IM2609',terms,'2026-10-29')['rounds'][1]['series']==[]
+    assert all(not r['series'] for r in rollover_progress(rows,None,None,terms,'2026-10-29')['rounds'])
+
+
+def test_rollover_reuses_existing_pair_spread(monkeypatch):
+    from backend import analytics
+    rows=[dict(symbol=s,trade_date='2026-10-29',position=p,close=c) for s,p,c in [('IM2612',100,100),('IM2703',80,90)]]
+    result=analytics.spread_series(rows,'IM2612','IM2703')
+    def unexpected(*args,**kwargs):
+        raise AssertionError('existing selected-pair spread must not be recomputed')
+    monkeypatch.setattr(analytics,'spread_series',unexpected)
+    assert analytics.rollover_series(rows,'IM2612','IM2703',result=result)['series'][0]['spread']==10
+    terms={'contracts':[dict(symbol='IM2612',last_trade_date='2026-12-18',status='rds_recorded')]}
+    assert analytics.rollover_progress(rows,'IM2612',None,terms,'2026-10-29',result)['rounds'][0]['series'][0]['spread']==10

@@ -112,6 +112,8 @@ def create_app(store=None):
                       for p in (store.runtime/name).rglob('*') if p.is_file()]
         if path in ('/api/dashboard','/api/basis-reference'):
             files += list((store.root.parent/'cfuturesdescription').glob('*.parquet'))
+        if path == '/api/dashboard':
+            files += list((store.root.parent/'cfuturescontractmapping').glob('*.parquet'))
         return [date.today().isoformat(), fingerprint(files)]
     code_version = sha256(b''.join(p.read_bytes() for p in sorted(Path(__file__).parent.glob('*.py')))).hexdigest()
     app.add_middleware(ResearchHTTP, version=source_version, cache=store.cache, code_version=code_version, session=store.read_session,
@@ -159,8 +161,22 @@ def create_app(store=None):
         for symbol in (near, far):
             if symbol and (not CONTRACT.fullmatch(symbol) or symbol not in known):
                 raise ValueError('指定合约不在此品种及日期窗口中')
+        if view == 'rollover':
+            mapping = store.root.parent/'cfuturescontractmapping/part.parquet'
+            current = previous = None
+            if mapping.is_file() and meta['as_of']:
+                segments = store._query([mapping], '''SELECT symbol,start_date::VARCHAR start_date,end_date::VARCHAR end_date
+                    FROM read_parquet(?) WHERE product=? AND start_date<=?::DATE ORDER BY start_date DESC''',
+                    [snapshot['product'],meta['as_of']])
+                active = next((s for s in segments if s['end_date'] >= meta['as_of']), None)
+                if active:
+                    current = active['symbol']
+                    previous = next((s['symbol'] for s in segments if s['end_date'] < active['start_date'] and s['symbol'] != current), None)
+            terms = contract_terms(snapshot['product'], sorted({r['symbol'] for r in contracts}|{s for s in (current,previous) if s}), meta['as_of'], store)
+            progress = analytics.rollover_progress(rows,current,previous,terms,meta['as_of'])
+            progress_spread = progress.pop('spread')
         liquid = sorted(contracts, key=lambda r: r.get('position') or 0, reverse=True)
-        defaults = sorted([r['symbol'] for r in liquid[:2]])
+        defaults = [progress['current'],progress['candidate']] if view == 'rollover' and progress['candidate'] else sorted([r['symbol'] for r in liquid[:2]])
         if near is None:
             near = defaults[0] if defaults else None
         if far is None:
@@ -171,14 +187,16 @@ def create_app(store=None):
         result = {'meta': meta, 'product': snapshot['product'], 'near': near, 'far': far,
                   'price_type': price_type, 'contracts': contracts}
         if view in ('all', 'spread', 'rollover'):
-            spread = analytics.spread_series(rows, near, far, price_type) if near and far else {'series': [], 'summary': {}}
+            spread = (progress_spread if view == 'rollover' and price_type == 'close' and (near,far) == (progress['current'],progress['candidate']) else analytics.spread_series(rows, near, far, price_type)) if near and far else {'series': [], 'summary': {}}
             result['spread'] = spread
         if view in ('all', 'spread'):
             result['risk'] = analytics.spread_risk(spread['series'], [r['trade_date'] for r in rows])
         if view in ('all', 'curve'):
             result['curve'] = analytics.term_structure_comparison(rows, meta['as_of'], price_type) if rows else {'nodes': [], 'adjacent': [], 'curvature': [], 'summary': {}, 'comparisons': []}
         if view in ('all', 'rollover'):
-            result['rollover'] = analytics.rollover_series(rows, near, far, price_type) if near and far else {'series': [], 'summary': {}}
+            result['rollover'] = analytics.rollover_series(rows, near, far, price_type, spread) if near and far else {'series': [], 'summary': {}}
+        if view == 'rollover':
+            result['rollover_progress'] = progress
         if view in ('all', 'scan'):
             opportunities = []
             for a, b in zip(contracts, contracts[1:]):

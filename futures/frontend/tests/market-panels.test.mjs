@@ -11,7 +11,7 @@ const ts=sharedRequire('typescript');
 const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const module={exports:{}},chartDraws=[];
 new Function('module','exports','require',code)(module,module.exports,id=>id.startsWith('react')?sharedRequire(id):id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),useChart:(_ref,draw)=>chartDraws.push(draw)}:createRequire(import.meta.url)(id));
-const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel,spreadMatrix,SpreadMatrix,SeasonalSpreadChart}=module.exports;
+const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel,spreadMatrix,SpreadMatrix,SeasonalSpreadChart,RolloverProgress}=module.exports;
 
 test('spread matrix uses recorded last trading days, preserves missing values and marks valid extrema',()=>{
  const trade_date='2026-10-29',row=(symbol,close)=>({symbol,close,trade_date});
@@ -206,4 +206,26 @@ test('curve keeps the shared selection and drills adjacent pairs into history',(
  assert.deepEqual(selected,['IM2609','IM2612']);
  const empty=renderToStaticMarkup(React.createElement(CurvePanel,{data:{meta,curve:{nodes:[],comparisons:[],adjacent:[]}},Chart:()=>{throw Error('empty chart rendered');}}));
  assert.match(empty,/当前日期暂无期限曲线数据/);
+});
+
+
+test('rollover overlay uses separate relative-day axes and real dates without joining missing observations',()=>{
+ const data={rounds:[{name:'current',outgoing:'IM2612',incoming:'IM2703',series:[{day:-50,trade_date:'2026-10-29',outgoing:100,incoming:50,spread:15}]},{name:'previous',outgoing:'IM2609',incoming:'IM2612',series:[{day:0,trade_date:'2026-09-18',outgoing:0,incoming:70,spread:null}]}]};
+ const html=renderToStaticMarkup(React.createElement(RolloverProgress,{data}));
+ let option;chartDraws.pop()({setOption:value=>{option=value;}});
+ assert.equal(option.series.length,5);
+ assert.equal(option.series.at(-1).yAxisIndex,1);
+ assert.deepEqual(option.series.map(s=>s.name),['IM2612','IM2703','IM2609 · 上轮','IM2612 · 上轮','价差']);
+ assert.deepEqual(option.series.map(s=>s.itemStyle.color),['#4e7fb9','#568f84','#4e7fb9','#568f84','#222222']);
+ assert.doesNotMatch(html,/对齐口径|候选/);
+ assert.equal(option.series[3].lineStyle.type,'dashed');
+ assert.deepEqual(option.series[2].data[0].value,[0,0]);
+ assert.equal(option.series[0].data[0].trade_date,'2026-10-29');
+ assert.ok(option.series.every(s=>s.connectNulls===false));
+ assert.equal(option.xAxis.max,0);
+ const hover=option.tooltip.formatter(option.series.map(s=>({seriesName:s.name,data:s.data[0],value:s.data[0].value})));
+ assert.equal((hover.match(/2026-10-29/g)||[]).length,1);
+ assert.equal((hover.match(/2026-09-18/g)||[]).length,1);
+ assert.equal(hover.split('\n').at(-1),'价差：15');
+ assert.match(html,/自然日对齐/);
 });

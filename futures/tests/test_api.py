@@ -1246,6 +1246,9 @@ def test_dashboard_view_preserves_values_and_omits_unrelated_sections(setup, vie
     assert response.status_code == 200
     result = response.json()
     expected = {'meta','product','near','far','price_type','contracts',*sections}
+    if view == 'rollover':
+        assert 'rollover_progress' in result
+        result.pop('rollover_progress')
     assert set(result) == expected
     for key in expected:
         assert result[key] == full[key]
@@ -1340,3 +1343,36 @@ def test_inventory_publication_scope_units_and_revision(setup):
         con.execute('COPY inventory TO ? (FORMAT PARQUET)', [str(revised)])
         revised.replace(path)
         assert client.get(url).status_code == 503
+
+
+def test_rollover_mapping_coverage_dates_and_cache_invalidation(setup):
+    client, store, source = setup
+    url='/api/dashboard?product=RB&end=2026-09-02&view=rollover'
+    missing=client.get(url)
+    assert missing.status_code==200 and missing.json()['rollover_progress']['current'] is None
+    folder=store.root.parent/'cfuturescontractmapping'
+    folder.mkdir()
+    terms=store.root.parent/'cfuturesdescription'
+    terms.mkdir()
+    with duckdb.connect() as con:
+        # A liquid non-main contract must not replace the mapped outgoing leg.
+        con.execute("CREATE TABLE daily AS SELECT * FROM read_parquet(?)",[str(source)])
+        con.execute("INSERT INTO daily SELECT * REPLACE ('RB2611' AS symbol, 300.0 AS position) FROM daily WHERE symbol='RB2610'")
+        con.execute('COPY daily TO ? (FORMAT PARQUET)',[str(source)])
+        con.execute("CREATE TABLE mapping AS SELECT 'RB' product,symbol,CAST(start_date AS DATE) start_date,CAST(end_date AS DATE) end_date FROM (VALUES ('RB2605','2026-01-01','2026-08-31'),('RB2610','2026-09-01','2026-09-02'),('RB2701','2026-09-03','2026-12-31')) t(symbol,start_date,end_date)")
+        con.execute('COPY mapping TO ? (FORMAT PARQUET)',[str(folder/'part.parquet')])
+        con.execute("CREATE TABLE terms AS SELECT 'RB' product,symbol,symbol||'.SHF' source_code,DATE '2025-01-01' listed_date,CAST(expiry AS DATE) last_trade_date,CAST(expiry AS DATE) last_delivery_date,'rds_recorded' date_status FROM (VALUES ('RB2605','2026-05-15'),('RB2610','2026-10-15'),('RB2701','2027-01-15')) t(symbol,expiry)")
+        con.execute('COPY terms TO ? (FORMAT PARQUET)',[str(terms/'part.parquet')])
+    response=client.get(url,headers={'If-None-Match':missing.headers['etag']})
+    assert response.status_code==200
+    result=response.json()['rollover_progress']
+    assert (result['previous'],result['current'],result['candidate'])==('RB2605','RB2610','RB2611')
+    assert (response.json()['near'],response.json()['far'])==('RB2610','RB2611')
+    assert result['rounds'][0]['last_trade_date']=='2026-10-15'
+    assert result['rounds'][0]['series'][-1]['spread']==0
+    assert 'rollover_progress' not in client.get('/api/dashboard?product=RB&view=catalog').json()
+    # Beyond the published interval, no carry-forward of a former main contract.
+    with duckdb.connect() as con:
+        con.execute("COPY (SELECT 'RB' product,'RB2610' symbol,DATE '2026-09-01' start_date,DATE '2026-09-01' end_date) TO ? (FORMAT PARQUET)",[str(folder/'part.parquet')])
+    stale=client.get(url,headers={'If-None-Match':response.headers['etag']})
+    assert stale.status_code==200 and stale.json()['rollover_progress']['current'] is None

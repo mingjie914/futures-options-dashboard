@@ -843,9 +843,44 @@ def term_structure_comparison(rows, as_of, price_type='close'):
     return result
 
 
-def rollover_series(rows, old, new, price_type='close'):
+def rollover_progress(rows, current, previous, terms, as_of, spread=None):
+    """Fixed contract pairs aligned to the outgoing leg's recorded last trading day."""
+    dates = {r['symbol']: r['last_trade_date'] for r in (terms or {}).get('contracts', [])
+             if r.get('status') == 'rds_recorded' and r.get('last_trade_date')}
+    latest = [r for r in rows if r['trade_date'] == as_of]
+    candidates = [r for r in latest if current and r['symbol'] > current
+                  and (_number(r.get('position')) or 0) > 0
+                  and (r['symbol'] not in dates or dates[r['symbol']] > as_of)]
+    following = min(candidates, key=lambda r: (-r['position'], r['symbol']))['symbol'] if candidates else None
+    if current and following:
+        if not spread or (spread['summary'].get('near'),spread['summary'].get('far'),spread['summary'].get('price_type')) != (current,following,'close'):
+            spread = spread_series(rows,current,following)
+    spreads = {p['trade_date']:p['spread'] for p in (spread or {}).get('series', [])}
+    indexed = _index(rows, {s for s in (previous, current, following) if s})
+    days = sorted({r['trade_date'] for r in rows if r['trade_date'] <= as_of})
+    rounds = []
+    for name, outgoing, incoming in [('current', current, following), ('previous', previous, current)]:
+        expiry = dates.get(outgoing)
+        points = []
+        if expiry and incoming:
+            end = date.fromisoformat(expiry)
+            for day in days:
+                offset = (date.fromisoformat(day)-end).days
+                if not -365 <= offset <= 0:
+                    continue
+                a, b = indexed.get((day, outgoing), {}), indexed.get((day, incoming), {})
+                positions = [_number(r.get('position')) for r in (a, b)]
+                points.append(dict(day=offset, trade_date=day,
+                    outgoing=positions[0] if positions[0] is not None and positions[0] >= 0 else None,
+                    incoming=positions[1] if positions[1] is not None and positions[1] >= 0 else None,
+                    spread=spreads.get(day) if name == 'current' else None))
+        rounds.append(dict(name=name, outgoing=outgoing, incoming=incoming, last_trade_date=expiry, series=points))
+    return dict(current=current, previous=previous, candidate=following, rounds=rounds, spread=spread)
+
+
+def rollover_series(rows, old, new, price_type='close', result=None):
     """Shares use the selected pair denominator, not all product open interest."""
-    result = spread_series(rows, old, new, price_type)
+    result = result if result is not None else spread_series(rows, old, new, price_type)
     series, previous_oi, previous_volume = [], None, None
     for point in result['series']:
         values = {}
