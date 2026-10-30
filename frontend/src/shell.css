@@ -45,3 +45,6 @@
 .unified-shell .board-content :is(.filters,.options-topbar):has(>.board-refresh){position:relative;min-height:36px;padding-top:0;padding-right:116px}
 .unified-shell .board-content :is(.filters,.options-topbar)>.board-refresh{position:absolute;top:0;right:20px;margin:0}
 @media(max-width:640px){.unified-shell .board-content :is(.filters,.options-topbar):has(>.board-refresh){padding-right:108px}.unified-shell .board-content :is(.filters,.options-topbar)>.board-refresh{right:12px}}
+
+.board-content :is([role="img"],.metrics,.research-metric,table){transition:opacity .12s ease}.board-content[aria-busy="true"] :is([role="img"],.metrics,.research-metric,table),.board-content [aria-busy="true"] :is([role="img"],.metrics,.research-metric,table){opacity:.45;pointer-events:none}
+@media(prefers-reduced-motion:reduce){.board-content :is([role="img"],.metrics,.research-metric,table){transition:none}}

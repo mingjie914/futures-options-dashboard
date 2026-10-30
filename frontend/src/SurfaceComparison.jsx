@@ -1,31 +1,25 @@
-import { conditionalFetch as fetch } from './transport.js';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useChart, ChartFrame, Metric, usePreference } from './charts.js';
+import { useMemo, useRef } from 'react';
+import { useChart, ChartFrame, Metric, usePreference, useResource } from './charts.js';
 import { surfaceMetrics } from './surfaceMetrics.js';
 
 const colors = ['#4e7fb9', '#8c7b9f', '#568f84', '#a48b59', '#505c6b', '#a17589'];
 const fmt = (x, digits = 1) => Number.isFinite(x) ? x.toFixed(digits) : '—';
 
 export function IvHistory({rows,spot,snapshot,monthId}) {
-  const [code,setCode]=usePreference('options.iv.'+monthId+'.code',''),[window,setWindow]=usePreference('options.iv.window',60),[data,setData]=useState(null),[error,setError]=useState('');
+  const [code,setCode]=usePreference('options.iv.'+monthId+'.code',''),[window,setWindow]=usePreference('options.iv.window',60);
   const ref=useRef();
   const ordered=useMemo(()=>[...rows].sort((a,b)=>a.strike-b.strike||a.cp.localeCompare(b.cp)),[rows]);
   const selected=ordered.find(r=>r.code===code)||ordered.reduce((best,row)=>!best||Math.abs(row.strike-spot)<Math.abs(best.strike-spot)?row:best,null);
   const id=selected?.code;
-  const result=data?.code===id&&data?.window===window?data:null;
-  useEffect(()=>{const c=new AbortController();setData(null);setError('');if(!id)return()=>c.abort();
-    fetch('/api/options/v1/iv-history?'+new URLSearchParams({code:id,window,snapshot_id:snapshot.snapshot_id}),{signal:c.signal})
-      .then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.detail||'历史读取失败');return {...d,window};})
-      .then(setData).catch(e=>{if(e.name!=='AbortError')setError(e.message);});return()=>c.abort();
-  },[id,window,snapshot]);
+  const {data:result,error,busy}=useResource(id?'/api/options/v1/iv-history?'+new URLSearchParams({code:id,window,snapshot_id:snapshot.snapshot_id}):null);
   useChart(ref,chart=>chart.setOption({animation:false,color:['#4e7fb9','#8d9a93'],
     grid:{left:48,right:16,top:32,bottom:28},legend:{top:0,textStyle:{color:'#505c6b',fontSize:11}},
     tooltip:{trigger:'axis',valueFormatter:v=>v==null?'—':`${Number(v).toFixed(2)}%`},
     xAxis:{type:'category',boundaryGap:false,data:result.points.map(p=>p.date),axisLabel:{formatter:v=>v.slice(5)}},
     yAxis:{type:'value',scale:true,axisLabel:{formatter:'{value}%'},splitLine:{lineStyle:{color:'#eef0f3'}}},
-    series:[['iv','合约收盘 IV'],['hv20','指数 HV20']].map(([key,name])=>({name,type:'line',showSymbol:false,connectNulls:false,data:result.points.map(p=>p[key]==null?null:p[key]*100)}))}),[result]);
+    series:[['iv','合约收盘 IV'],['hv20','指数 HV20']].map(([key,name])=>({name,type:'line',showSymbol:false,connectNulls:false,data:result.points.map(p=>p[key]==null?null:p[key]*100)}))}, true),[result]);
   const latest=result?.latest, gap=latest?.iv!=null&&latest?.hv20!=null?(latest.iv-latest.hv20)*100:null;
-  return <section className="options-surface options-iv-history">
+  return <section className="options-surface options-iv-history" aria-busy={busy}>
     <div className="options-heading"><h2>隐含波动率 · 历史位置</h2><div className="options-analysis-tools"><label>合约<select value={id||''} onChange={e=>setCode(e.target.value)}>{ordered.map(r=><option key={r.code} value={r.code}>{r.code}</option>)}</select></label><label>观察窗口<select value={window} onChange={e=>setWindow(Number(e.target.value))}><option value={20}>近20个交易日</option><option value={60}>近60个交易日</option></select></label></div></div>
     <div className="options-iv-layout"><div className="options-iv-stats">
       <Metric label="截面 IV" value={selected?.iv==null?'—':`${fmt(selected.iv*100,2)}%`} hint={'由买卖中价反解的隐含波动率。'}/>
@@ -52,7 +46,7 @@ export default function SurfaceComparison({ rows, months, metric }) {
     chart.setOption({ animation:false, grid:{left:55,right:25,top:40,bottom:45}, legend:metric === 'smiles' ? {top:0} : undefined,
       tooltip:{trigger:'axis',valueFormatter:x => x == null ? '—' : `${Number(x).toFixed(2)}${metric === 'skew' ? ' pp' : '%'}`},
       xAxis:metric === 'smiles' ? {type:'value',scale:true,min:'dataMin',max:'dataMax',name:'K / F',nameLocation:'middle',nameGap:28,axisLabel:{formatter:x=>Number(x).toFixed(2)}} : {type:'category',data:visible.map(m=>m.code)},
-      yAxis:{type:'value',scale:true,name:metric === 'skew' ? 'Put IV − Call IV (pp)' : 'IV (%)',splitLine:{lineStyle:{color:'#eef0f3'}}}, series });
+      yAxis:{type:'value',scale:true,name:metric === 'skew' ? 'Put IV − Call IV (pp)' : 'IV (%)',splitLine:{lineStyle:{color:'#eef0f3'}}}, series }, true);
   }, [data, hidden, metric]);
   return <section className="options-surface">
     <div className="options-analysis-tools">{data.map((m,i)=><button key={m.id} type="button" className="options-plain-button" aria-pressed={!hidden.includes(m.id)} style={{borderColor:hidden.includes(m.id)?'#ddd':colors[i%colors.length],opacity:hidden.includes(m.id)?.5:1}} onClick={()=>setHidden(current=>current.includes(m.id)?current.filter(id=>id!==m.id):[...current,m.id])}>{m.code.slice(0,-2)}<strong style={{color:colors[i%colors.length]}}>{m.code.slice(-2)}</strong></button>)}</div>

@@ -275,7 +275,7 @@ function VolatilityTab({ rows, month, months, spot, snapshot }) {
         { name: 'Call IV', type: 'line', data: callPoints, showSymbol: true, symbolSize: 7, connectNulls: false, lineStyle: { width: 2 } },
         { name: 'Put IV', type: 'line', data: putPoints, showSymbol: true, symbolSize: 7, connectNulls: false, lineStyle: { width: 2 } },
       ],
-    });
+    }, true);
     if (spotValue !== null) {
       chart.setOption({
         series: [
@@ -656,7 +656,7 @@ export default function Options() {
         <RefreshButton busy={snapshotStatus === 'loading'} onClick={() => loadSnapshot()} />
       </header>
       {snapshotStatus === 'error' && snapshot ? <div className="options-refresh-error">当前快照读取异常：{snapshotError}</div> : null}
-      <main className="options-main">
+      <main className="options-main" aria-busy={snapshotStatus === 'loading'}>
 {content}</main>
 
     </div>

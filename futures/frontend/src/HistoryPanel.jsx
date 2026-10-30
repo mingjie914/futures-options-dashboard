@@ -1,6 +1,5 @@
-import { conditionalFetch as fetch } from '../../../frontend/src/transport.js';
-import { useChart, ChartFrame, usePreference } from '../../../frontend/src/charts.js';
-import {useEffect, useMemo, useRef, useState} from 'react';
+import { useChart, ChartFrame, usePreference, useResource } from '../../../frontend/src/charts.js';
+import {useMemo, useRef} from 'react';
 import {lineSegments, tooltipRows, seasonalSelection, inventoryHistory} from './lineSegments.mjs';
 
 const quantity = value => value == null ? '—' : Number(value).toLocaleString('zh-CN',{maximumFractionDigits:2});
@@ -17,26 +16,22 @@ function InventoryTrend({rows, unit, name}) {
     dataZoom:[{type:'inside'},{type:'slider',height:20,bottom:10}],
     series:[{name,type:'line',showSymbol:false,connectNulls:false,z:3,lineStyle:{width:2.4,color:'#4e7fb9'},itemStyle:{color:'#4e7fb9'},areaStyle:{color:'#4e7fb9',opacity:0.035},data:rows.map(p=>p.value)},
       ...[['增加','#b64d49',1],['减少','#2b8167',-1]].map(([label,color,sign])=>({name:label,type:'bar',yAxisIndex:1,barGap:'-100%',itemStyle:{color,opacity:0.7},data:rows.map(p=>p.change!=null&&p.change*sign>0?p.change:null)}))]
-  }),[rows,unit,name]);
+  }, true),[rows,unit,name]);
   return <ChartFrame><div ref={ref} className="chart" style={{height:inventoryHeight}} role="img" aria-label={name+'走势与增减'}/></ChartFrame>;
 }
 
 export function InventoryPanel({product,end,revision,controls}) {
-  const [data,setData]=useState(null),[error,setError]=useState('');
   const [indicator,setIndicator]=usePreference('futures.inventory.'+product+'.indicator',''),[years,setYears]=usePreference('futures.inventory.years',5);
-  useEffect(()=>{const c=new AbortController();setData(null);setError('');
-    fetch('/api/inventory?'+new URLSearchParams({product,...(end?{end}:{})}),{signal:c.signal}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.detail||'库存仓单读取失败');return d;}).then(d=>{if(!c.signal.aborted)setData(d);}).catch(e=>{if(e.name!=='AbortError')setError(e.message);});
-    return()=>c.abort();
-  },[product,end,revision]);
+  const {data,error,busy}=useResource('/api/inventory?'+new URLSearchParams({product,...(end?{end}:{})}),revision);
   const series=data?.series.find(s=>s.id===indicator)||data?.series.find(s=>s.kind==='仓单'&&s.id.endsWith('_W'))||data?.series.find(s=>s.kind==='仓单')||data?.series[0];
   const history=useMemo(()=>inventoryHistory(series?.points||[],end,years),[series,end,years]),last=history.rows.at(-1);
   const selection=<>{data?.series.length>1&&<select aria-label="库存仓单指标" value={series.id} onChange={e=>setIndicator(e.target.value)}>{data.series.map(s=><option key={s.id} value={s.id}>{inventoryLabel(s)}</option>)}</select>}<select aria-label="历史跨度" value={years} onChange={e=>setYears(Number(e.target.value))}><option value={5}>近5年</option><option value={0}>全部年份</option></select></>;
-  return <><div className="filters page-filters">{controls(selection,last?.date||data?.as_of,!data&&!error)}</div>
+  return <><div className="filters page-filters">{controls(selection,last?.date||data?.as_of,busy)}</div>
     {error?<p className="error" role="alert">{error}</p>:!data?<p className="empty" role="status">读取库存仓单…</p>:!history.rows.length?<p className="empty">{product} 暂无所选日期前的库存仓单数据</p>:<>
-      <section className="panel history-panel"><div className="filters history-toolbar"><h2 className="section-label">{inventoryLabel(series)}季节性 / {series.unit}</h2></div>
+      <section className="panel history-panel" aria-busy={busy}><div className="filters history-toolbar"><h2 className="section-label">{inventoryLabel(series)}季节性 / {series.unit}</h2></div>
         <HistoryChart result={{...history,mode:'seasonal',metric:'price',unit:series.unit,accessible_label:series.name+'历年季节性'}} showAllYears height={inventoryHeight}/>
       </section>
-      <section className="panel"><h2>走势与增减 / {series.unit}</h2><InventoryTrend rows={history.rows} unit={series.unit} name={inventoryLabel(series)}/></section>
+      <section className="panel" aria-busy={busy}><h2>走势与增减 / {series.unit}</h2><InventoryTrend rows={history.rows} unit={series.unit} name={inventoryLabel(series)}/></section>
       {data.preview&&<p className="sub">预览样本</p>}
     </>}
   </>;
@@ -94,7 +89,8 @@ export function HistoryChart({result, heatmap=false, showAllYears=false, height=
         lineStyle: {color: palette[lineIndex % palette.length], width: lineIndex === (result.mode === 'spread' ? currentIndex : result.lines.length-1) ? 2.8 : 1.3},
         ...(lineIndex === currentIndex && currentPoint && data[axisIndex.get(currentPoint.x)] != null ? {markPoint:{symbol:'circle',symbolSize:7,label:{position:'top',formatter:'当前 '+display(currentPoint.value)},data:[{coord:[axisIndex.get(currentPoint.x),currentPoint.value]}]},markLine:{silent:true,symbol:'none',label:{show:false},lineStyle:{color:'#7c8590',width:1},data:[{xAxis:axisIndex.get(currentPoint.x)}]}} : {}), data})),
     };
-    chart.setOption(option);
+    chart.setOption(option, true);
+    chart.off('legendselectchanged');
     chart.on('legendselectchanged', event => {selected = event.selected;});
   }, [result, heatmap, showAllYears]);
   return <ChartFrame><div ref={ref} className="history-chart" style={{height: heatmap ? Math.min(850, Math.max(420, result.lines.length * 12)) : height}} role="img" aria-label={result.accessible_label || (result.mode === 'spread' ? '同月份组合历年价差对照图' : heatmap ? '全合约持仓热力图' : '历年合约对比图')}/></ChartFrame>;
@@ -110,25 +106,14 @@ export default function HistoryPanel({product, end, near, far, priceType, revisi
   const [metric, setMetric] = usePreference('futures.history.metric','position');
   const [overviewMetric, setOverviewMetric] = usePreference('futures.history.overviewMetric','price');
   const [overviewStyle, setOverviewStyle] = usePreference('futures.history.overviewStyle','line');
-  const [result, setResult] = useState(null), [error, setError] = useState('');
   const anchorYear = mode === 'overview' ? Number(end.slice(0,4)) : 2000 + Number(near?.slice(-4,-2) || end.slice(2,4));
   const effectiveMetric = mode === 'spread' ? 'price' : mode === 'overview' ? overviewMetric : metric;
-  const summary = result?.seasonal_summary;
-  useEffect(() => {
-    const controller = new AbortController();
-    setResult(null); setError('');
-    const query = new URLSearchParams({product, end, mode, years, near_month: nearMonth, far_month: farMonth, far_year_offset: offset, metric: effectiveMetric, price_type: priceType, anchor_year: anchorYear});
-    fetch('/api/contract-history?' + query, {signal: controller.signal}).then(async response => {
-      const data = await response.json();
-      if (!response.ok) throw Error(typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail));
-      setResult(data);
-    }).catch(e => {if (e.name !== 'AbortError') setError(e.message);});
-    return () => controller.abort();
-  }, [product, end, mode, years, nearMonth, farMonth, offset, effectiveMetric, priceType, anchorYear, revision]);
+  const {data:result,error,busy}=useResource('/api/contract-history?'+new URLSearchParams({product,end,mode,years,near_month:nearMonth,far_month:farMonth,far_year_offset:offset,metric:effectiveMetric,price_type:priceType,anchor_year:anchorYear}),revision);
+  const summary=result?.seasonal_summary;
   const metricControl = mode === 'same_month' ? <select aria-label="对比指标" value={metric} onChange={e => setMetric(e.target.value)}><option value="position">持仓手数</option><option value="position_share">持仓占比</option><option value="price">合约价格</option><option value="volume">成交量</option></select> : mode === 'overview' ? <select aria-label="对比指标" value={overviewMetric} onChange={e => setOverviewMetric(e.target.value)}><option value="price">合约价格</option><option value="position">持仓手数</option><option value="position_share">持仓占比</option></select> : null;
   const yearsControl = <label>跨度<select aria-label="历史跨度" value={years} onChange={e => setYears(Number(e.target.value))}>{[3,5,10].map(n => <option key={n} value={n}>{n}年</option>)}</select></label>;
-  return <section className="panel history-panel">
-    <div className="filters history-toolbar">{title&&<h2 className="section-label">{title}</h2>}{controls?controls(spreadOnly?yearsControl:metricControl):metricControl}
+  return <section className="panel history-panel" aria-busy={busy}>
+    <div className="filters history-toolbar">{title&&<h2 className="section-label">{title}</h2>}{controls?controls(spreadOnly?yearsControl:metricControl,undefined,busy):metricControl}
       {(!spreadOnly||!controls)&&yearsControl}
       {!spreadOnly && mode !== 'overview' && <label>交割月<select aria-label="交割月份" value={month} onChange={e => setMonth(Number(e.target.value))}>{Array.from({length:12}, (_,i) => <option key={i+1} value={i+1}>{i+1}月</option>)}</select></label>}
       {mode === 'overview' && overviewMetric !== 'price' && <label>呈现方式<select value={overviewStyle} onChange={e => setOverviewStyle(e.target.value)}><option value="line">各合约曲线</option><option value="heatmap">持仓热力图</option></select></label>}

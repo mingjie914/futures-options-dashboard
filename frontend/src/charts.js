@@ -1,6 +1,24 @@
 import { createElement, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { conditionalFetch } from './transport.js';
 
 export { usePreference } from './preferences.js';
+
+// Keep the last matching view in place while its next selection is fetched.
+export function useResource(url, revision=0, scope='') {
+  const [result,setResult]=useState({data:null});
+  const busy=!!url&&(result.url!==url||result.revision!==revision||result.scope!==scope);
+  useEffect(()=>{
+    if(!url)return;
+    const controller=new AbortController();
+    conditionalFetch(url,{signal:controller.signal}).then(async response=>{
+      const data=await response.json();
+      if(!response.ok)throw Error(typeof data.detail==='string'?data.detail:JSON.stringify(data.detail||'数据读取失败'));
+      if(!controller.signal.aborted)setResult({url,revision,scope,data});
+    }).catch(error=>{if(!controller.signal.aborted)setResult({url,revision,scope,data:null,error:error.message});});
+    return()=>controller.abort();
+  },[url,revision,scope]);
+  return {data:url&&result.scope===scope?result.data:null,error:url&&!busy&&result.scope===scope?result.error:'',busy};
+}
 
 export function RefreshButton({busy=false, onClick, type='button'}) {
   return createElement('button', {className:'board-refresh', type, onClick, disabled:busy},
@@ -18,27 +36,34 @@ export function ChartFrame({children}) {
 
 // Six chart views share one engine, loaded only after a chart is mounted.
 export function useChart(ref, draw, dependencies, zoomGroup, syncLegend = false) {
+  const active=useRef();
   useEffect(() => {
     const node = ref.current;
-    if (!node) return;
-    let cancelled = false, chart, observer, unlink;
-    const visibility = new IntersectionObserver(entries => {
-      if (!entries.some(entry => entry.isIntersecting)) return;
-      visibility.disconnect();
-      import('./chart-engine.js').then(({ init }) => {
-        if (cancelled) return;
-        chart = init(node);
-        draw(chart);
-        if (zoomGroup) unlink = linkZoom(chart, zoomGroup, syncLegend);
-        observer = new ResizeObserver(() => chart.resize());
-        observer.observe(node);
-      }).catch(() => {
-        if (!cancelled) node.textContent = '图表暂时无法加载，请刷新页面重试。';
-      });
-    }, { rootMargin: '200px' });
-    visibility.observe(node);
-    return () => { cancelled = true; visibility.disconnect(); observer?.disconnect(); unlink?.(); chart?.dispose(); };
-  }, [...dependencies, zoomGroup, syncLegend]);
+    if(active.current?.node!==node){active.current?.dispose();active.current=null;}
+    if(!node)return;
+    let state=active.current;
+    if(!state){
+      state={node};active.current=state;
+      const visibility=new IntersectionObserver(entries=>{
+        if(!entries.some(entry=>entry.isIntersecting))return;
+        visibility.disconnect();
+        import('./chart-engine.js').then(({init})=>{
+          if(active.current!==state)return;
+          state.chart=init(node);state.update();
+          state.observer=new ResizeObserver(()=>state.chart.resize());state.observer.observe(node);
+        }).catch(()=>{if(active.current===state)node.textContent='图表暂时无法加载，请刷新页面重试。';});
+      },{rootMargin:'200px'});
+      state.dispose=()=>{visibility.disconnect();state.observer?.disconnect();state.unlink?.();state.chart?.dispose();};
+      visibility.observe(node);
+    }
+    const inputs=[...dependencies,zoomGroup,syncLegend];
+    if(!state.inputs||inputs.length!==state.inputs.length||inputs.some((value,i)=>!Object.is(value,state.inputs[i]))){
+      state.inputs=inputs;
+      state.update=()=>{state.unlink?.();draw(state.chart);state.unlink=zoomGroup?linkZoom(state.chart,zoomGroup,syncLegend):null;};
+      if(state.chart)state.update();
+    }
+  });
+  useEffect(()=>()=>{active.current?.dispose();active.current=null;},[]);
 }
 
 // Group members must use the same ordered date axis, including null gaps.

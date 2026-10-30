@@ -277,14 +277,14 @@ export function Dashboard() {
           snapshot={snapshot}
         />
 
-        {loadState !== "ready" && loadState !== "partial" && (
+        {loadState !== "ready" && loadState !== "partial" && !(loadState === "loading" && snapshot && loadedView === view) && (
           <StateNotice state={loadState} detail={errorMessage ? `${errorMessage}${snapshot && loadedView === view ? "；下方保留上次成功读取的数据" : ""}` : undefined} onRetry={loadState === "error" ? refresh : undefined} />
         )}
 
         {(!snapshot || loadedView !== view) && loadState === "loading" && <DashboardSkeleton />}
         {(!snapshot || loadedView !== view) && loadState !== "loading" && <EmptyPageState state={loadState} onRetry={refresh} />}
         {snapshot && loadedView === view && (
-          <div className={styles.viewPanel} id={`dashboard-panel-${view}`} role="tabpanel" aria-labelledby={`dashboard-tab-${view}`}>
+          <div className={styles.viewPanel} id={`dashboard-panel-${view}`} role="tabpanel" aria-labelledby={`dashboard-tab-${view}`} aria-busy={isRefreshing}>
             {view === "combination" && (
               <CombinationView
                 snapshot={snapshot}

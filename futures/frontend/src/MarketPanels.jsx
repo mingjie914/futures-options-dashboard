@@ -1,6 +1,6 @@
-import { conditionalFetch as fetch } from '../../../frontend/src/transport.js';
-import {Metric,usePreference,RefreshButton,useChart,ChartFrame} from '../../../frontend/src/charts.js';
-import {useEffect,useMemo,useRef,useState} from 'react';
+import {observedRows} from './lineSegments.mjs';
+import {Metric,usePreference,useResource,RefreshButton,useChart,ChartFrame} from '../../../frontend/src/charts.js';
+import {useMemo,useRef,useState} from 'react';
 const fmt=v=>v==null?'—':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:2});
 const weak=(p,k)=>p?.['near_'+k]==null||p?.['far_'+k]==null?null:Math.min(p['near_'+k],p['far_'+k]);
 export const passesScan=(o,minHistory=0,minVolume=0)=>(minHistory<=0||(o.latest?.history_n??-1)>=minHistory)&&(minVolume<=0||(weak(o.latest,'volume')??-1)>=minVolume);
@@ -13,22 +13,21 @@ export function ObservationDate({latest,value,...props}) {
 }
 
 export function BasisPanel({product,end,priceType,revision,Chart,onProduct,controls}) {
- const [symbol,setSymbol]=usePreference('futures.basis.'+product+'.symbol',''),[data,setData]=useState(null),[error,setError]=useState('');
- useEffect(()=>{const c=new AbortController();setData(null);setError('');const q=new URLSearchParams({product,price_type:priceType});for(const [k,v] of Object.entries({end,symbol}))if(v)q.set(k,v);
- fetch('/api/basis-reference?'+q,{signal:c.signal}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail));return d;}).then(d=>{if(!c.signal.aborted)setData(d);}).catch(e=>{if(e.name!=='AbortError')setError(e.message);});return()=>c.abort();},[product,end,symbol,priceType,revision]);
+ const [symbol,setSymbol]=usePreference('futures.basis.'+product+'.symbol','');
+ const {data,error,busy}=useResource('/api/basis-reference?'+new URLSearchParams({product,price_type:priceType,...(end?{end}:{}),...(symbol?{symbol}:{})}),revision);
  const zoomGroup=useMemo(()=>new Set(),[data]);
  const last=data?.latest,isIndex=data?.status==='index_close_basis',unit=isIndex?'点':'元/吨',label=isIndex?'基差':'周频参考价差';
  const contract=data?.contracts?.length?<select aria-label="期货合约" value={symbol||data.symbol} onChange={e=>setSymbol(e.target.value)}>{data.contracts.map(s=><option key={s}>{s}</option>)}</select>:null;
- return <><div className="filters page-filters">{controls?.(contract,data?.meta?.as_of,!data&&!error)}</div>
- {error?<><p role="alert">{error}</p>{symbol&&<button onClick={()=>setSymbol('')}>重选活跃合约</button>}</>:!data?<p role="status">读取基差…</p>:data.status==='unavailable'?<section className="panel"><p className="sub">{product} 暂无基差数据</p><div className="scan-controls">{['IM','IF','IC','IH','CU'].map(p=><button key={p} onClick={()=>onProduct(p)}>{p}</button>)}</div></section>:<>
- <section className="panel">
+ return <><div className="filters page-filters">{controls?.(contract,data?.meta?.as_of,busy)}</div>
+ {error?<><p role="alert">{error}</p>{symbol&&<button onClick={()=>setSymbol('')}>重选活跃合约</button>}</>:!data?<p role="status">读取基差…</p>:data.status==='unavailable'?<section className="panel" aria-busy={busy}><p className="sub">{product} 暂无基差数据</p><div className="scan-controls">{['IM','IF','IC','IH','CU'].map(p=><button key={p} onClick={()=>onProduct(p)}>{p}</button>)}</div></section>:<>
+ <section className="panel" aria-busy={busy}>
  <div className="stats-heading"><h2>{label} / {unit}</h2><span>{last?.trade_date||'无有效配对'} · {data.matched} 个观测{data.unmatched?' · '+data.unmatched+' 个未配对':''}{data.meta.stale?' · 缓存降级':''}{data.reference.source?.includes('测试')?' · 测试样本':''}</span></div>
  <div className="metrics"><Metric label={label} value={fmt(last?.reference_spread)} hint={(isIndex?'指数 − 期货；正值贴水，负值升水':'同日参考价 − 期货收盘价')+'，单位：'+unit}/><Metric label={isIndex?'指数':'参考价'} value={fmt(last?.reference_price)} hint={data.reference.name+' · '+data.reference.code+'；'+(data.reference.source||'已保存参考价')}/><Metric label="期货价" value={fmt(last?.futures_price)} hint={data.symbol+' 收盘；单位：'+unit}/>{isIndex&&<Metric label="基差率" value={last?.basis_ratio==null?'—':fmt(last.basis_ratio*100)+'%'} hint="（指数 − 期货）÷ 指数，非年化"/>}</div>
  {data.series.length?<Chart zoomGroup={zoomGroup} rows={data.series} lines={[["reference_spread",label+' / '+unit]]}/>:<p className="empty">暂无配对数据</p>}
  </section>
  {!!data.series.length&&<div className={isIndex?'grid':undefined}>
- {isIndex&&<section className="panel"><h2>基差率 / %</h2><Chart zoomGroup={zoomGroup} rows={data.series} lines={[["basis_ratio","基差率"]]} percent/></section>}
- <section className="panel"><h2>价格对比 / {unit}</h2><Chart zoomGroup={zoomGroup} rows={data.series} lines={[["reference_price",data.reference.name],["futures_price",data.symbol]]}/></section>
+ {isIndex&&<section className="panel" aria-busy={busy}><h2>基差率 / %</h2><Chart zoomGroup={zoomGroup} rows={data.series} lines={[["basis_ratio","基差率"]]} percent/></section>}
+ <section className="panel" aria-busy={busy}><h2>价格对比 / {unit}</h2><Chart zoomGroup={zoomGroup} rows={data.series} lines={[["reference_price",data.reference.name],["futures_price",data.symbol]]}/></section>
  </div>}
  </>}
  </>;
@@ -46,11 +45,8 @@ export function HistoricalPosition({event}) {
 }
 
 export function PositionPeaks({end,minVolume,minPosition,revision,priceType,onSelect}) {
- const [data,setData]=useState(null),[error,setError]=useState('');
- useEffect(()=>{const c=new AbortController();setData(null);setError('');
-  fetch('/api/position-peaks?'+new URLSearchParams({...(end?{end}:{}),min_volume:minVolume,min_position:minPosition}),{signal:c.signal}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(d.detail||'持仓峰值读取失败');return d;}).then(setData).catch(e=>{if(e.name!=='AbortError')setError(e.message);});return()=>c.abort();
- },[end,minVolume,minPosition,revision]);
- return <section className="position-ranking"><div className="ranking-heading"><h2>持仓异常 TOP10</h2>{data&&<span className="sub">{data.as_of}</span>}</div>
+ const {data,error,busy}=useResource('/api/position-peaks?'+new URLSearchParams({...(end?{end}:{}),min_volume:minVolume,min_position:minPosition}),revision);
+ return <section className="position-ranking" aria-busy={busy}><div className="ranking-heading"><h2>持仓异常 TOP10</h2>{data&&<span className="sub">{data.as_of}</span>}</div>
  {error?<p role="alert">{error}</p>:!data?<p role="status">读取历史持仓峰值…</p>:!data.items.length?<p className="empty">暂无可比较的历史持仓</p>:<div className="table-wrap"><table className="position-peaks"><colgroup>{[5,8,15,14,18,26,14].map((w,i)=><col key={i} style={{width:w+'%'}}/>)}</colgroup><thead><tr><th>排名</th><th>品种</th><th>名称</th><th><Metric label="当前主力" hint="当日持仓最多的月合约，按顶部量仓门槛筛选；并列时按合约代码排序。"/></th><th className="num">当前持仓 / 手</th><th className="num"><Metric label="过去5年同月峰值 / 手" hint="前5个交割年份同月合约的最高持仓，不含当前合约；不足5年按已有样本。"/></th><th className="num"><Metric label="偏离" hint="（当前持仓 ÷ 历史峰值 − 1）×100%，降序排列。"/></th></tr></thead><tbody>{data.items.map((r,i)=><tr key={r.product}><td>{i+1}</td><td>{r.product}</td><td>{r.name||'—'}</td><td><button className="link" onClick={()=>onSelect(r.product,{near:r.symbol},{price_type:priceType,as_of:data.as_of},'持仓换月')}>{r.symbol}</button></td><td className="num">{fmt(r.position)}</td><td className="num"><Metric label={fmt(r.baseline_peak)} hint={'峰值合约 '+r.baseline_symbol+'；有效 '+r.history_years.length+'/5 年：'+r.history_years.join('、')}/>{r.history_years.length<5&&<small className="peak-years">{r.history_years.length}年</small>}</td><td className={'num '+(r.deviation>0?'direction-long':r.deviation<0?'direction-short':'')}>{r.deviation>0?'+':''}{fmt(r.deviation)}%</td></tr>)}</tbody></table></div>}
  </section>;
 }
@@ -58,16 +54,14 @@ export function PositionPeaks({end,minVolume,minPosition,revision,priceType,onSe
 export function RadarPanel({onSelect}) {
  const [draft,setDraft]=usePreference('futures.radar.draft',{end:'',min_volume:1000,min_position:1000});
  const [family,setFamily]=usePreference('futures.radar.family','all');
- const [query,setQuery]=usePreference('futures.radar.query',{min_volume:1000,min_position:1000}),[revision,setRevision]=useState(0),[data,setData]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[filter,setFilter]=usePreference('futures.radar.filter','priority'),[search,setSearch]=usePreference('futures.radar.search','');
- useEffect(()=>{const c=new AbortController();setBusy(true);setError('');setData(null);
-  fetch('/api/radar?'+new URLSearchParams({...query,family,price_type:'close'}),{signal:c.signal}).then(async r=>{const d=await r.json();if(!r.ok)throw Error(typeof d.detail==='string'?d.detail:JSON.stringify(d.detail));return d;}).then(d=>{if(!c.signal.aborted)setData(d);}).catch(e=>{if(e.name!=='AbortError')setError(e.message);}).finally(()=>{if(!c.signal.aborted)setBusy(false);});return()=>c.abort();
- },[query,revision,family]);
+ const [query,setQuery]=usePreference('futures.radar.query',{min_volume:1000,min_position:1000}),[revision,setRevision]=useState(0),[filter,setFilter]=usePreference('futures.radar.filter','priority'),[search,setSearch]=usePreference('futures.radar.search','');
+ const {data,error,busy}=useResource('/api/radar?'+new URLSearchParams({...query,family,price_type:'close'}),revision);
  const items=radarRows(data).filter(r=>r.product.includes(search.trim().toUpperCase())&&(filter==='all'||filter==='signals'&&r.events.length>0&&r.bucket!=='数据待检查'||filter==='priority'&&r.bucket==='优先核查'||filter==='watch'&&r.bucket==='观察名单'||filter==='quality'&&(r.quality.length>0||r.bucket==='数据待检查')));
  const limits=r=>r.limits.filter(v=>!['均值回归假设；到期、成本与可成交性待核验','仅凭量仓或价差突变不判断多空','短样本'].includes(v));
  const hasLimits=items.some(r=>limits(r).length);
  const change=e=>setDraft(p=>({...p,[e.target.name]:e.target.value}));
  function open(r){const e=r.events.find(e=>e.family==='spread')||r.events[0];onSelect(r.product,e?{...e,direction_code:r.direction_code,rationale:r.events.map(e=>e.label).join('；')}:null,data,e?e.far?'跨期分析':e.family==='position'?'持仓换月':'机会扫描':'机会扫描');}
- return <section className="panel radar-panel">
+ return <section className="panel radar-panel" aria-busy={busy}>
  <form className="filters" onSubmit={e=>{e.preventDefault();const v={...Object.fromEntries(new FormData(e.currentTarget)),end:draft.end};if(!v.end)delete v.end;setQuery(v);setRevision(revision+1);}}>
  <ObservationDate name="end" value={draft.end} onChange={change} latest={data?.as_of}/><label>成交 ≥<input aria-label="每腿最低成交 / 手" type="number" name="min_volume" min="0" max="10000000" step="1" defaultValue={draft.min_volume} onChange={change} required/></label><label>持仓 ≥<input aria-label="每腿最低持仓 / 手" type="number" name="min_position" min="0" max="10000000" step="1" defaultValue={draft.min_position} onChange={change} required/></label><RefreshButton busy={busy} type="submit"/></form>
  <PositionPeaks minVolume={query.min_volume} minPosition={query.min_position} end={query.end} revision={revision} priceType="close" onSelect={onSelect}/>{error&&<p role="alert">扫描失败：{error}</p>}
@@ -139,7 +133,8 @@ export function SpreadMatrix({data,onPair}) {
 }
 
 export function RolloverProgress({data}) {
- const ref=useRef(),rounds=data?.rounds||[],available=rounds.some(r=>r.series.some(p=>p.outgoing!=null||p.incoming!=null));
+ const ref=useRef(),rounds=useMemo(()=>(data?.rounds||[]).map(r=>({...r,series:observedRows(r.series,['outgoing','incoming','spread'])})),[data]),available=rounds.some(r=>r.series.length);
+ const firstDay=Math.min(0,...rounds.flatMap(r=>r.series.length?[r.series[0].day]:[]));
  useChart(ref,chart=>chart.setOption({animation:false,
   legend:{type:'scroll',top:0},grid:{left:75,right:65,top:60,bottom:72},
   tooltip:{trigger:'axis',confine:true,renderMode:'richText',formatter:params=>{
@@ -152,15 +147,15 @@ export function RolloverProgress({data}) {
    if(spread)lines.push(`价差：${fmt(spread.value[1])}`);
    return lines.join('\n');
   }},
-  xAxis:{type:'value',max:0,name:'距最后交易日 / 天',nameLocation:'middle',nameGap:28,axisLabel:{hideOverlap:true}},
+  xAxis:{type:'value',min:'dataMin',max:0,name:'距最后交易日 / 天',nameLocation:'middle',nameGap:28,axisLabel:{hideOverlap:true}},
   yAxis:[{type:'value',position:'left',axisLine:{onZero:false,show:false},name:'持仓 / 手',splitLine:{lineStyle:{color:'#eef0f3'}}},{type:'value',position:'right',axisLine:{onZero:false,show:false},name:'价差',scale:true,splitLine:{show:false}}],
-  dataZoom:[{type:'inside',startValue:-180,endValue:0},{type:'slider',bottom:4,height:18,startValue:-180,endValue:0}],
+  dataZoom:[{type:'inside',startValue:Math.max(-180,firstDay),endValue:0},{type:'slider',bottom:4,height:18,startValue:Math.max(-180,firstDay),endValue:0}],
   series:rounds.filter(r=>r.series.length).flatMap(r=>['outgoing','incoming',...(r.name==='current'?['spread']:[])].map((key,i)=>({
    name:key==='spread'?'价差':r[key]+(r.name==='previous'?' · 上轮':''),type:'line',yAxisIndex:key==='spread'?1:0,showSymbol:false,connectNulls:false,
    lineStyle:{type:r.name==='previous'?'dashed':'solid',width:key==='spread'?1.8:2},itemStyle:{color:['#4e7fb9','#568f84','#222222'][i]},
    data:r.series.map(p=>({value:[p.day,p[key]],trade_date:p.trade_date}))
   }))).sort((a,b)=>a.yAxisIndex-b.yAxisIndex)
- }),[data]);
+ }, true),[data]);
  return <section className="panel"><h2>移仓对比</h2>{available?<ChartFrame><div className="chart" ref={ref} role="img" aria-label="本轮与上一轮移仓持仓及价差，按距移出合约最后交易日的自然日对齐"/></ChartFrame>:<p className="empty">主力映射或最后交易日尚未齐备</p>}{available&&rounds.some(r=>!r.series.length)&&<p className="sub">上轮或本轮资料不全</p>}</section>;
 }
 
@@ -174,7 +169,7 @@ export function SeasonalSpreadChart({summary}) {
   yAxis:{type:'category',inverse:true,axisLabel:{interval:0},data:rows.map(p=>`${p.year}${p.current?' 当前':''}`),axisLine:{show:false},axisTick:{show:false}},
   series:[{type:'line',showSymbol:true,showAllSymbol:true,lineStyle:{opacity:0},data:rows.map((p,i)=>({value:[p.value,i],symbol:p.current?'diamond':'circle',symbolSize:p.current?11:8,itemStyle:{color:p.current?'#4e7fb9':'#aebdce'},label:{show:true,position:'right',distance:6,formatter:()=>fmt(p.value),color:p.current?'#315f94':'#505c6b'}})),
    ...(Number.isFinite(summary.median)?{markLine:{silent:true,symbol:'none',label:{show:false},lineStyle:{color:'#7c8590',type:'dashed'},data:[{xAxis:summary.median}]}}:{})}]
- }),[summary]);
+ }, true),[summary]);
  return samples.length?<><div className="metrics"><Metric label="中位数" value={fmt(summary.median)} hint="同月日向前7日匹配，每年一个样本，不含当前交割年。"/><Metric label="偏离" value={fmt(Number.isFinite(current?.value)&&Number.isFinite(summary.median)?current.value-summary.median:null)} hint="当前价差 − 同期历史中位数。"/></div><div ref={ref} className="seasonal-spread-chart" role="img" aria-label="历年同期价差点图，当前年份在上，蓝色菱形为当前组合，虚线为历史中位数"/></>:<p className="empty">暂无同期历史样本</p>;
 }
 

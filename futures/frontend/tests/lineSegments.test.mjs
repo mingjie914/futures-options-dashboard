@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {lineSegments, tooltipRows, seasonalSelection, inventoryHistory} from '../src/lineSegments.mjs';
+import {lineSegments, tooltipRows, seasonalSelection, inventoryHistory, observedRows} from '../src/lineSegments.mjs';
+
+test('observed ranges trim only empty edges, keeping zero, interior gaps and original dates',()=>{
+  const rows=[null,0,null,3,null].map((value,i)=>({date:i,value}));
+  assert.deepEqual(observedRows(rows,['value']),rows.slice(1,4));
+  assert.deepEqual(observedRows([{value:null},{value:NaN}],['value']),[]);
+  assert.equal(rows.length,5);
+});
 
 test('inventory keeps original units, null gaps, leap days and previous publication deltas', () => {
   const points=[{date:'2023-12-29',value:12.5},{date:'2024-01-05',value:0},{date:'2024-02-23',value:null},{date:'2024-02-29',value:9},{date:'2024-03-08',value:11},{date:'2025-01-03',value:80}];

@@ -10,7 +10,7 @@ const source=await readFile(new URL('../src/MarketPanels.jsx',import.meta.url),'
 const ts=sharedRequire('typescript');
 const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const module={exports:{}},chartDraws=[];
-new Function('module','exports','require',code)(module,module.exports,id=>id.startsWith('react')?sharedRequire(id):id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),useChart:(_ref,draw)=>chartDraws.push(draw)}:createRequire(import.meta.url)(id));
+new Function('module','exports','require',code)(module,module.exports,id=>id.startsWith('react')?sharedRequire(id):id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),useChart:(_ref,draw)=>chartDraws.push(draw)}:createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
 const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel,spreadMatrix,SpreadMatrix,SeasonalSpreadChart,RolloverProgress}=module.exports;
 
 test('spread matrix uses recorded last trading days, preserves missing values and marks valid extrema',()=>{
@@ -82,17 +82,14 @@ test('seasonal comparison keeps individual observations, zero and current separa
 test('seasonal spread follows selected legs and date despite a saved month preference',async()=>{
  const source=await readFile(new URL('../src/HistoryPanel.jsx',import.meta.url),'utf8');
  const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- const effects=[],queries=[],module={exports:{}};
+ const queries=[],module={exports:{}};
  new Function('module','exports','require',code)(module,module.exports,id=>{
-  if(id==='react')return {...React,useEffect:fn=>effects.push(fn)};
-  if(id.endsWith('/charts.js'))return {usePreference:(key,initial)=>[key.endsWith('.month')?1:initial,()=>{}]};
-  if(id.endsWith('/transport.js'))return {conditionalFetch:url=>{queries.push(new URL(url,'http://test').searchParams);return Promise.resolve({ok:true,json:async()=>({lines:[]})});}};
+  if(id.endsWith('/charts.js'))return {usePreference:(key,initial)=>[key.endsWith('.month')?1:initial,()=>{}],useResource:url=>{queries.push(new URL(url,'http://test').searchParams);return {data:null,busy:true};}};
   return id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/HistoryPanel.jsx',import.meta.url))(id);
  });
  const props={product:'RB',end:'2026-10-28',near:'RB2701',far:'RB2703',priceType:'close',view:'spread'};
  for(const change of [{},{near:'RB2612'},{near:'RB2612',far:'RB2705'},{near:'RB2611',far:'RB2612',end:'2026-10-14'},{view:'month',near:'RB2612'},{product:'SC',near:'SC2611',far:'SC2909'},{product:'SC',near:'SC2903',far:'SC2909'}]){
   renderToStaticMarkup(React.createElement(module.exports.default,{...props,...change}));
-  effects.splice(0).forEach(effect=>effect());
  }
  assert.deepEqual(queries.map(q=>['near_month','far_month','far_year_offset','anchor_year','end'].map(k=>q.get(k))),[
   ['1','3','0','2027','2026-10-28'],['12','3','1','2026','2026-10-28'],['12','5','1','2026','2026-10-28'],
@@ -157,7 +154,7 @@ test('basis keeps one control row, meaningful units and compact formula hints',(
 
 test('radar starts with all-product controls and does not require choosing a product',()=>{
  const html=renderToStaticMarkup(React.createElement(RadarPanel,{onSelect(){}}));
- assert.match(html,/type="submit"[^>]*>.*刷新/);
+ assert.match(html,/type="submit"[^>]*>.*更新中/);
  assert.match(html,/name="min_volume"/);
  assert.match(html,/name="min_position"/);
  assert.doesNotMatch(html,/name="product"/);
@@ -210,7 +207,7 @@ test('curve keeps the shared selection and drills adjacent pairs into history',(
 
 
 test('rollover overlay uses separate relative-day axes and real dates without joining missing observations',()=>{
- const data={rounds:[{name:'current',outgoing:'IM2612',incoming:'IM2703',series:[{day:-50,trade_date:'2026-10-29',outgoing:100,incoming:50,spread:15}]},{name:'previous',outgoing:'IM2609',incoming:'IM2612',series:[{day:0,trade_date:'2026-09-18',outgoing:0,incoming:70,spread:null}]}]};
+ const data={rounds:[{name:'current',outgoing:'IM2612',incoming:'IM2703',series:[{day:-365,trade_date:'2025-12-19',outgoing:null,incoming:null,spread:null},{day:-50,trade_date:'2026-10-29',outgoing:100,incoming:50,spread:15}]},{name:'previous',outgoing:'IM2609',incoming:'IM2612',series:[{day:0,trade_date:'2026-09-18',outgoing:0,incoming:70,spread:null}]}]};
  const html=renderToStaticMarkup(React.createElement(RolloverProgress,{data}));
  let option;chartDraws.pop()({setOption:value=>{option=value;}});
  assert.equal(option.series.length,5);
@@ -223,9 +220,58 @@ test('rollover overlay uses separate relative-day axes and real dates without jo
  assert.equal(option.series[0].data[0].trade_date,'2026-10-29');
  assert.ok(option.series.every(s=>s.connectNulls===false));
  assert.equal(option.xAxis.max,0);
+ assert.equal(option.xAxis.min,'dataMin');
+ assert.equal(option.dataZoom[0].startValue,-50);
  const hover=option.tooltip.formatter(option.series.map(s=>({seriesName:s.name,data:s.data[0],value:s.data[0].value})));
  assert.equal((hover.match(/2026-10-29/g)||[]).length,1);
  assert.equal((hover.match(/2026-09-18/g)||[]).length,1);
  assert.equal(hover.split('\n').at(-1),'价差：15');
  assert.match(html,/自然日对齐/);
+});
+
+
+async function sharedHooks(overrides={}) {
+ const source=await readFile(new URL('../../../frontend/src/charts.js',import.meta.url),'utf8');
+ const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const slots=[],effects=[],module={exports:{}};let index=0;
+ const hooks={...React,useState:initial=>{const i=index++;slots[i]||={value:typeof initial==='function'?initial():initial};return [slots[i].value,next=>{slots[i].value=typeof next==='function'?next(slots[i].value):next;}];},
+  useRef:value=>slots[index++]||=( {current:value} ),
+  useEffect:(effect,deps)=>{const i=index++,old=slots[i];if(!old||!deps||deps.some((v,j)=>!Object.is(v,old.deps[j])))effects.push(()=>{old?.cleanup?.();slots[i]={deps,cleanup:effect()};});}};
+ new Function('module','exports','require',code)(module,module.exports,id=>id==='react'?hooks:overrides[id]||{});
+ return {render:(name,...args)=>{index=0;const value=module.exports[name](...args);effects.splice(0).forEach(fn=>fn());return value;},unmount:()=>slots.forEach(slot=>slot.cleanup?.())};
+}
+const settleHooks=()=>new Promise(resolve=>setImmediate(resolve));
+
+test('selection requests retain the previous view, cancel stale responses and distinguish errors',async()=>{
+ const requests=[];
+ const h=await sharedHooks({'./transport.js':{conditionalFetch:(url,{signal})=>new Promise((resolve,reject)=>requests.push({url,signal,resolve:data=>resolve({ok:true,json:async()=>data}),reject}))}});
+ assert.equal(h.render('useResource','/a').busy,true);
+ requests[0].resolve({product:'A'});await settleHooks();
+ assert.equal(h.render('useResource','/a').data.product,'A');
+ const pending=h.render('useResource','/b');assert.equal(pending.busy,true);assert.equal(pending.data.product,'A');
+ h.render('useResource','/c');assert.equal(requests[1].signal.aborted,true);
+ requests[1].resolve({product:'B'});requests[2].resolve({product:'C'});await settleHooks();
+ assert.deepEqual(h.render('useResource','/c'),{data:{product:'C'},error:undefined,busy:false});
+ assert.equal(h.render('useResource','/d',0,'other').data,null);
+ requests[3].reject(Error('offline'));await settleHooks();
+ assert.deepEqual(h.render('useResource','/d',0,'other'),{data:null,error:'offline',busy:false});
+ h.unmount();assert.equal(requests[3].signal.aborted,true);
+});
+
+test('chart updates reuse the instance and dispose only when the DOM node leaves',async()=>{
+ const oldIntersection=globalThis.IntersectionObserver,oldResize=globalThis.ResizeObserver;
+ let created=0,disposed=0,draws=0;
+ globalThis.IntersectionObserver=class{constructor(callback){this.callback=callback;}observe(){queueMicrotask(()=>this.callback([{isIntersecting:true}]));}disconnect(){}};
+ globalThis.ResizeObserver=class{observe(){}disconnect(){}};
+ try{
+  const h=await sharedHooks({'./chart-engine.js':{init:()=>{created++;return {dispose:()=>disposed++,resize(){}};}}});
+  const ref={current:{}},draw=()=>draws++;
+  h.render('useChart',ref,draw,[1]);await settleHooks();
+  h.render('useChart',ref,draw,[2]);await settleHooks();
+  assert.equal(created,1);assert.equal(disposed,0);assert.equal(draws,2);
+  h.render('useChart',ref,draw,[2]);assert.equal(draws,2);
+  ref.current=null;h.render('useChart',ref,draw,[2]);assert.equal(disposed,1);
+  ref.current={};h.render('useChart',ref,draw,[3]);await settleHooks();
+  assert.equal(created,2);h.unmount();assert.equal(disposed,2);
+ }finally{globalThis.IntersectionObserver=oldIntersection;globalThis.ResizeObserver=oldResize;}
 });
