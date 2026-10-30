@@ -143,7 +143,10 @@ test('radar keeps small result lists visible and carries candidate evidence into
 });
 test('basis keeps one control row, meaningful units and compact formula hints',()=>{
  const html=renderToStaticMarkup(React.createElement(BasisPanel,{product:'CU',priceType:'close',controls:()=>React.createElement('span',null,'controls')}));
- assert.match(html,/controls/);assert.match(html,/读取基差/);
+ assert.match(html,/controls/);assert.match(html,/商品基差暂未接入/);
+ assert.doesNotMatch(html,/>CU<|读取基差/);
+ assert.equal((html.match(/<button/g)||[]).length,4);
+ assert.match(renderToStaticMarkup(React.createElement(BasisPanel,{product:'IH',priceType:'close'})),/读取基差/);
  assert.match(source,/isIndex\?'点':'元\/吨'/);
  assert.match(source,/正值贴水，负值升水/);
  assert.match(source,/非年化/);

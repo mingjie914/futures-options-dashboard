@@ -1,3 +1,9 @@
+export function holdingLeaders(contracts) {
+  const largest = after => contracts.reduce((best,r) => r.symbol>after && Number.isFinite(r.position) && r.position>0 && (!best || r.position>best.position || r.position===best.position && r.symbol<best.symbol) ? r : best, null)?.symbol || '';
+  const activeContract=largest('');
+  return {activeContract,secondaryContract:activeContract?largest(activeContract):''};
+}
+
 // Calendar padding is skipped, but an explicit missing observation breaks a line.
 export function inventoryHistory(points, end = '', years = 5) {
   const all = points.filter(p => !end || p.date <= end).slice().sort((a,b) => a.date.localeCompare(b.date));

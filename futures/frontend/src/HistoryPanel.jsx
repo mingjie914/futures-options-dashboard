@@ -1,6 +1,6 @@
 import { useChart, ChartFrame, usePreference, observedRows, useResource } from '../../../frontend/src/charts.js';
 import {useMemo, useRef} from 'react';
-import {lineSegments, tooltipRows, seasonalSelection, inventoryHistory} from './lineSegments.mjs';
+import {lineSegments, tooltipRows, seasonalSelection, inventoryHistory, holdingLeaders} from './lineSegments.mjs';
 
 const quantity = value => value == null ? '—' : Number(value).toLocaleString('zh-CN',{maximumFractionDigits:2});
 const historyHeight = 'clamp(380px, 56vh, 600px)';
@@ -112,8 +112,7 @@ export default function HistoryPanel({product, end, near, far, priceType, revisi
   const [overviewMetric, setOverviewMetric] = usePreference('futures.history.overviewMetric','price');
   const [overviewStyle, setOverviewStyle] = usePreference('futures.history.overviewStyle','line');
   const [chosen,setChosen]=usePreference('futures.history.'+product+'.contract','');
-  const activeContract=contracts.reduce((best,row)=>row.position>0&&(!best||row.position>best.position)?row:best,null)?.symbol||'';
-  const secondaryContract=contracts.reduce((best,row)=>row.symbol!==activeContract&&row.position>0&&(!best||row.position>best.position)?row:best,null)?.symbol||'';
+  const {activeContract,secondaryContract}=holdingLeaders(contracts);
   const anchorYear = mode === 'overview' ? Number(end.slice(0,4)) : 2000 + Number(near?.slice(-4,-2) || end.slice(2,4));
   const effectiveMetric = mode === 'spread' ? 'price' : mode === 'overview' ? overviewMetric : metric;
   const {data:result,error,busy}=useResource('/api/contract-history?'+new URLSearchParams({product,end,mode,years,near_month:nearMonth,far_month:farMonth,far_year_offset:offset,metric:effectiveMetric,price_type:priceType,anchor_year:anchorYear}),revision);

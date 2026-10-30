@@ -14,13 +14,14 @@ export function ObservationDate({latest,value,...props}) {
 export function BasisPanel({product,end,priceType,revision,Chart,onProduct,controls}) {
  const [symbol,setSymbol]=usePreference('futures.basis.'+product+'.symbol','');
  const [metric,setMetric]=usePreference('futures.basis.metric','spread');
- const {data,error,busy}=useResource('/api/basis-reference?'+new URLSearchParams({product,price_type:priceType,...(end?{end}:{}),...(symbol?{symbol}:{})}),revision);
+ const indexProducts=['IM','IF','IC','IH'],supported=indexProducts.includes(product);
+ const {data,error,busy}=useResource(supported?'/api/basis-reference?'+new URLSearchParams({product,price_type:priceType,...(end?{end}:{}),...(symbol?{symbol}:{})}):null,revision);
  const zoomGroup=useMemo(()=>new Set(),[data]);
  const last=data?.latest,isIndex=data?.status==='index_close_basis',unit=isIndex?'点':'元/吨',label=isIndex?'基差':'周频参考价差';
- const ratio=isIndex&&metric==='ratio',chartLabel=ratio?'基差率':label;
+ const ratio=isIndex&&metric==='ratio',chartLabel=ratio?'股指基差率':isIndex?'股指基差':label;
  const contract=data?.contracts?.length?<select aria-label="期货合约" value={symbol||data.symbol} onChange={e=>setSymbol(e.target.value)}>{data.contracts.map(s=><option key={s}>{s}</option>)}</select>:null;
  return <><div className="filters page-filters">{controls?.(<>{contract}{isIndex&&<select aria-label="基差指标" value={metric} onChange={e=>setMetric(e.target.value)}><option value="spread">基差</option><option value="ratio">基差率</option></select>}</>,data?.meta?.as_of,busy)}</div>
- {error?<><p role="alert">{error}</p>{symbol&&<button onClick={()=>setSymbol('')}>重选活跃合约</button>}</>:!data?<p role="status">读取基差…</p>:data.status==='unavailable'?<section className="panel" aria-busy={busy}><p className="sub">{product} 暂无基差数据</p><div className="scan-controls">{['IM','IF','IC','IH','CU'].map(p=><button key={p} onClick={()=>onProduct(p)}>{p}</button>)}</div></section>:<>
+ {!supported||data?.status==='unavailable'?<section className="panel" aria-busy={busy}><p className="sub">{supported?'所选品种暂无基差数据':['T','TF','TS','TL'].includes(product)?'国债基差暂未接入':'商品基差暂未接入'}</p><div className="scan-controls">{indexProducts.map(p=><button key={p} onClick={()=>onProduct(p)}>{p}</button>)}</div></section>:error?<><p role="alert">{error}</p>{symbol&&<button onClick={()=>setSymbol('')}>重选活跃合约</button>}</>:!data?<p role="status">读取基差…</p>:<>
  <section className="panel" aria-busy={busy}>
  <div className="stats-heading"><h2>{chartLabel} / {ratio?'%':unit}</h2><span>{last?.trade_date||'无有效配对'} · {data.matched} 个观测{data.unmatched?' · '+data.unmatched+' 个未配对':''}{data.meta.stale?' · 缓存降级':''}{data.reference.source?.includes('测试')?' · 测试样本':''}</span></div>
  <div className="metrics"><Metric label={label} value={fmt(last?.reference_spread)} hint={(isIndex?'指数 − 期货；正值贴水，负值升水':'同日参考价 − 期货收盘价')+'，单位：'+unit}/><Metric label={isIndex?'指数':'参考价'} value={fmt(last?.reference_price)} hint={data.reference.name+' · '+data.reference.code+'；'+(data.reference.source||'已保存参考价')}/><Metric label="期货价" value={fmt(last?.futures_price)} hint={data.symbol+' 收盘；单位：'+unit}/>{isIndex&&<Metric label="基差率" value={last?.basis_ratio==null?'—':fmt(last.basis_ratio*100)+'%'} hint="（指数 − 期货）÷ 指数，非年化"/>}</div>
