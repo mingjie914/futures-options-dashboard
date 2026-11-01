@@ -173,7 +173,8 @@ class ResearchHTTP:
             body = b''
             headers.pop('content-encoding', None)
             headers.pop('content-type', None)
-        elif self.compress and len(body) >= 1024 and not headers.get('content-encoding') and accepts_gzip(request_headers.get('accept-encoding', '')):
+        # Caddy's default MIME matcher excludes our custom delta media type.
+        elif (self.compress or headers.get('im') == DELTA) and len(body) >= 1024 and not headers.get('content-encoding') and accepts_gzip(request_headers.get('accept-encoding', '')):
             body = gzip.compress(body, compresslevel=4, mtime=0)
             headers['content-encoding'] = 'gzip'
         await Response(body, status_code=status, headers=headers)(scope, receive, send)

@@ -169,3 +169,20 @@ def test_options_lazy_health_and_same_day_revision(monkeypatch, tmp_path):
         assert corrected.json()=={'value':2} and corrected.headers['etag']!=first.headers['etag']
         assert len(calls)==2
     module.cache.clear()
+
+
+def test_edge_mode_keeps_large_custom_delta_compressed():
+    from starlette.responses import Response
+    app = FastAPI()
+    app.add_middleware(ResearchHTTP, compress=False)
+    payload = json.dumps({'ops': [['set', ['rows', 0], 'market' * 1000]]}).encode()
+
+    @app.get('/api/delta')
+    def delta():
+        return Response(payload, status_code=226, media_type='application/vnd.mingjiec.delta+json',
+                        headers={'im': DELTA, 'delta-base': 'W/"previous"', 'cache-control': 'no-store'})
+
+    with TestClient(app) as client:
+        result = client.get('/api/delta', headers={'Accept-Encoding': 'gzip, br, zstd'})
+        assert result.status_code == 226 and result.headers['content-encoding'] == 'gzip'
+        assert result.content == payload and result.headers['delta-base'] == 'W/"previous"'
