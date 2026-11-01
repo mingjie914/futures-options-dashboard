@@ -112,7 +112,7 @@ def test_heavy_requests_serialized_and_errors_not_cached():
     asyncio.run(run())
 
 
-def test_gateway_compresses_once_and_keeps_security(monkeypatch):
+def test_gateway_leaves_compression_to_edge_and_keeps_security(monkeypatch):
     from backend.gateway import app
     payload = json.dumps({'rows': ['market'] * 1000}).encode()
     requests = []
@@ -130,8 +130,9 @@ def test_gateway_compresses_once_and_keeps_security(monkeypatch):
     monkeypatch.setenv('DASHBOARD_PUBLIC_READONLY', '1')
     with TestClient(app) as client:
         app.state.client = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
-        result = client.get('/api/futures/v1/products', headers={'Accept-Encoding': 'gzip'})
-        assert result.headers['content-encoding'] == 'gzip' and result.content == payload
+        for encoding in ('gzip', 'gzip, deflate, br, zstd', 'identity', 'gzip;q=0, zstd;q=0'):
+            result = client.get('/api/futures/v1/products', headers={'Accept-Encoding': encoding})
+            assert 'content-encoding' not in result.headers and result.content == payload
         unchanged = client.get('/api/futures/v1/products', headers={'If-None-Match': 'W/"same"', 'A-IM': DELTA})
         assert unchanged.status_code == 304 and unchanged.content == b''
         assert requests[-1].headers['a-im'] == DELTA
