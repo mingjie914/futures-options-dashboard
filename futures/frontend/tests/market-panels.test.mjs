@@ -309,3 +309,20 @@ test('contract legend highlights every segment without hiding any contract',asyn
  select({name:'IM2611',selected:{IM2611:false}});
  assert.equal(options[2].series[0].lineStyle.width,1.3);
 });
+
+
+test('basis overlays current contracts on one date axis and retains missing prices',async()=>{
+ const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const module={exports:{}},charts=[],point=(trade_date,basis,price)=>({trade_date,reference_spread:basis,reference_price:100,futures_price:price});
+ const a={series:[point('2026-09-01',1,99),point('2026-09-02',2,98)],matched:2,latest:point('2026-09-02',2,98)};
+ const b={series:[point('2026-09-02',4,96)],matched:1,latest:point('2026-09-02',4,96)};
+ const data={...a,contracts:['IM2612','IM2703'],symbol:'IM2612',status:'index_close_basis',meta:{as_of:'2026-09-02'},reference:{name:'中证1000'},comparisons:{IM2612:a,IM2703:b}};
+ new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),usePreference:(_k,v)=>[v,()=>{}],useResource:url=>{assert.match(url,/all_contracts=true/);return {data};}}:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
+ renderToStaticMarkup(React.createElement(module.exports.BasisPanel,{product:'IM',Chart:props=>{charts.push(props);return null;}}));
+ assert.deepEqual(charts[0].lines,[['IM2612','IM2612'],['IM2703','IM2703']]);
+ assert.equal(charts[0].rows[0].IM2703,undefined);
+ assert.equal(charts[0].rows[1].IM2703,4);
+ assert.equal(charts[0].focus,'IM2612');
+ assert.equal(charts[0].rows,charts[1].rows);
+ assert.deepEqual(charts[1].lines,[['reference_price','中证1000'],['IM2612_price','IM2612']]);
+});

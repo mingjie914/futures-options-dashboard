@@ -161,8 +161,20 @@ def test_index_basis_real_local_snapshot_and_settle_rejection(setup,monkeypatch)
     from datetime import date
     days=(date(2026,12,18)-date(2026,9,2)).days
     assert d['latest']['annualized_basis_ratio']==(1/8001)*365/days
-    assert client.get('/api/basis-reference?product=IM&symbol=IF2612').status_code==422
     assert (path.read_bytes(),(raw.parent/report['file']).read_bytes())==before
+    with duckdb.connect() as con:
+        con.execute('CREATE TABLE daily AS SELECT * FROM read_parquet(?)',[str(path)])
+        con.execute("INSERT INTO daily SELECT * REPLACE ('IM2703' AS symbol,7900 AS close) FROM daily WHERE symbol='IM2612'")
+        con.execute("INSERT INTO daily SELECT * REPLACE ('IM2608' AS symbol) FROM daily WHERE symbol='IM2612' AND trade_date='2026-09-01'")
+        con.execute('COPY daily TO ? (FORMAT PARQUET)',[str(path)])
+    overlay=client.get('/api/basis-reference?product=IM&end=2026-09-02&all_contracts=true&symbol=IM2608').json()
+    assert overlay['contracts']==['IM2612','IM2703']
+    assert overlay['symbol'] in overlay['contracts']
+    assert set(overlay['comparisons'])==set(overlay['contracts'])
+    assert overlay['comparisons']['IM2703']['latest']['reference_spread']==101
+    assert overlay['comparisons']['IM2612']['latest']['reference_spread']==1
+    assert overlay['comparisons']['IM2703']['latest']['annualized_basis_ratio'] is None
+    assert client.get('/api/basis-reference?product=IM&symbol=IF2612').status_code==422
     (raw.parent/report['file']).write_bytes(b'corrupt')
     assert client.get('/api/basis-reference?product=IM').status_code==503
 

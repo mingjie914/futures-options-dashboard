@@ -15,19 +15,28 @@ export function BasisPanel({product,end,priceType,revision,Chart,onProduct,contr
  const [symbol,setSymbol]=usePreference('futures.basis.'+product+'.symbol','');
  const [metric,setMetric]=usePreference('futures.basis.metric','spread');
  const indexProducts=['IM','IF','IC','IH'],supported=indexProducts.includes(product);
- const {data,error,busy}=useResource(supported?'/api/basis-reference?'+new URLSearchParams({product,price_type:priceType,...(end?{end}:{}),...(symbol?{symbol}:{})}):null,revision);
+ const {data,error,busy}=useResource(supported?'/api/basis-reference?'+new URLSearchParams({product,price_type:priceType,all_contracts:true,...(end?{end}:{})}):null,revision);
  const zoomGroup=useMemo(()=>new Set(),[data]);
- const last=data?.latest,isIndex=data?.status==='index_close_basis',unit=isIndex?'点':'元/吨',label=isIndex?'基差':'周频参考价差';
+ const chosen=data?.comparisons?.[symbol]?symbol:data?.symbol,selected=data?.comparisons?.[chosen]||data;
+ const last=selected?.latest,isIndex=data?.status==='index_close_basis',unit=isIndex?'点':'元/吨',label=isIndex?'基差':'周频参考价差';
  const ratio=isIndex&&metric==='ratio',chartLabel=ratio?'年化基差率':isIndex?'股指基差':label;
- const contract=data?.contracts?.length?<select aria-label="期货合约" value={symbol||data.symbol} onChange={e=>setSymbol(e.target.value)}>{data.contracts.map(s=><option key={s}>{s}</option>)}</select>:null;
+ const rows=useMemo(()=>{
+  const days=new Map();
+  for(const [s,result] of Object.entries(data?.comparisons||{}))for(const p of result.series){
+   if(!days.has(p.trade_date))days.set(p.trade_date,{trade_date:p.trade_date,reference_price:p.reference_price});
+   Object.assign(days.get(p.trade_date),{[s]:p[ratio?'annualized_basis_ratio':'reference_spread'],[s+'_price']:p.futures_price});
+  }
+  return [...days.values()].sort((a,b)=>a.trade_date.localeCompare(b.trade_date));
+ },[data,ratio]);
+ const contract=data?.contracts?.length?<select aria-label="重点合约" value={chosen} onChange={e=>setSymbol(e.target.value)}>{data.contracts.map(s=><option key={s}>{s}</option>)}</select>:null;
  return <><div className="filters page-filters">{controls?.(<>{contract}{isIndex&&<select aria-label="基差指标" value={metric} onChange={e=>setMetric(e.target.value)}><option value="spread">基差</option><option value="ratio">年化基差率</option></select>}</>,data?.meta?.as_of,busy)}</div>
  {!supported||data?.status==='unavailable'?<section className="panel" aria-busy={busy}><p className="sub">{supported?'所选品种暂无基差数据':['T','TF','TS','TL'].includes(product)?'国债基差暂未接入':'商品基差暂未接入'}</p><div className="scan-controls">{indexProducts.map(p=><button key={p} onClick={()=>onProduct(p)}>{p}</button>)}</div></section>:error?<><p role="alert">{error}</p>{symbol&&<button onClick={()=>setSymbol('')}>重选活跃合约</button>}</>:!data?<p role="status">读取基差…</p>:<>
  <section className="panel" aria-busy={busy}>
- <div className="stats-heading"><h2>{chartLabel} / {ratio?'%':unit}</h2><span>{last?.trade_date||'无有效配对'} · {data.matched} 个观测{data.unmatched?' · '+data.unmatched+' 个未配对':''}{data.meta.stale?' · 缓存降级':''}{data.reference.source?.includes('测试')?' · 测试样本':''}</span></div>
+ <div className="stats-heading"><h2>{chartLabel} / {ratio?'%':unit}</h2><span>{last?.trade_date||'无有效配对'} · {selected.matched} 个观测{selected.unmatched?' · '+selected.unmatched+' 个未配对':''}{data.meta.stale?' · 缓存降级':''}{data.reference.source?.includes('测试')?' · 测试样本':''}</span></div>
  <div className="metrics"><Metric label={label} value={fmt(last?.reference_spread)} hint="现货 − 期货"/><Metric label={isIndex?'指数':'参考价'} value={fmt(last?.reference_price)}/><Metric label="期货价" value={fmt(last?.futures_price)}/>{isIndex&&<Metric label="年化基差率" value={last?.annualized_basis_ratio==null?'—':fmt(last.annualized_basis_ratio*100)+'%'} hint="基差 ÷ 现货 × 365 ÷ 距交割日天数"/>}</div>
- {data.series.length?<Chart zoomGroup={zoomGroup} rows={data.series} lines={[[ratio?'annualized_basis_ratio':'reference_spread',chartLabel+' / '+(ratio?'%':unit)]]} percent={ratio}/>:<p className="empty">暂无配对数据</p>}
+ {rows.length?<Chart zoomGroup={zoomGroup} rows={rows} lines={data.contracts.map(s=>[s,s])} percent={ratio} focus={chosen}/>:<p className="empty">暂无配对数据</p>}
  </section>
- {!!data.series.length&&<section className="panel basis-prices" aria-busy={busy}><h2>{isIndex?'期现价格':'价格对比'} / {unit}</h2><Chart zoomGroup={zoomGroup} rows={data.series} lines={[["reference_price",data.reference.name],["futures_price",data.symbol]]}/></section>}
+ {!!data.series.length&&<section className="panel basis-prices" aria-busy={busy}><h2>{isIndex?'期现价格':'价格对比'} / {unit}</h2><Chart zoomGroup={zoomGroup} rows={rows} lines={[["reference_price",data.reference.name],[chosen+'_price',chosen]]}/></section>}
  </>}
  </>;
 }

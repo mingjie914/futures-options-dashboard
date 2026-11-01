@@ -437,7 +437,7 @@ def create_app(store=None):
 
     @app.get('/api/basis-reference')
     def basis_reference(product: str, symbol: Optional[str] = None, price_type: str = 'close',
-                        start: Optional[date] = None, end: Optional[date] = None):
+                        start: Optional[date] = None, end: Optional[date] = None, all_contracts: bool = False):
         product=validate_product(product)
         if price_type not in ('close','settle'):
             raise ValueError('价格口径只允许close/settle')
@@ -461,6 +461,9 @@ def create_app(store=None):
             raise ValueError('所选合约不属于当前品种')
         snapshot=read(product,start.isoformat() if start else None,end.isoformat() if end else None)
         contracts=latest_contracts(snapshot)
+        active_symbols=[r['symbol'] for r in contracts]
+        if is_index and all_contracts and symbol not in active_symbols:
+            symbol=None
         symbol=symbol or next((r['symbol'] for r in sorted(contracts,key=lambda r:-(r.get('position') or 0))),None)
         if not symbol or symbol not in {r['symbol'] for r in snapshot['rows']}:
             raise ValueError('窗口中无所选真实合约')
@@ -470,12 +473,15 @@ def create_app(store=None):
             except (OSError,RuntimeError,ValueError,KeyError,duckdb.Error) as exc:
                 raise HTTPException(503,'指数快照不可用或校验失败；不会自动取数或替换指标') from exc
             item=next(i for i in review['indicators'] if i['product']==product)
-            terms=contract_terms(product,[symbol],snapshot['meta']['as_of'],store)
-            delivery=next((r.get('last_delivery_date') for r in (terms or {}).get('contracts',[]) if r['symbol']==symbol and r.get('status')=='rds_recorded' and r.get('last_delivery_date')==r.get('last_trade_date')),None)
-            result=analytics.index_basis(snapshot['rows'],review['points'],symbol,delivery)
+            symbols=active_symbols if all_contracts else [symbol]
+            terms=contract_terms(product,symbols,snapshot['meta']['as_of'],store)
+            deliveries={r['symbol']:r.get('last_delivery_date') for r in (terms or {}).get('contracts',[]) if r.get('status')=='rds_recorded' and r.get('last_delivery_date')==r.get('last_trade_date')}
+            comparisons={s:analytics.index_basis(snapshot['rows'],review['points'],s,deliveries.get(s)) for s in symbols}
+            result=comparisons[symbol]
             return clean(dict(result,status='index_close_basis',product=product,symbol=symbol,
                 contract_terms=terms,
-                contracts=sorted({r['symbol'] for r in snapshot['rows']}),price_type='close',meta=snapshot['meta'],
+                contracts=symbols if all_contracts else sorted({r['symbol'] for r in snapshot['rows']}),
+                **({'comparisons':comparisons} if all_contracts else {}),price_type='close',meta=snapshot['meta'],
                 reference=item,reference_snapshot=review['sha256'],
                 warnings=['基差 = 指数收盘 S − 期货收盘 F；正值为期货贴水，负值为期货升水',
                     '年化基差率 = (S−F)/S × 365/距最后交割日自然天数；日期缺失或到期后不计算，不含资金、分红或成本',
