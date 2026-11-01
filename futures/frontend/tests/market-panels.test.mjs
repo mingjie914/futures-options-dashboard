@@ -148,8 +148,8 @@ test('basis keeps one control row, meaningful units and compact formula hints',(
  assert.equal((html.match(/<button/g)||[]).length,4);
  assert.match(renderToStaticMarkup(React.createElement(BasisPanel,{product:'IH',priceType:'close'})),/读取基差/);
  assert.match(source,/isIndex\?'点':'元\/吨'/);
- assert.match(source,/正值贴水，负值升水/);
- assert.match(source,/非年化/);
+ assert.match(source,/现货 − 期货/);
+ assert.match(source,/基差 ÷ 现货 × 365 ÷ 距交割日天数/);
  assert.match(source,/测试样本/);
  const basis=source.slice(source.indexOf('export function BasisPanel'),source.indexOf('export function SpreadDirection'));
  assert.doesNotMatch(basis,/<details|ContractTerms|<table/);
@@ -216,7 +216,7 @@ test('rollover overlay uses separate relative-day axes and real dates without jo
  assert.equal(option.series.length,5);
  assert.equal(option.series.at(-1).yAxisIndex,1);
  assert.deepEqual(option.series.map(s=>s.name),['IM2612','IM2703','IM2609 · 上轮','IM2612 · 上轮','价差']);
- assert.deepEqual(option.series.map(s=>s.itemStyle.color),['#4e7fb9','#568f84','#4e7fb9','#568f84','#222222']);
+ assert.deepEqual(option.series.map(s=>s.itemStyle.color),['#4e7fb9','#a48b59','#4e7fb9','#a48b59','#222222']);
  assert.doesNotMatch(html,/对齐口径|候选/);
  assert.equal(option.series[3].lineStyle.type,'dashed');
  assert.deepEqual(option.series[2].data[0].value,[0,0]);
@@ -291,4 +291,21 @@ test('single published inventory observation is visible in both charts without i
  for(const option of options){assert.equal(option.series[0].showSymbol,true);assert.equal(option.series[0].symbolSize,6);assert.deepEqual(option.series[0].data.filter(Number.isFinite),[31327]);}
  assert.equal(options[0].series[0].showAllSymbol,true);
  assert.deepEqual(options[1].series.slice(1).map(s=>s.data),[[null],[null]]);
+});
+
+
+test('contract legend highlights every segment without hiding any contract',async()=>{
+ const source=await readFile(new URL('../src/HistoryPanel.jsx',import.meta.url),'utf8');
+ const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const module={exports:{}},draws=[];
+ new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),useChart:(_ref,draw)=>draws.push(draw)}:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/HistoryPanel.jsx',import.meta.url))(id));
+ const result={mode:'overview',metric:'price',axis:['2026-10-01','2026-10-02'],lines:['IM2611','IM2612','IM2703'].map((label,i)=>({label,points:[{x:'2026-10-01',trade_date:'2026-10-01',value:100+i}]}))};
+ renderToStaticMarkup(React.createElement(module.exports.HistoryChart,{result,activeContract:'IM2612',secondaryContract:'IM2703'}));
+ const options=[];let select;
+ draws.pop()({setOption:o=>options.push(o),off(){},on:(_event,handler)=>{select=handler;}});
+ select({name:'IM2611',selected:{IM2611:false}});
+ assert.ok(Object.values(options[1].legend.selected).every(Boolean));
+ assert.equal(options[1].series[0].lineStyle.width,3);
+ select({name:'IM2611',selected:{IM2611:false}});
+ assert.equal(options[2].series[0].lineStyle.width,1.3);
 });

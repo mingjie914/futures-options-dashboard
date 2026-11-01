@@ -80,7 +80,7 @@ def reference_basis(rows, points, symbol, price_type='close'):
         comparison_basis='same_observation_date_only',execution_eligible=False)
 
 
-def index_basis(rows, points, symbol):
+def index_basis(rows, points, symbol, delivery_date=None):
     """S-F close basis of one real contract; retain gaps inside its observed lifetime."""
     contract = [r for r in rows if r['symbol']==symbol]
     if not contract:
@@ -100,6 +100,8 @@ def index_basis(rows, points, symbol):
         if (spot is not None and spot<=0) or (future is not None and future<=0):
             p['reference_spread'] = None
         p['basis_ratio'] = p['reference_spread']/spot if p['reference_spread'] is not None and spot else None
+        remaining = (date.fromisoformat(delivery_date)-date.fromisoformat(p['trade_date'])).days if delivery_date else None
+        p['annualized_basis_ratio'] = p['basis_ratio']*365/remaining if p['basis_ratio'] is not None and remaining is not None and remaining>0 else None
     valid = [p for p in result['series'] if p['reference_spread'] is not None]
     result.update(matched=len(valid),unmatched=len(days)-len(valid),latest=valid[-1] if valid else None)
     return result

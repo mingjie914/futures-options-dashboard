@@ -150,6 +150,17 @@ def test_index_basis_real_local_snapshot_and_settle_rejection(setup,monkeypatch)
         dashboard=client.get('/api/dashboard',params={'product':product,'start':'2026-09-01','end':'2026-09-02'}).json()
         assert dashboard['contract_terms']==terms
         assert client.get('/api/basis-reference',params={'product':product,'price_type':'settle'}).json()['status']=='unavailable'
+    import backend.api as api_module
+    original_terms=api_module.contract_terms
+    def recorded_terms(*args,**kwargs):
+        value=original_terms(*args,**kwargs)
+        value['contracts'][0].update(status='rds_recorded',last_trade_date='2026-12-18',last_delivery_date='2026-12-18')
+        return value
+    monkeypatch.setattr(api_module,'contract_terms',recorded_terms)
+    d=client.get('/api/basis-reference?product=IM&end=2026-09-02').json()
+    from datetime import date
+    days=(date(2026,12,18)-date(2026,9,2)).days
+    assert d['latest']['annualized_basis_ratio']==(1/8001)*365/days
     assert client.get('/api/basis-reference?product=IM&symbol=IF2612').status_code==422
     assert (path.read_bytes(),(raw.parent/report['file']).read_bytes())==before
     (raw.parent/report['file']).write_bytes(b'corrupt')

@@ -104,7 +104,7 @@ def contract_terms(product, symbols=(), as_of=None, store=None):
         'warnings':['last_trade_date/last_delivery_date读取当前RDS修订版；expected_last_trade_date仅为2026规则估计，二者不混用',
             'calendar_conflict为源日期与RDS交易日历不符，calendar_uncovered为日历未覆盖；已入库日期不等于最终公告或历史时点档案',
             '剩余日数相对期货源截止日，为自然日，不是从今天算起；到期日不表示当前仍可交易',
-            '当前核验版本不是历史当时可得规则；不据此计算年化、放宽雷达到期拦截或产生下单建议',
+            '当前日期版本不是历史时点档案；年化仅使用已记录且同日核验的股指交割日期，不据此放宽雷达到期拦截或产生下单建议',
             '账户保证金、手续费、滑点、资金和分红仍需另行核验；不将合约表最低保证金当作账户要求']}
 
 

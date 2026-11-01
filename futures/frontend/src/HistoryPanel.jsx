@@ -49,9 +49,10 @@ export function HistoryChart({result, heatmap=false, showAllYears=false, height=
     const byLine = heatmap ? [] : result.lines.map(line => new Map(line.points.map(point => [point.x, point])));
     const segments = heatmap ? [] : lineSegments(result.axis, result.lines);
     let selected = result.mode === 'seasonal' ? seasonalSelection(result.lines, showAllYears) : {};
-    const palette = ['#4e7fb9', '#568f84', '#a48b59', '#8c7b9f', '#b36c73', '#505c6b', '#4e7fb9', '#65a30d', '#c026d3', '#b45309'];
+    const palette = ['#4e7fb9', '#a48b59', '#568f84', '#8c7b9f', '#b36c73', '#505c6b', '#4e7fb9', '#65a30d', '#c026d3', '#b45309'];
     const overview=result.mode==='overview',focus=overview?[...new Set([activeContract,secondaryContract,focusContract].filter(s=>result.lines.some(l=>l.label===s)))]:[];
-    const color=(name,i)=>overview?name===activeContract?'#4e7fb9':name===secondaryContract?'#568f84':name===focusContract?'#a48b59':'#b8c2ce':palette[i%palette.length];
+    let emphasized=focusContract;
+    const color=(name,i)=>overview?name===activeContract?'#4e7fb9':name===secondaryContract?'#a48b59':name===focusContract?'#8c7b9f':'#9ba7b6':palette[i%palette.length];
     const currentIndex = result.mode === 'spread' ? result.lines.findIndex(line => line.year === result.meta?.anchor_year) : -1;
     const currentPoint = result.lines[currentIndex]?.points.filter(p => Number.isFinite(p.value)).at(-1);
     const axisIndex = new Map(result.axis.map((x, i) => [x, i]));
@@ -89,14 +90,18 @@ export function HistoryChart({result, heatmap=false, showAllYears=false, height=
           ...(rows.length ? [] : ['暂无数据'])].join('\n');
       }},
       yAxis: {type: 'value', scale: true, axisLabel: {formatter: display}, splitLine: {lineStyle: {color: '#eef0f3'}}},
-      series: segments.map(({name, lineIndex, count, data}) => ({name, type: 'line', showSymbol: result.mode !== 'overview' || count === 1, showAllSymbol: count === 1, symbolSize: count === 1 ? 6 : 3, connectNulls: true, emphasis: {focus: 'series'},
+      series: segments.map(({name, lineIndex, count, data}) => ({name, type: 'line', showSymbol: result.mode !== 'overview' || count === 1, showAllSymbol: count === 1, symbolSize: count === 1 ? 6 : 3, connectNulls: true, emphasis: {focus: 'series',lineStyle:{width:3,opacity:1,...(overview?{color:focus.includes(name)?color(name,lineIndex):'#8c7b9f'}:{})}},
         z:overview&&focus.includes(name)?3:2,itemStyle: {color: color(name,lineIndex)},
-        lineStyle: {color: color(name,lineIndex), width: overview?focus.includes(name)?2.6:1:lineIndex === (result.mode === 'spread' ? currentIndex : result.lines.length-1) ? 2.8 : 1.3,opacity:overview&&!focus.includes(name)?.55:1},
+        lineStyle: {color: color(name,lineIndex), width: overview?focus.includes(name)?2.6:1:lineIndex === (result.mode === 'spread' ? currentIndex : result.lines.length-1) ? 2.8 : 1.3,opacity:overview&&!focus.includes(name)?.7:1},
         ...(lineIndex === currentIndex && currentPoint && data[axisIndex.get(currentPoint.x)] != null ? {markPoint:{symbol:'circle',symbolSize:7,label:{position:'top',formatter:'当前 '+display(currentPoint.value)},data:[{coord:[axisIndex.get(currentPoint.x),currentPoint.value]}]},markLine:{silent:true,symbol:'none',label:{show:false},lineStyle:{color:'#7c8590',width:1},data:[{xAxis:axisIndex.get(currentPoint.x)}]}} : {}), data})),
     };
     chart.setOption(option, true);
     chart.off('legendselectchanged');
-    chart.on('legendselectchanged', event => {selected = event.selected;});
+    chart.on('legendselectchanged', event => {
+      if(!overview){selected=event.selected;return;}
+      emphasized=emphasized===event.name?'':event.name;
+      chart.setOption({legend:{selected:Object.fromEntries(result.lines.map(l=>[l.label,true]))},series:segments.map(({name,lineIndex})=>({itemStyle:{color:name===emphasized&&!focus.includes(name)?'#8c7b9f':color(name,lineIndex)},lineStyle:{color:name===emphasized&&!focus.includes(name)?'#8c7b9f':color(name,lineIndex),width:name===emphasized?3:focus.includes(name)?2.6:1.3,opacity:name===emphasized||focus.includes(name)?1:.7},z:name===emphasized?4:focus.includes(name)?3:2}))});
+    });
   }, [result, heatmap, showAllYears,focusContract,activeContract,secondaryContract],zoomGroup);
   return <ChartFrame><div ref={ref} className="history-chart" style={{height: heatmap ? Math.min(850, Math.max(420, result.lines.length * 12)) : height}} role="img" aria-label={result.accessible_label || (result.mode === 'spread' ? '同月份组合历年价差对照图' : heatmap ? '全合约持仓热力图' : '历年合约对比图')}/></ChartFrame>;
 }

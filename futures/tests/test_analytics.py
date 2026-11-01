@@ -25,6 +25,17 @@ def test_index_basis_same_day_sign_ratio_and_internal_gaps():
     assert result['latest']['trade_date']=='2026-09-05'
 
 
+def test_annualized_basis_uses_delivery_calendar_days_and_keeps_raw_ratio():
+    from backend.analytics import index_basis
+    rows=[dict(symbol='IM2612',trade_date=d,close=99) for d in ['2026-09-01','2026-09-02','2026-09-03']]
+    points=[dict(observation_date=r['trade_date'],raw_value=100) for r in rows]
+    result=index_basis(rows,points,'IM2612','2026-09-02')
+    assert result['series'][0]['annualized_basis_ratio']==.01*365
+    assert [p['annualized_basis_ratio'] for p in result['series'][1:]]==[None,None]
+    assert all(p['basis_ratio']==.01 for p in result['series'])
+    assert all(p['annualized_basis_ratio'] is None for p in index_basis(rows,points,'IM2612')['series'])
+
+
 def test_reference_spread_same_date_only_zero_and_missing():
     from backend.analytics import reference_basis
     rows=[row('2026-09-01','CU2610',100),row('2026-09-02','CU2610',101),row('2026-09-04','CU2610',None)]

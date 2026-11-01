@@ -470,13 +470,15 @@ def create_app(store=None):
             except (OSError,RuntimeError,ValueError,KeyError,duckdb.Error) as exc:
                 raise HTTPException(503,'指数快照不可用或校验失败；不会自动取数或替换指标') from exc
             item=next(i for i in review['indicators'] if i['product']==product)
-            result=analytics.index_basis(snapshot['rows'],review['points'],symbol)
+            terms=contract_terms(product,[symbol],snapshot['meta']['as_of'],store)
+            delivery=next((r.get('last_delivery_date') for r in (terms or {}).get('contracts',[]) if r['symbol']==symbol and r.get('status')=='rds_recorded' and r.get('last_delivery_date')==r.get('last_trade_date')),None)
+            result=analytics.index_basis(snapshot['rows'],review['points'],symbol,delivery)
             return clean(dict(result,status='index_close_basis',product=product,symbol=symbol,
-                contract_terms=contract_terms(product,[symbol],snapshot['meta']['as_of'],store),
+                contract_terms=terms,
                 contracts=sorted({r['symbol'] for r in snapshot['rows']}),price_type='close',meta=snapshot['meta'],
                 reference=item,reference_snapshot=review['sha256'],
                 warnings=['基差 = 指数收盘 S − 期货收盘 F；正值为期货贴水，负值为期货升水',
-                    '基差率 = (S−F)/S；不是年化收益率，不含资金、分红、成本或ETF跟踪误差',
+                    '年化基差率 = (S−F)/S × 365/距最后交割日自然天数；日期缺失或到期后不计算，不含资金、分红或成本',
                     '只比较同日收盘字段，未验证逐笔收盘同步；不使用期货结算价',
                     '真实单合约，不拼接主力；已观测生命周期内单边缺失保留断点',
                     '不参与雷达方向或排名；历史下载版本不等于当时可得，不作为无前视回测']))
