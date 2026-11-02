@@ -36,6 +36,7 @@ test('one live socket discovers its directory, changes subscription, reconnects 
   globalThis.WebSocket=class {constructor(url){this.url=url;this.readyState=1;this.sent=[];sockets.push(this);}send(raw){this.sent.push(JSON.parse(raw));}close(){this.closed=true;}};
   const flush=()=>new Promise(resolve=>setImmediate(resolve));
   const live=openLive('http://127.0.0.1:18808','basis',state=>states.push(state));
+  assert.equal(states[0].connection,'connecting');
   await flush();assert.equal(sockets.length,1);assert.deepEqual(requests,['http://127.0.0.1:18808/api/realtime/v1/catalog']);
   const ws=sockets[0];ws.onopen();
   assert.equal(ws.url,'ws://127.0.0.1:18808/api/realtime/v1/stream');

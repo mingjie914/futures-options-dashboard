@@ -24,6 +24,7 @@ export function openLive(base, view, publish) {
     return response.json();
   }
   async function connect() {
+    state.connection='connecting';emit();
     try {
       state.catalog=await catalog();
       if(stopped)return;

@@ -30,7 +30,7 @@ export default function Intraday() {
   useEffect(()=>{if(!BASE)return;const timer=setInterval(()=>setNow(performance.now()),1000);return()=>clearInterval(timer);},[]);
   useEffect(()=>{save(view);history.replaceState({},'',location.pathname+'?'+new URLSearchParams({view}));},[view]);
   const metadata=feed.catalog?.metadata||{},indices=(feed.catalog?.codes||[]).filter(code=>metadata[code]?.kind==='index');
-  const online=liveOnline(feed,now),status=!BASE?'等待独立Wind实时订阅接入':feed.connection==='unauthorized'?'只读订阅未授权':online?'订阅在线':feed.connection==='connected'?'等待Wind发送端':'连接中断，自动重连';
+  const online=liveOnline(feed,now),status=!BASE?'等待独立Wind实时订阅接入':['waiting','connecting'].includes(feed.connection)?'正在连接Wind订阅':feed.connection==='unauthorized'?'只读订阅未授权':online?'订阅在线':feed.connection==='connected'?'等待Wind发送端':'连接中断，自动重连';
   return <><div className="board-content" style={{paddingBottom:0}}><nav className="board-tabs" aria-label="日内页签">{Object.entries(VIEWS).map(([key,label])=><button key={key} aria-pressed={view===key} onClick={()=>setView(key)}>{label}</button>)}</nav></div><main className="board-content observation-page">
     <div className="observation-heading"><h1>{VIEWS[view]}</h1><span>开发预览</span></div>
     <p className="sub" role="status">{status}{!online&&feed.quotes.size>0?' · 保留最近值':''}</p>
