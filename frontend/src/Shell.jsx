@@ -8,12 +8,15 @@ const FuturesApp = lazy(async () => {
 });
 const OptionsApp = lazy(() => import('./Options.jsx'));
 const SeatsApp = lazy(() => import('./seats/Dashboard.tsx'));
+const ObserveApp = import.meta.env.OBSERVE_PREVIEW ? lazy(() => import('./Observe.jsx')) : null;
+const IntradayApp = import.meta.env.INTRADAY_PREVIEW ? lazy(() => import('./Intraday.jsx')) : null;
 // Only confirmed destinations are visible; deployment can set these at build time.
 const HOME = import.meta.env.VITE_HOME_URL || 'https://mingjiec.com/';
 const BASE = import.meta.env.BASE_URL;
 const touchNavigation = '(hover: none), (pointer: coarse)';
 const modules = [['seats', '席位', SeatsApp], ['futures', '期货', FuturesApp], ['options', '期权(Beta)', OptionsApp]];
-const currentModule = () => modules.find(([id]) => location.pathname.startsWith(`${BASE}${id}/`) || location.pathname === `${BASE}${id}`)?.[0] || 'futures';
+const previews = [...(ObserveApp ? [['observe','观察',ObserveApp]] : []), ...(IntradayApp ? [['intraday','日内',IntradayApp]] : [])];
+const currentModule = () => previews.find(([id]) => [BASE+id,BASE+id+'/'].includes(location.pathname))?.[0] || modules.find(([id]) => location.pathname.startsWith(`${BASE}${id}/`) || location.pathname === `${BASE}${id}`)?.[0] || 'futures';
 
 class ModuleErrorBoundary extends Component {
   state = { error: null };
@@ -29,7 +32,7 @@ export default function Shell() {
   const [versionState, setVersionState] = useState({ updated: false, failed: false });
   useEffect(() => {
     setVersionState({ updated: false, failed: false });
-    return watchVersion(active, setVersionState);
+    if (modules.some(([id]) => id === active)) return watchVersion(active, setVersionState);
   }, [active]);
   const menu = useRef(null);
   const lastView = useRef({});
@@ -49,7 +52,7 @@ export default function Shell() {
     if (next !== active) {
       lastView.current[active] = location.pathname + location.search + location.hash;
       const target = new URL(lastView.current[next] || `${BASE}${next}/`, location.origin), product = selectedProduct();
-      if (next !== 'options' && product && target.searchParams.get('product')?.split('.')[0] !== product) {
+      if (['seats','futures'].includes(next) && product && target.searchParams.get('product')?.split('.')[0] !== product) {
         target.searchParams.set('product', product);
         for (const key of ['near', 'far', 'focus_symbol']) target.searchParams.delete(key);
       }
@@ -57,11 +60,11 @@ export default function Shell() {
       history.pushState({}, '', target);
       setActive(next);
     }
-    menu.current.querySelector(touch ? 'summary' : 'summary a').focus();
+    if (modules.some(([id]) => id === next)) menu.current.querySelector(touch ? 'summary' : 'summary a').focus();
     menu.current.open = false;
     window.scrollTo({top: 0, left: 0, behavior: 'instant'});
   }
-  const ActiveModule = modules.find(([id]) => id === active)[2];
+  const ActiveModule = [...modules,...previews].find(([id]) => id === active)[2];
   return <div className="unified-shell">
     <script async src={new URL('site-footer.js', HOME).href} />
     <header className="unified-topbar"><nav aria-label="站点导航">
@@ -75,6 +78,7 @@ export default function Shell() {
         <summary tabIndex={touch ? undefined : -1} aria-label={touch ? '切换看板' : undefined}>{touch ? '看板' : <a href={`${BASE}${modules[0][0]}/`} aria-label="切换看板" onClick={event=>select(event, modules[0][0])}>看板</a>}</summary>
         <div className="board-menu__items">{modules.map(([id, label]) => <a key={id} href={`${BASE}${id}/`} aria-current={active === id ? 'page' : undefined} onClick={event => select(event, id)}><span>{label}</span></a>)}</div>
       </details>
+      {previews.map(([id,label]) => <a key={id} href={`${BASE}${id}/`} aria-current={active===id?'page':undefined} onClick={event=>select(event,id)}>{label}</a>)}
     </nav></header>
     <div className={`module-frame ${active === 'futures' ? 'futures-module' : ''}`}>
       <ModuleErrorBoundary key={active}><Suspense fallback={<p className="module-loading" role="status">加载看板…</p>}>

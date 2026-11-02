@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 import json
 import math
 import os
@@ -107,7 +107,10 @@ def create_app(store=None):
     app = FastAPI(title='期货量价工作台', version='0.1.0')
     app.state.store = store
     radar_lock = Lock()
+    observe_preview = os.environ.get('DASHBOARD_OBSERVE_PREVIEW') == '1'
     def source_version(path):
+        if path == '/api/observation/context':
+            return fingerprint([p for p in store.runtime.parent.glob('observation-*.json') if p.is_file()])
         files = list((store.root.parent/'futuresfundamentals').glob('*.parquet')) if path == '/api/inventory' else store._files()
         if not files:
             files = list((store.runtime/'snapshots').glob('*.json'))
@@ -117,7 +120,7 @@ def create_app(store=None):
                       for p in (store.runtime/name).rglob('*') if p.is_file()]
         if path in ('/api/dashboard','/api/basis-reference'):
             files += list((store.root.parent/'cfuturesdescription').glob('*.parquet'))
-        if path == '/api/dashboard':
+        if path in ('/api/dashboard','/api/observation'):
             files += list((store.root.parent/'cfuturescontractmapping').glob('*.parquet'))
         return [date.today().isoformat(), fingerprint(files)]
     code_version = sha256(b''.join(p.read_bytes() for p in sorted(Path(__file__).parent.glob('*.py')))).hexdigest()
@@ -125,7 +128,7 @@ def create_app(store=None):
         concurrency=int(os.environ.get('FUTURES_HTTP_CONCURRENCY', '1')),
         paths=['/api/'+name for name in ('products','contracts','dashboard','spread-history',
             'seasonal-position','contract-position','contract-history','basis-reference','inventory','radar','position-peaks',
-            'fundamentals/analysis','fundamentals/review','fundamentals/candidates','data/futures_daily/rows')])
+            'fundamentals/analysis','fundamentals/review','fundamentals/candidates','data/futures_daily/rows')] + (['/api/observation','/api/observation/context'] if observe_preview else []))
     public_hosts = [h.strip().lower() for h in os.environ.get('DASHBOARD_ALLOWED_HOSTS', '').split(',') if h.strip()]
     if any(any(c in h for c in '*:/') for h in public_hosts):
         raise ValueError('DASHBOARD_ALLOWED_HOSTS must contain explicit hostnames, without scheme, port or wildcard')
@@ -435,6 +438,74 @@ def create_app(store=None):
         return clean({'meta':snapshot['meta'],'contracts':sorted({r['symbol'] for r in snapshot['rows']}),
             **analytics.contract_position(snapshot['rows'],symbol)})
 
+    if observe_preview:
+        @app.get('/api/observation/context')
+        def observation_context(view: str = Query('allocation',pattern='^(allocation|cycle|flow|compare)$'),
+                                index: str = Query('000300.SH',pattern=r'^(000001\.SH|000016\.SH|000300\.SH|000905\.SH|000852\.SH|000985\.CSI|399006\.SZ|000688\.SH)$'), end: Optional[date] = None):
+            cutoff=(end or date.today()).isoformat()
+            if view=='compare':
+                path=store.runtime.parent/'observation-comparison-preview.json'
+                if not path.is_file():
+                    return {'series':[],'preview':True,'missing':'股债对照数据尚未准备'}
+                source=json.loads(path.read_bytes())
+                return clean(dict(source,series=[p for p in source['series'] if p['trade_date']<=cutoff],preview=True))
+            if view=='flow':
+                path=store.runtime.parent/'observation-etf-flows.json'
+                holders=store.runtime.parent/'observation-etf-holders.json'
+                if not path.is_file() or not holders.is_file():
+                    return {'series':[],'preview':True,'missing':'ETF样本数据尚未准备'}
+                source=json.loads(path.read_bytes());ownership=json.loads(holders.read_bytes())
+                if 'series' in source:
+                    return clean(dict(source,series=[p for p in source['series'] if p['trade_date']<=cutoff]))
+                return clean(dict(**analytics.etf_flows(source['funds'],ownership['funds'],cutoff,source.get('trading_days')),meta=source['meta']))
+            path=store.runtime.parent/'observation-context.json'
+            if not path.is_file():
+                return {'series':[],'cycles':[],'preview':True,'missing':'预览数据尚未准备'}
+            source=json.loads(path.read_bytes())
+            if view=='cycle':
+                series=[dict(trade_date=p['trade_date'],close=analytics._number(p.get('close'))) for p in source['indices'].get(index,[]) if p['trade_date']<=cutoff]
+                cycles=analytics.index_cycles(series)
+                current=None
+                if cycles:
+                    phase=cycles[-1];points=phase['points'];latest=points[-1]
+                    high=max(points,key=lambda p:p['value']);low=min(points,key=lambda p:p['value'])
+                    current=dict(as_of=latest['trade_date'],direction=phase['direction'],change_from_start=latest['value'],
+                                 drawdown=(1+latest['value'])/(1+high['value'])-1,peak_date=high['trade_date'],
+                                 rebound=(1+latest['value'])/(1+low['value'])-1,low_date=low['trade_date'])
+                return clean(dict(series=series,cycles=cycles,current=current,index=index,meta=source['meta'],preview=True))
+            funds=source['funds']
+            by_fund=[{p['trade_date']:analytics._number(p.get('net_assets')) for p in f['points'] if (not f.get('listed_date') or p['trade_date']>=f['listed_date']) and (not f.get('delisted_date') or p['trade_date']<=f['delisted_date'])} for f in funds]
+            closes={p['trade_date']:analytics._number(p.get('close')) for p in source['indices'].get('000300.SH',[])}
+            series=[]
+            for p in source['valuation']:
+                day=p['trade_date']
+                if day>cutoff:continue
+                values=[f.get(day) for f in by_fund]
+                total=sum(values) if len(values)==4 and all(v is not None and v>=0 for v in values) else None
+                cap=analytics._number(p.get('float_market_cap'))
+                series.append(dict(trade_date=day,net_assets=total,float_market_cap=cap,index_close=closes.get(day),
+                                   ratio=total/cap if total is not None and cap is not None and cap>0 else None))
+            return clean(dict(series=series,funds=[dict(code=f['code'],name=f['name']) for f in funds],meta=source['meta'],preview=True))
+
+        @app.get('/api/observation')
+        def observation(product: str = Query('IM', pattern='^(IF|IH|IC|IM)$'),
+                        bond: str = Query('T', pattern='^(T|TF|TS|TL)$'), end: Optional[date] = None):
+            cutoff = (end or date.today()).isoformat()
+            mapping = store.root.parent/'cfuturescontractmapping/part.parquet'
+            files = store._files(None,cutoff)
+            if not mapping.is_file() or not files:
+                return {'product':product,'bond':bond,'series':[], 'as_of':None,'preview':True,'missing':'日线或主力映射尚未接入'}
+            segments = store._query([mapping], '''SELECT product,symbol,start_date::VARCHAR start_date,end_date::VARCHAR end_date
+                FROM read_parquet(?) WHERE product IN (?, ?) AND start_date<=?::DATE''', [product,bond,cutoff])
+            rows = store._query(files, '''SELECT upper(symbol) symbol,trade_date::VARCHAR trade_date,close
+                FROM read_parquet(?, union_by_name=true) WHERE regexp_full_match(symbol,'[A-Z]+[0-9]{4}')
+                AND right(symbol,4) NOT IN ('8888','9998','9999') AND regexp_extract(symbol,'^([A-Z]+)',1) IN (?,?)
+                AND trade_date<=?::DATE ORDER BY trade_date,symbol''', [product,bond,cutoff])
+            series = analytics.stock_bond_observation(rows,segments,product,bond)
+            return clean({'product':product,'bond':bond,'series':series,'as_of':series[-1]['trade_date'] if series else None,
+                          'bond_history_start':next((p['trade_date'] for p in series if p['bond_return20'] is not None),None),
+                          'preview':True,'missing':None if {s['product'] for s in segments}=={product,bond} else '主力映射覆盖不足'})
+
     @app.get('/api/basis-reference')
     def basis_reference(product: str, symbol: Optional[str] = None, price_type: str = 'close',
                         start: Optional[date] = None, end: Optional[date] = None, all_contracts: bool = False):
@@ -481,7 +552,7 @@ def create_app(store=None):
             return clean(dict(result,status='index_close_basis',product=product,symbol=symbol,
                 contract_terms=terms,
                 contracts=symbols if all_contracts else sorted({r['symbol'] for r in snapshot['rows']}),
-                **({'comparisons':comparisons} if all_contracts else {}),price_type='close',meta=snapshot['meta'],
+                **({'comparisons':comparisons,'contract_positions':{r['symbol']:r.get('position') for r in contracts}} if all_contracts else {}),price_type='close',meta=snapshot['meta'],
                 reference=item,reference_snapshot=review['sha256'],
                 warnings=['基差 = 指数收盘 S − 期货收盘 F；正值为期货贴水，负值为期货升水',
                     '年化基差率 = (S−F)/S × 365/距最后交割日自然天数；日期缺失或到期后不计算，不含资金、分红或成本',

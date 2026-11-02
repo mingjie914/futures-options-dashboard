@@ -8,6 +8,36 @@ import pytest
 ROOT=Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize('enabled,intraday',[(False,False),(True,False),(False,True),(True,True)])
+def test_development_gateway_is_default_closed(tmp_path,monkeypatch,enabled,intraday):
+    import httpx
+    from fastapi.testclient import TestClient
+    monkeypatch.setenv('DASHBOARD_RUNTIME_ROOT',str(tmp_path))
+    monkeypatch.delenv('DASHBOARD_OBSERVE_PREVIEW',raising=False)
+    if enabled:monkeypatch.setenv('DASHBOARD_OBSERVE_PREVIEW','1')
+    monkeypatch.delenv('DASHBOARD_INTRADAY_PREVIEW',raising=False)
+    if intraday:monkeypatch.setenv('DASHBOARD_INTRADAY_PREVIEW','1')
+    gateway=load_script('observe_gateway_test',ROOT/'backend/gateway.py')
+    gateway.dist=tmp_path
+    (tmp_path/'index.html').write_text('preview shell')
+    called=[]
+    def upstream(request):
+        called.append(str(request.url))
+        return httpx.Response(200,json={'preview':True})
+    with TestClient(gateway.app) as client:
+        gateway.app.state.client=httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+        for path in ('/observe','/observe/','/api/futures/v1/observation?product=IM'):
+            assert client.get(path).status_code==(200 if enabled else 404)
+        assert client.get('/observe/unknown').status_code==404
+        for path in ('/intraday','/intraday/'):
+            assert client.get(path).status_code==(200 if intraday else 404)
+        assert client.get('/intraday/unknown').status_code==404
+        assert client.get('/api/realtime/v1/snapshot').status_code==404
+        assert len(called)==int(enabled)
+        for path in ('/futures/','/seats/','/options/'):
+            assert client.get(path).status_code==200
+
+
 def test_gateway_keeps_old_lazy_assets_and_independent_seat_contract(tmp_path,monkeypatch):
     import httpx
     from fastapi.testclient import TestClient

@@ -1,7 +1,7 @@
 import {observedRows} from '../../../frontend/src/charts.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {lineSegments, tooltipRows, seasonalSelection, inventoryHistory, holdingLeaders} from '../src/lineSegments.mjs';
+import {lineSegments, tooltipRows, seasonalSelection, inventoryHistory, holdingLeaders,contractColors} from '../src/lineSegments.mjs';
 
 test('observed ranges trim only empty edges, keeping zero, interior gaps and original dates',()=>{
   const rows=[null,0,null,3,null].map((value,i)=>({date:i,value}));
@@ -65,6 +65,7 @@ test('tooltip resolves split series by original line and data index, not reporte
 test('secondary highlight stays after the OI leader, with stable ties and no fabricated fallback',()=>{
   const rows=[['IH2611',20666],['IH2612',75788],['IH2703',20035],['IH2706',3712]].map(([symbol,position])=>({symbol,position}));
   assert.deepEqual(holdingLeaders(rows),{activeContract:'IH2612',secondaryContract:'IH2703'});
+  assert.deepEqual(contractColors(rows),{IH2612:'#4e7fb9',IH2703:'#a48b59',IH2611:'#568f84',IH2706:'#8c7b9f'});
   assert.deepEqual(holdingLeaders(rows.slice(0,2)),{activeContract:'IH2612',secondaryContract:''});
   assert.deepEqual(holdingLeaders([{symbol:'IH2703',position:10},{symbol:'IH2612',position:10}]),{activeContract:'IH2612',secondaryContract:'IH2703'});
   assert.deepEqual(holdingLeaders([{symbol:'IH2612',position:null},{symbol:'IH2703',position:0}]),{activeContract:'',secondaryContract:''});

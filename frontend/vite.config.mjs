@@ -2,6 +2,10 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
+  define: {
+    'import.meta.env.OBSERVE_PREVIEW': JSON.stringify(process.env.DASHBOARD_OBSERVE_PREVIEW === '1'),
+    'import.meta.env.INTRADAY_PREVIEW': JSON.stringify(process.env.DASHBOARD_INTRADAY_PREVIEW === '1'),
+  },
   envPrefix: ["VITE_", "NEXT_PUBLIC_"],
   build: {
     outDir: "dist",

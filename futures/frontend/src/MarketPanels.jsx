@@ -1,5 +1,6 @@
 import {Metric,usePreference,observedRows, useResource,RefreshButton,useChart,ChartFrame} from '../../../frontend/src/charts.js';
 import {useMemo,useRef,useState} from 'react';
+import {contractColors} from './lineSegments.mjs';
 const fmt=v=>v==null?'—':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:2});
 const weak=(p,k)=>p?.['near_'+k]==null||p?.['far_'+k]==null?null:Math.min(p['near_'+k],p['far_'+k]);
 export const passesScan=(o,minHistory=0,minVolume=0)=>(minHistory<=0||(o.latest?.history_n??-1)>=minHistory)&&(minVolume<=0||(weak(o.latest,'volume')??-1)>=minVolume);
@@ -16,6 +17,8 @@ export function BasisPanel({product,end,priceType,revision,Chart,onProduct,contr
  const indexProducts=['IM','IF','IC','IH'],supported=indexProducts.includes(product);
  const {data,error,busy}=useResource(supported?'/api/basis-reference?'+new URLSearchParams({product,price_type:priceType,all_contracts:true,...(end?{end}:{})}):null,revision);
  const zoomGroup=useMemo(()=>new Set(),[data]);
+ const colors=useMemo(()=>({...contractColors((data?.contracts||[]).map(symbol=>({symbol,position:data.contract_positions?.[symbol]}))),[data?.reference?.name||'指数']:'#505c6b'}),[data]);
+ const contracts=Object.keys(colors).filter(s=>data?.contracts?.includes(s));
  const chosen=data?.comparisons?.[symbol]?symbol:data?.symbol,selected=data?.comparisons?.[chosen]||data;
  const last=selected?.latest,isIndex=data?.status==='index_close_basis',unit=isIndex?'点':'元/吨',label=isIndex?'基差':'周频参考价差';
  const chartLabel=isIndex?'股指基差':label;
@@ -31,12 +34,12 @@ export function BasisPanel({product,end,priceType,revision,Chart,onProduct,contr
  return <><div className="filters page-filters">{controls?.(contract,data?.meta?.as_of,busy)}</div>
  {!supported||data?.status==='unavailable'?<section className="panel" aria-busy={busy}><p className="sub">{supported?'所选品种暂无基差数据':['T','TF','TS','TL'].includes(product)?'国债基差暂未接入':'商品基差暂未接入'}</p><div className="scan-controls">{indexProducts.map(p=><button key={p} onClick={()=>onProduct(p)}>{p}</button>)}</div></section>:error?<><p role="alert">{error}</p>{symbol&&<button onClick={()=>setSymbol('')}>重选活跃合约</button>}</>:!data?<p role="status">读取基差…</p>:<>
  <section className="panel" aria-busy={busy}>
- <div className="stats-heading"><h2>{chartLabel} / {unit}</h2><span>{last?.trade_date||'无有效配对'} · {selected.matched} 个观测{selected.unmatched?' · '+selected.unmatched+' 个未配对':''}{data.meta.stale?' · 缓存降级':''}{data.reference.source?.includes('测试')?' · 测试样本':''}</span></div>
+ <div className="stats-heading"><h2>{chartLabel}{!isIndex&&' / '+unit}</h2><span>{last?.trade_date||'无有效配对'} · {selected.matched} 个观测{selected.unmatched?' · '+selected.unmatched+' 个未配对':''}{data.meta.stale?' · 缓存降级':''}{data.reference.source?.includes('测试')?' · 测试样本':''}</span></div>
  <div className="metrics"><Metric label={label} value={fmt(last?.reference_spread)} hint="现货 − 期货"/><Metric label={isIndex?'指数':'参考价'} value={fmt(last?.reference_price)}/><Metric label="期货价" value={fmt(last?.futures_price)}/>{isIndex&&<Metric label="年化基差率" value={last?.annualized_basis_ratio==null?'—':fmt(last.annualized_basis_ratio*100)+'%'} hint="基差 ÷ 现货 × 365 ÷ 距交割日天数"/>}</div>
- {rows.length?<Chart zoomGroup={zoomGroup} rows={rows} lines={data.contracts.map(s=>[s,s])} focus={chosen}/>:<p className="empty">暂无配对数据</p>}
+ {rows.length?<Chart zoomGroup={zoomGroup} rows={rows} lines={contracts.map(s=>[s,s])} colors={colors} focus={chosen}/>:<p className="empty">暂无配对数据</p>}
  </section>
- {isIndex&&!!rows.length&&<section className="panel" aria-busy={busy}><h2>年化基差率 / %</h2><Chart zoomGroup={zoomGroup} rows={rows} lines={data.contracts.map(s=>[s+'_annual',s])} percent focus={chosen}/></section>}
- {!!data.series.length&&<section className="panel basis-prices" aria-busy={busy}><h2>{isIndex?'期现价格':'价格对比'} / {unit}</h2><Chart zoomGroup={zoomGroup} rows={rows} lines={[["reference_price",data.reference.name],[chosen+'_price',chosen]]}/></section>}
+ {isIndex&&!!rows.length&&<section className="panel" aria-busy={busy}><h2>年化基差率 / %</h2><Chart zoomGroup={zoomGroup} rows={rows} lines={contracts.map(s=>[s+'_annual',s])} colors={colors} percent focus={chosen}/></section>}
+ {!!data.series.length&&<section className="panel basis-prices" aria-busy={busy}><h2>{isIndex?'期现价格':'价格对比 / '+unit}</h2><Chart zoomGroup={zoomGroup} rows={rows} lines={[["reference_price",data.reference.name],...contracts.map(s=>[s+'_price',s])]} colors={colors} focus={chosen}/></section>}
  </>}
  </>;
 }

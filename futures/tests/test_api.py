@@ -9,6 +9,24 @@ from backend.api import create_app
 from backend.data import DailyStore
 
 
+def test_observation_default_closed_and_explicit_preview(setup,monkeypatch):
+    _,store,_=setup
+    monkeypatch.delenv('DASHBOARD_OBSERVE_PREVIEW',raising=False)
+    closed=TestClient(create_app(store))
+    assert closed.get('/api/observation').status_code==404
+    assert '/api/observation' not in closed.get('/openapi.json').json()['paths']
+    monkeypatch.setenv('DASHBOARD_OBSERVE_PREVIEW','1')
+    opened=TestClient(create_app(store))
+    response=opened.get('/api/observation?product=IM&end=2026-09-02')
+    assert response.status_code==200 and response.json()['series']==[]
+    assert response.json()['missing']=='日线或主力映射尚未接入'
+    assert opened.get('/api/observation?product=RB').status_code==422
+    assert opened.get('/api/observation?bond=RB').status_code==422
+    for bond in ['T','TF','TS','TL']:
+        assert opened.get('/api/observation?bond='+bond).json()['bond']==bond
+    assert not (store.runtime/'snapshots').exists()
+
+
 def test_isolated_fundamental_review_bounds_and_evidence(setup, monkeypatch):
     import hashlib
     import json
@@ -171,6 +189,8 @@ def test_index_basis_real_local_snapshot_and_settle_rejection(setup,monkeypatch)
     assert overlay['contracts']==['IM2612','IM2703']
     assert overlay['symbol'] in overlay['contracts']
     assert set(overlay['comparisons'])==set(overlay['contracts'])
+    expected_positions={r['symbol']:r['position'] for r in store.read('IM',None,'2026-09-02')['rows'] if r['trade_date']=='2026-09-02'}
+    assert overlay['contract_positions']==expected_positions
     assert overlay['comparisons']['IM2703']['latest']['reference_spread']==101
     assert overlay['comparisons']['IM2612']['latest']['reference_spread']==1
     assert overlay['comparisons']['IM2703']['latest']['annualized_basis_ratio'] is None
@@ -1410,3 +1430,81 @@ def test_rollover_mapping_coverage_dates_and_cache_invalidation(setup):
         con.execute("COPY (SELECT 'RB' product,'RB2610' symbol,DATE '2026-09-01' start_date,DATE '2026-09-01' end_date) TO ? (FORMAT PARQUET)",[str(folder/'part.parquet')])
     stale=client.get(url,headers={'If-None-Match':response.headers['etag']})
     assert stale.status_code==200 and stale.json()['rollover_progress']['current'] is None
+
+
+def test_observation_context_is_preview_only_and_never_sums_incomplete_funds(setup,monkeypatch):
+    import json
+    from backend.api import create_app
+    from fastapi.testclient import TestClient
+    _,store,_=setup
+    source={'meta':{'source':'fixture'},'funds':[{'code':str(i),'name':str(i),'points':[{'trade_date':'2026-09-01','net_assets':10},{'trade_date':'2026-09-02','net_assets':None if i==0 else 10}]} for i in range(4)],'valuation':[{'trade_date':d,'float_market_cap':100} for d in ['2026-09-01','2026-09-02']],'indices':{'000300.SH':[{'trade_date':'2026-09-01','close':100}]}}
+    (store.runtime.parent/'observation-context.json').write_text(json.dumps(source))
+    assert TestClient(create_app(store)).get('/api/observation/context').status_code==404
+    monkeypatch.setenv('DASHBOARD_OBSERVE_PREVIEW','1')
+    client=TestClient(create_app(store))
+    result=client.get('/api/observation/context').json()
+    assert result['series'][0]['ratio']==.4
+    assert result['series'][1]['ratio'] is None
+    assert result['series'][1]['net_assets'] is None
+    assert len(client.get('/api/observation/context?end=2026-09-01').json()['series'])==1
+    assert client.get('/api/observation/context?view=cycle').json()['cycles']==[]
+
+    source['indices']['000300.SH']=[{'trade_date':'2026-09-01','close':'100'},{'trade_date':'2026-09-02','close':'120'},{'trade_date':'2026-09-03','close':'110'}]
+    (store.runtime.parent/'observation-context.json').write_text(json.dumps(source))
+    current=client.get('/api/observation/context?view=cycle').json()['current']
+    assert current['direction']==1 and current['peak_date']=='2026-09-02'
+    assert abs(current['drawdown']-(110/120-1))<1e-12
+    prefix=client.get('/api/observation/context?view=cycle&end=2026-09-02').json()['current']
+    assert prefix['drawdown']==0 and prefix['as_of']=='2026-09-02'
+    for code in ('399006.SZ','000688.SH'):
+        source['indices'][code]=source['indices']['000300.SH']
+    (store.runtime.parent/'observation-context.json').write_text(json.dumps(source))
+    for code in ('399006.SZ','000688.SH'):
+        response=client.get('/api/observation/context',params={'view':'cycle','index':code,'end':'2026-09-02'})
+        assert response.status_code==200 and response.json()['index']==code
+        assert response.json()['current']['drawdown']==0 and len(response.json()['series'])==2
+
+
+def test_observation_comparison_stays_local_and_clips_by_date(setup,monkeypatch):
+    import json
+    from backend.api import create_app
+    from fastapi.testclient import TestClient
+    _,store,_=setup
+    url='/api/observation/context?view=compare'
+    assert TestClient(create_app(store)).get(url).status_code==404
+    monkeypatch.setenv('DASHBOARD_OBSERVE_PREVIEW','1')
+    client=TestClient(create_app(store))
+    assert client.get(url).json()['series']==[]
+    source=dict(assets=[dict(key='stock',name='沪深300全收益')],series=[dict(trade_date='2026-09-01',stock=100),dict(trade_date='2026-09-02',stock=None)],meta=dict(source='fixture'))
+    path=store.runtime.parent/'observation-comparison-preview.json'
+    path.write_text(json.dumps(source),encoding='utf8')
+    result=client.get(url+'&end=2026-09-01')
+    assert result.json()['series']==source['series'][:1]
+    assert result.json()['assets']==source['assets']
+    assert client.get(url+'&end=2026-09-01',headers={'If-None-Match':result.headers['etag']}).status_code==304
+    assert client.get(url).json()['series'][-1]['stock'] is None
+
+
+def test_etf_flow_context_stays_preview_only_and_revalidates_holder_changes(setup,monkeypatch):
+    import json
+    from backend.api import create_app
+    from fastapi.testclient import TestClient
+    _,store,_=setup
+    url='/api/observation/context?view=flow'
+    assert TestClient(create_app(store)).get(url).status_code==404
+    monkeypatch.setenv('DASHBOARD_OBSERVE_PREVIEW','1')
+    client=TestClient(create_app(store))
+    assert client.get(url).json()['series']==[]
+    (store.runtime.parent/'observation-etf-flows.json').write_text(json.dumps(dict(meta={},funds=[dict(code='510300.SH',name='ETF',points=[dict(trade_date='2026-09-07',total_shares='100',unit_nav='2'),dict(trade_date='2026-09-08',total_shares='110',unit_nav='3')])])),encoding='utf8')
+    holders=store.runtime.parent/'observation-etf-holders.json'
+    holders.write_text(json.dumps(dict(funds=[dict(code='510300',institution=.6,individual=.4)])),encoding='utf8')
+    response=client.get(url)
+    assert response.json()['series'][-1]['institution']==30/1e8
+    assert client.get(url,headers={'If-None-Match':response.headers['etag']}).status_code==304
+    holders.write_text(json.dumps(dict(funds=[dict(code='510300',institution=.4,individual=.6)])),encoding='utf8')
+    updated=client.get(url,headers={'If-None-Match':response.headers['etag']})
+    assert updated.status_code==200 and updated.json()['funds'][0]['group']=='individual'
+    assert len(client.get(url+'&end=2026-09-07').json()['series'])==1
+    (store.runtime.parent/'observation-etf-flows.json').write_text(json.dumps(updated.json()),encoding='utf8')
+    compiled=client.get(url+'&end=2026-09-07').json()
+    assert compiled['series']==updated.json()['series'][:1] and compiled['funds']==updated.json()['funds']

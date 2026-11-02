@@ -15,6 +15,8 @@ TARGETS={
     'futures':os.environ.get('DASHBOARD_FUTURES_API','http://127.0.0.1:8795').rstrip('/'),
     'options':os.environ.get('DASHBOARD_OPTIONS_API','http://127.0.0.1:8794').rstrip('/'),
 }
+OBSERVE_PREVIEW=os.environ.get('DASHBOARD_OBSERVE_PREVIEW')=='1'
+INTRADAY_PREVIEW=os.environ.get('DASHBOARD_INTRADAY_PREVIEW')=='1'
 
 
 @asynccontextmanager
@@ -43,6 +45,8 @@ def health():return {'status':'ok','service':'unified-local-entry'}
 @app.api_route('/api/{module}/v1/{path:path}',methods=['GET','POST','PUT','PATCH','DELETE'])
 async def proxy(module:str,path:str,request:Request):
     if module not in TARGETS:raise HTTPException(404,'未知模块')
+    if module=='futures' and path.split('/')[0]=='observation' and not OBSERVE_PREVIEW:
+        raise HTTPException(404,'文件不存在')
     if os.environ.get('DASHBOARD_PUBLIC_READONLY')=='1':
         if module=='futures' and path=='watchlists' and request.method=='GET':
             return JSONResponse({'items':[],'read_only':True})
@@ -89,6 +93,6 @@ def font_license():return FileResponse(dist/'inter-OFL.txt')
 
 @app.get('/{path:path}')
 def index(path:str):
-    if path and path.rstrip('/') not in TARGETS:raise HTTPException(404,'文件不存在')
+    if path and path.rstrip('/') not in TARGETS and not (OBSERVE_PREVIEW and path.rstrip('/')=='observe') and not (INTRADAY_PREVIEW and path.rstrip('/')=='intraday'):raise HTTPException(404,'文件不存在')
     if not (dist/'index.html').exists():raise HTTPException(503,'请先完成前端构建')
     return FileResponse(dist/'index.html',headers={'Cache-Control':'no-cache'})

@@ -8,10 +8,59 @@ Contract dates inferred here are month anchors, never authoritative expiry dates
 import math
 import re
 import statistics
+from bisect import bisect_left, bisect_right, insort
 from datetime import date, datetime
 
 FORMULA_VERSION = 'daily-v1'
 MIN_HISTORY = 20
+
+
+def stock_bond_observation(rows, mappings, stock, bond='T'):
+    """Preview only: current-vintage mapping and same-contract close returns; no forward labels."""
+    prices = {(r['trade_date'], r['symbol']): r['close'] for r in rows}
+    if len(prices) != len(rows):
+        raise ValueError('股债日线逻辑键重复')
+    days = sorted({r['trade_date'] for r in rows})
+    series, returns, history = [], {stock: [], bond: []}, []
+    segments = {p: sorted((m for m in mappings if m['product']==p), key=lambda m:m['start_date']) for p in returns}
+    for group in segments.values():
+        if any(a['end_date'] >= b['start_date'] for a,b in zip(group,group[1:])):
+            raise ValueError('主力映射区间重叠')
+    cursor = {p: 0 for p in returns}
+    valid = lambda v: isinstance(v,(int,float)) and math.isfinite(v) and v>0
+    for i, day in enumerate(days):
+        point = {'trade_date': day}
+        for product, prefix in [(stock,'stock'),(bond,'bond')]:
+            group = segments[product]
+            while cursor[product] < len(group) and group[cursor[product]]['end_date'] < day:
+                cursor[product] += 1
+            segment = group[cursor[product]] if cursor[product] < len(group) else None
+            symbol = segment['symbol'] if segment and segment['start_date'] <= day else None
+            close = prices.get((day,symbol))
+            previous = prices.get((days[i-1],symbol)) if i else None
+            change = close / previous - 1 if valid(close) and valid(previous) else None
+            returns[product].append(change)
+            point.update({prefix+'_symbol':symbol,prefix+'_close':close if valid(close) else None})
+        stocks, bonds = returns[stock][-20:], returns[bond][-20:]
+        complete = len(bonds)==20 and all(r is not None for r in bonds)
+        growth = math.prod(1+r for r in bonds)-1 if complete else None
+        correlation = None
+        if complete and all(r is not None for r in stocks) and len(set(stocks))>1 and len(set(bonds))>1:
+            correlation = -statistics.correlation(stocks,bonds)
+        thresholds = {'bond_p10': None, 'bond_p90': None}
+        percentile = None
+        if len(history)>=MIN_HISTORY:
+            for key, q in [('bond_p10', .1), ('bond_p90', .9)]:
+                index = (len(history)-1)*q
+                lower = int(index)
+                thresholds[key] = history[lower]+(history[lower+1]-history[lower])*(index-lower)
+            if growth is not None:
+                percentile = 50*(bisect_left(history,growth)+bisect_right(history,growth))/len(history)
+        point.update(negative_correlation=correlation,bond_return20=growth,bond_percentile=percentile,**thresholds)
+        if growth is not None:
+            insort(history,growth)
+        series.append(point)
+    return series
 
 
 def fundamental_statistics(points, as_of, frequency):
@@ -976,3 +1025,84 @@ def quote_spread(near_quote, far_quote, now, max_age_seconds=10, max_skew_second
                 near_received_at=near_quote.get('received_at'), far_received_at=far_quote.get('received_at'),
                 near_trade_date=near_quote.get('trade_date'), far_trade_date=far_quote.get('trade_date'),
                 formula_version=FORMULA_VERSION)
+
+
+def etf_flows(funds, holders, cutoff, trading_days=None):
+    """Preview: latest holder snapshot fixes groups; raw share changes estimate flows."""
+    ownership={f['code']:f for f in holders}
+    calendar=sorted(set(trading_days if trading_days is not None else (p['trade_date'] for f in funds for p in f['points'] if date.fromisoformat(p['trade_date']).weekday()<5)))
+    positions={day:i for i,day in enumerate(calendar)}
+    groups=('individual','institution','unclassified')
+    members=[];daily={}
+    for fund in funds:
+        holder=ownership.get(fund['code'].split('.')[0],{})
+        institution=_number(holder.get('institution'));individual=_number(holder.get('individual'))
+        valid=all(v is not None and 0<=v<=1 for v in (institution,individual))
+        group=('institution' if institution>individual else 'individual') if valid and institution!=individual and institution+individual<=1.001 else 'unclassified'
+        members.append(dict(code=fund['code'],name=fund['name'],group=group,
+                            institution=institution,individual=individual,report_date=holder.get('report_date')))
+        previous=None;previous_day=None
+        for p in fund['points']:
+            day=p['trade_date']
+            if day>cutoff:break
+            if day not in positions:continue
+            if fund.get('listed_date') and day<fund['listed_date']:continue
+            if fund.get('delisted_date') and day>fund['delisted_date']:continue
+            values=daily.setdefault(day,{key:[0.,0,0] for key in groups})[group]
+            shares=_number(p.get('total_shares'));nav=_number(p.get('unit_nav'))
+            valid=shares is not None and shares>=0 and nav is not None and nav>0
+            adjacent=previous_day is not None and positions[day]==positions[previous_day]+1
+            change=(shares-previous)*nav if valid and previous is not None and adjacent else None
+            values[1]+=int(valid)
+            if change is not None:values[0]+=change;values[2]+=1
+            previous=shares if shares is not None and shares>=0 else None
+            previous_day=day
+    series=[];cumulative=dict.fromkeys(groups,0.)
+    for day,observations in sorted(daily.items()):
+        row=dict(trade_date=day)
+        for group,(change,valid,observed) in observations.items():
+            cumulative[group]+=change
+            row[group]=cumulative[group]/1e8 if valid else None
+            row[group+'_daily']=change/1e8 if observed else None
+            row[group+'_observed']=observed
+        series.append(row)
+    return dict(series=series,funds=members,preview=True)
+
+
+def index_cycles(points, threshold=.2):
+    """Retrospective directional-change cycles; confirmation dates are not turning dates."""
+    rows=[p for p in points if _number(p.get('close')) is not None and p['close']>0]
+    if not rows:
+        return []
+    if any(a['trade_date']>=b['trade_date'] for a,b in zip(rows,rows[1:])):
+        raise ValueError('指数日期须递增且唯一')
+    low=high=anchor=0
+    direction=0
+    cycles=[]
+    def segment(end, confirmation, ongoing=False):
+        start=rows[anchor]
+        return dict(direction=direction,start=start['trade_date'],end=rows[end]['trade_date'],
+                    confirmed_on=confirmation,ongoing=ongoing,
+                    points=[dict(trade_date=p['trade_date'],value=p['close']/start['close']-1) for p in rows[anchor:end+1]])
+    for i,p in enumerate(rows):
+        value=p['close']
+        if not direction:
+            if value<rows[low]['close']: low=i
+            if value>rows[high]['close']: high=i
+            if value>=rows[low]['close']*(1+threshold):
+                anchor=low;high=i;direction=1
+            elif value<=rows[high]['close']*(1-threshold):
+                anchor=high;low=i;direction=-1
+        elif direction==1:
+            if value>rows[high]['close']: high=i
+            elif value<=rows[high]['close']*(1-threshold):
+                cycles.append(segment(high,p['trade_date']))
+                anchor=high;low=i;direction=-1
+        else:
+            if value<rows[low]['close']: low=i
+            elif value>=rows[low]['close']*(1+threshold):
+                cycles.append(segment(low,p['trade_date']))
+                anchor=low;high=i;direction=1
+    if direction:
+        cycles.append(segment(len(rows)-1,None,True))
+    return cycles

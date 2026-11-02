@@ -1,3 +1,10 @@
+export const contractPalette=['#4e7fb9','#a48b59','#568f84','#8c7b9f','#b36c73'];
+
+export function contractColors(contracts) {
+  const {activeContract,secondaryContract}=holdingLeaders(contracts);
+  return Object.fromEntries([...new Set([activeContract,secondaryContract,...contracts.map(r=>r.symbol).sort()].filter(Boolean))].map((symbol,i)=>[symbol,contractPalette[i%contractPalette.length]]));
+}
+
 export function holdingLeaders(contracts) {
   const largest = after => contracts.reduce((best,r) => r.symbol>after && Number.isFinite(r.position) && r.position>0 && (!best || r.position>best.position || r.position===best.position && r.symbol<best.symbol) ? r : best, null)?.symbol || '';
   const activeContract=largest('');

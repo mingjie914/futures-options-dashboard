@@ -484,3 +484,77 @@ def test_rollover_reuses_existing_pair_spread(monkeypatch):
     assert analytics.rollover_series(rows,'IM2612','IM2703',result=result)['series'][0]['spread']==10
     terms={'contracts':[dict(symbol='IM2612',last_trade_date='2026-12-18',status='rds_recorded')]}
     assert analytics.rollover_progress(rows,'IM2612',None,terms,'2026-10-29',result)['rounds'][0]['series'][0]['spread']==10
+def test_observation_same_contract_rolls_gaps_and_no_future_percentile():
+    from datetime import date,timedelta
+    from backend.analytics import stock_bond_observation
+    days=[(date(2025,1,1)+timedelta(days=i)).isoformat() for i in range(300)]
+    rows=[]
+    for i,day in enumerate(days):
+        for symbol,price in [('IM2506',100+i*i/1000),('IM2512',200+2*i*i/1000),('T2506',100+i*i/1000)]:
+            rows.append({'trade_date':day,'symbol':symbol,'close':price})
+    mapping=[{'product':'IM','symbol':'IM2506','start_date':days[0],'end_date':days[149]},
+             {'product':'IM','symbol':'IM2512','start_date':days[150],'end_date':days[-1]},
+             {'product':'T','symbol':'T2506','start_date':days[0],'end_date':days[-1]}]
+    result=stock_bond_observation(rows,mapping,'IM')
+    assert result[19]['negative_correlation'] is None
+    assert abs(result[150]['negative_correlation']+1)<1e-10  # No fake return from the price-level roll gap.
+    assert abs(result[50]['bond_return20']-((100+50*50/1000)/(100+30*30/1000)-1))<1e-10
+    assert result[39]['bond_p90'] is None and result[40]['bond_p90'] is not None
+    prior=sorted(p['bond_return20'] for p in result[20:299])
+    assert abs(result[299]['bond_p90']-(prior[250]*.8+prior[251]*.2))<1e-10  # All 279 earlier observations, not the last 252.
+    assert abs(result[299]['bond_p10']-(prior[27]*.2+prior[28]*.8))<1e-10
+    assert result[39]['bond_percentile'] is None
+    assert result[299]['bond_percentile']==50*(sum(v<result[299]['bond_return20'] for v in prior)+sum(v<=result[299]['bond_return20'] for v in prior))/len(prior)
+    prefix=stock_bond_observation([r for r in rows if r['trade_date']<=days[280]],mapping,'IM')
+    assert result[:281]==prefix  # Adding future rows cannot revise a historical percentile.
+    broken=stock_bond_observation([r for r in rows if not(r['trade_date']==days[100] and r['symbol']=='T2506')],mapping,'IM')
+    assert broken[100]['negative_correlation'] is None and broken[119]['bond_return20'] is None
+    assert broken[100]['bond_percentile'] is None
+    alternate=[{**r,'symbol':'TF2506','close':300-r['close']} for r in rows if r['symbol']=='T2506']
+    alternate_mapping=mapping+[dict(product='TF',symbol='TF2506',start_date=days[0],end_date=days[-1])]
+    selected=stock_bond_observation(rows+alternate,alternate_mapping,'IM','TF')
+    assert selected[-1]['bond_symbol']=='TF2506' and selected[-1]['bond_return20']<0
+    assert selected[-1]['negative_correlation']>0 and result[-1]['negative_correlation']<0
+    assert selected[-1]['bond_p90']<0<result[-1]['bond_p90']
+    assert [p['stock_close'] for p in selected]==[p['stock_close'] for p in result]
+    flat=stock_bond_observation([{**r,'close':100} for r in rows],mapping,'IM')
+    assert flat[40]['bond_p10']==flat[40]['bond_p90']==0 and flat[40]['bond_percentile']==50
+
+
+def test_retrospective_cycles_keep_confirmation_after_extreme_and_open_tail():
+    from backend.analytics import index_cycles
+    values=[100,80,96,120,90,70,84,100]
+    points=[dict(trade_date=f'2020-01-{i+1:02}',close=v) for i,v in enumerate(values)]
+    cycles=index_cycles(points)
+    assert [(c['direction'],c['start'],c['end']) for c in cycles]==[(-1,'2020-01-01','2020-01-02'),(1,'2020-01-02','2020-01-04'),(-1,'2020-01-04','2020-01-06'),(1,'2020-01-06','2020-01-08')]
+    assert cycles[0]['confirmed_on']=='2020-01-03'
+    assert cycles[1]['confirmed_on']=='2020-01-05'
+    assert cycles[-1]['ongoing'] and cycles[-1]['confirmed_on'] is None
+    assert abs(cycles[1]['points'][-1]['value']-.5)<1e-12
+    assert index_cycles([dict(trade_date='2020-01-01',close=100)])==[]
+
+
+def test_etf_flow_demo_compares_holder_shares_and_preserves_missing_intervals():
+    from backend.analytics import etf_flows
+    days=['2026-09-07','2026-09-08','2026-09-09','2026-09-10','2026-09-11','2026-09-12']
+    points=[dict(trade_date=d,total_shares=s,unit_nav=n) for d,s,n in zip(days,['100','110',None,'120','125','9999'],['2','3','3','4','4','4'])]
+    funds=[dict(code=c+'.SH',name=c,points=points) for c in ['a','b','c']]
+    holders=[dict(code='a',individual=.6,institution=.3),dict(code='b',individual=.3401,institution=.4397,internal=.2202),dict(code='c',individual=.4,institution=.4)]
+    result=etf_flows(funds,holders,'2026-09-30')
+    assert [f['group'] for f in result['funds']]==['individual','institution','unclassified']
+    assert len(result['series'])==5  # Weekend NAV-only observations are not share-flow dates.
+    assert result['series'][0]['individual']==0 and result['series'][0]['individual_daily'] is None
+    assert result['series'][1]['individual']==30/1e8
+    assert result['series'][2]['individual'] is None
+    assert result['series'][3]['individual_daily'] is None  # No bridge across a missing weekday share count.
+    assert result['series'][4]['individual']==50/1e8
+    assert etf_flows(funds,holders,'2026-09-08')['series']==result['series'][:2]
+
+    late=[dict(code='x.SH',name='x',points=[dict(trade_date=d,total_shares=s,unit_nav=2) for d,s in zip(days[:3],[100,105,None])]),
+          dict(code='y.SH',name='y',listed_date=days[1],points=[dict(trade_date=d,total_shares=s,unit_nav=2) for d,s in zip(days[:3],[9999,200,210])])]
+    result=etf_flows(late,[],'2026-09-09')['series']
+    assert [p['unclassified'] for p in result]==[0,10/1e8,30/1e8]
+    assert result[-1]['unclassified_observed']==1  # Sum only observed flows; a late listing is not an early-history gap.
+    missing=dict(code='x.SH',name='x',points=[dict(trade_date=days[0],total_shares=100,unit_nav=1),dict(trade_date=days[2],total_shares=110,unit_nav=1)])
+    assert etf_flows([missing],[],days[2],days[:3])['series'][-1]['unclassified_daily'] is None
+    assert etf_flows([missing],[],days[2],[days[0],days[2]])['series'][-1]['unclassified_daily']==10/1e8  # A known exchange holiday does not break adjacency.

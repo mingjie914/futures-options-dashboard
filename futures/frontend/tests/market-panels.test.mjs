@@ -316,10 +316,11 @@ test('basis overlays current contracts on one date axis and retains missing pric
  const module={exports:{}},charts=[],point=(trade_date,basis,price)=>({trade_date,reference_spread:basis,annualized_basis_ratio:basis/100,reference_price:100,futures_price:price});
  const a={series:[point('2026-09-01',1,99),point('2026-09-02',2,98)],matched:2,latest:point('2026-09-02',2,98)};
  const b={series:[point('2026-09-02',4,96)],matched:1,latest:point('2026-09-02',4,96)};
- const data={...a,contracts:['IM2612','IM2703'],symbol:'IM2612',status:'index_close_basis',meta:{as_of:'2026-09-02'},reference:{name:'中证1000'},comparisons:{IM2612:a,IM2703:b}};
+ const data={...a,contracts:['IM2611','IM2612','IM2703'],contract_positions:{IM2611:10,IM2612:100,IM2703:80},symbol:'IM2612',status:'index_close_basis',meta:{as_of:'2026-09-02'},reference:{name:'中证1000'},comparisons:{IM2611:b,IM2612:a,IM2703:b}};
  new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),usePreference:(_k,v)=>[v,()=>{}],useResource:url=>{assert.match(url,/all_contracts=true/);return {data};}}:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
- renderToStaticMarkup(React.createElement(module.exports.BasisPanel,{product:'IM',Chart:props=>{charts.push(props);return null;}}));
- assert.deepEqual(charts[0].lines,[['IM2612','IM2612'],['IM2703','IM2703']]);
+ const html=renderToStaticMarkup(React.createElement(module.exports.BasisPanel,{product:'IM',Chart:props=>{charts.push(props);return null;}}));
+ assert.match(html,/<h2>股指基差<\/h2>/);assert.match(html,/<h2>期现价格<\/h2>/);
+ assert.deepEqual(charts[0].lines,[['IM2612','IM2612'],['IM2703','IM2703'],['IM2611','IM2611']]);
  assert.equal(charts[0].rows[0].IM2703,undefined);
  assert.equal(charts[0].rows[1].IM2703,4);
  assert.equal(charts[0].focus,'IM2612');
@@ -327,6 +328,169 @@ test('basis overlays current contracts on one date axis and retains missing pric
  assert.equal(charts[1].percent,true);
  assert.equal(charts[1].rows[0].IM2612_annual,.01);
  assert.equal(charts[1].rows[0].IM2703_annual,undefined);
- assert.deepEqual(charts[1].lines,[['IM2612_annual','IM2612'],['IM2703_annual','IM2703']]);
- assert.deepEqual(charts[2].lines,[['reference_price','中证1000'],['IM2612_price','IM2612']]);
+ assert.deepEqual(charts[1].lines,[['IM2612_annual','IM2612'],['IM2703_annual','IM2703'],['IM2611_annual','IM2611']]);
+ assert.deepEqual(charts[2].lines,[['reference_price','中证1000'],['IM2612_price','IM2612'],['IM2703_price','IM2703'],['IM2611_price','IM2611']]);
+ assert.equal(charts[0].colors,charts[1].colors);assert.equal(charts[0].colors,charts[2].colors);
+ assert.equal(charts[2].colors.IM2612,'#4e7fb9');assert.equal(charts[2].colors.IM2703,'#a48b59');assert.equal(charts[2].colors['中证1000'],'#505c6b');
+});
+
+
+test('explicit contract colors stay fixed when the index is first and focus changes',async()=>{
+ const source=await readFile(new URL('../src/App.jsx',import.meta.url),'utf8');
+ const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const module={exports:{}},draws=[],require=createRequire(new URL('../src/App.jsx',import.meta.url));
+ new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/charts.js')?{...sharedRequire('./src/charts.js'),useChart:(_ref,draw)=>draws.push(draw)}:id.endsWith('.jsx')?{}:id.startsWith('react')?sharedRequire(id):require(id));
+ const props={rows:[{trade_date:'2026-10-30',index:100,near:99,far:null}],lines:[['index','中证1000'],['near','IM2612'],['far','IM2703']],colors:{'中证1000':'#505c6b',IM2612:'#4e7fb9',IM2703:'#a48b59'}};
+ for(const focus of ['IM2612','IM2703']){
+  renderToStaticMarkup(React.createElement(module.exports.Chart,{...props,focus}));
+  let option;draws.pop()({setOption:o=>{option=o;}});
+  assert.deepEqual(option.series.map(s=>s.itemStyle.color),['#505c6b','#4e7fb9','#a48b59']);
+  assert.equal(option.series.find(s=>s.name===focus).lineStyle.width,2.8);
+  assert.deepEqual(option.series[2].data,[null]);
+ }
+});
+
+
+test('observation cycle compression retains true returns and allocation uses a separate price axis',async()=>{
+ const source=await readFile(new URL('../../../frontend/src/Observe.jsx',import.meta.url),'utf8');
+ const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const module={exports:{}},draws=[];
+ new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/charts.js')?{...sharedRequire('./src/charts.js'),useChart:(_ref,draw)=>draws.push(draw)}:id==='./preferences.js'?{}:sharedRequire(id));
+ const points=[{trade_date:'2020-01-01',value:0},{trade_date:'2020-01-02',value:4}];
+ renderToStaticMarkup(React.createElement(module.exports.ContextChart,{cycle:true,data:{series:points,cycles:[{start:'2020-01-01',end:'2020-01-02',direction:1,points}]}}));
+ let option;draws.pop()({setOption:o=>{option=o;}});
+ assert.ok(Math.abs(option.series[0].data[1]-Math.log10(5))<1e-12);
+ assert.equal(option.series[0].markPoint.label.formatter,'2020-01\n400%');
+ assert.equal(option.yAxis.min,-1);assert.equal(option.yAxis.max,1);
+ assert.match(option.tooltip.formatter([{seriesIndex:0,value:Math.log10(5),axisValue:'2020-01-02'}]),/400%/);
+ points[1].value=12.44;
+ renderToStaticMarkup(React.createElement(module.exports.ContextChart,{cycle:true,data:{series:points,cycles:[{start:'2020-01-01',end:'2020-01-02',direction:1,points}]}}));
+ draws.pop()({setOption:o=>{option=o;}});
+ assert.ok(option.yAxis.max>=option.series[0].data[1]);
+ assert.equal(option.yAxis.min,-option.yAxis.max);
+ renderToStaticMarkup(React.createElement(module.exports.ContextChart,{data:{series:[{trade_date:'2020-01-01',ratio:.01,index_close:4000,net_assets:1e9,float_market_cap:1e11}]}}));
+ draws.pop()({setOption:o=>{option=o;}});
+ assert.equal(option.series[1].yAxisIndex,1);
+ assert.deepEqual(option.series[1].data,[4000]);
+ assert.deepEqual(option.series.map(s=>s.itemStyle.color),['#a48b59','#4e7fb9']);
+ renderToStaticMarkup(React.createElement(module.exports.ContextChart,{flow:true,data:{funds:[{group:'individual'},{group:'institution'}],series:[{trade_date:'2026-09-07',individual:0,institution:null},{trade_date:'2026-09-08',individual:3,institution:-2}]}}));
+ draws.pop()({setOption:o=>{option=o;}});
+ assert.deepEqual(option.series.map(s=>s.data),[[0,3],[null,-2]]);
+ assert.deepEqual(option.series.map(s=>s.itemStyle.color),['#4e7fb9','#a48b59']);
+ assert.equal(option.series[0].connectNulls,false);
+ assert.match(option.tooltip.formatter([{seriesName:'个人为主',value:3,axisValue:'2026-09-08'}]),/个人为主：3亿元/);
+});
+
+test('ETF funds share one page and chart height, preserving monthly gaps and separate data dates',async()=>{
+ const source=await readFile(new URL('../../../frontend/src/Observe.jsx',import.meta.url),'utf8');
+ const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const module={exports:{}},requests=[],draws=[],originalLocation=globalThis.location;
+ const series=Array.from({length:21},(_,i)=>({trade_date:`2026-10-${String(i+1).padStart(2,'0')}`,individual:i*7,institution:-i*11,individual_daily:2,institution_daily:-3}));
+ const flow={series,funds:[{group:'individual'},{group:'institution'},{group:'unclassified'}],coverage:{included_flow:1406},meta:{currency_assumed:true}};
+ const allocation={series:[{trade_date:'2026-10-21',ratio:.01,index_close:4000},{trade_date:'2026-10-22',ratio:null,index_close:4010}],funds:[]};
+ new Function('module','exports','require',code)(module,module.exports,id=>id==='./charts.js'?{...sharedRequire('./src/charts.js'),usePreference:(_k,v)=>[v,()=>{}],useResource:url=>{requests.push(url);return {data:url.includes('view=allocation')?allocation:flow};},useChart:(_ref,draw)=>draws.push(draw)}:id==='./preferences.js'?{}:sharedRequire(id));
+ try{
+  for(const mode of ['cumulative','recent','allocation']){
+   globalThis.location={search:'?view=funds&fund_view='+mode+'&end=2026-10-30'};requests.length=draws.length=0;
+   const html=renderToStaticMarkup(React.createElement(module.exports.default));
+   assert.equal(requests.length,2);assert.equal(draws.length,3);assert.match(requests[0],/view=flow&end=2026-10-30/);assert.match(requests[1],/view=allocation&end=2026-10-30/);
+   assert.doesNotMatch(html,/资金视角|近20日|未分类|<table/);assert.equal((html.match(/height:380px/g)||[]).length,3);
+   assert.match(html,/规模占比<\/button><strong>1%/);assert.match(html,/2026-10-21/);
+   assert.ok(html.indexOf('头部沪深300ETF规模占比')<html.indexOf('累计净申赎估算'));assert.ok(html.indexOf('累计净申赎估算')<html.indexOf('月度净申赎'));
+    assert.match(html,/人民币假设/);assert.ok(html.includes('个人为主ETF</button><strong>140'));assert.match(html,/末月截至 2026-10-21/);
+    let option;draws[2]({setOption:o=>option=o});
+    assert.deepEqual(option.series.map(s=>s.type),['bar','bar']);assert.deepEqual(option.series.map(s=>s.data),[[42],[-63]]);
+    assert.deepEqual(option.xAxis.data,['2026-10']);assert.equal(option.xAxis.boundaryGap,true);
+    assert.match(option.tooltip.formatter([{dataIndex:0,axisValue:'2026-10'}]),/2026-10 · 截至 2026-10-21\n个人为主：42亿元\n机构为主：-63亿元/);
+  }
+  const allocationRows=allocation.series;allocation.series=[];draws.length=0;
+  const partial=renderToStaticMarkup(React.createElement(module.exports.default));
+  assert.equal(draws.length,2);assert.match(partial,/ETF累计净申赎估算/);assert.match(partial,/暂无规模占比数据/);allocation.series=allocationRows;
+  const monthly=module.exports.fundMonthlyView({...flow,series:[
+   {trade_date:'2025-12-30',individual_daily:10,institution_daily:0},
+   {trade_date:'2025-12-31',individual_daily:-3,institution_daily:0},
+   {trade_date:'2026-01-02',individual_daily:null,institution_daily:4},
+   {trade_date:'2026-01-05',individual_daily:6,institution_daily:-2},
+   {trade_date:'2026-02-02',individual_daily:0,institution_daily:null}
+  ]});
+  assert.deepEqual(monthly.series,[
+   {trade_date:'2025-12',period_end:'2025-12-31',individual:7,institution:0},
+   {trade_date:'2026-01',period_end:'2026-01-05',individual:null,institution:2},
+   {trade_date:'2026-02',period_end:'2026-02-02',individual:0,institution:null}
+  ]);
+  assert.equal(flow.series.length,21);assert.equal(flow.series[20].individual,140);
+  const history={...flow,series:[
+   {trade_date:'2020-07-01',individual:null,institution:null,individual_daily:null,institution_daily:null},
+   {trade_date:'2020-07-02',individual:7,institution:8,individual_daily:7,institution_daily:8},
+   {trade_date:'2020-08-03',individual:10,institution:9,individual_daily:3,institution_daily:1},
+   {trade_date:'2020-08-04',individual:10,institution:9,individual_daily:0,institution_daily:0}
+  ]},scale={series:[{trade_date:'2013-03-25',ratio:.01},{trade_date:'2020-08-03',ratio:.02},{trade_date:'2020-08-04',ratio:null}]};
+  const aligned=module.exports.fundsView(history,scale);
+  assert.deepEqual(aligned.flow.series.map(p=>p.trade_date),['2020-08-03','2020-08-04']);
+  assert.equal(aligned.flow.series[0].individual,10);assert.equal(aligned.monthly.series[0].trade_date,'2020-08');
+  assert.equal(aligned.monthly.series[0].individual,3);assert.equal(aligned.allocation.series[0].trade_date,'2020-08-03');
+  assert.equal(aligned.allocation.series[1].ratio,null);assert.equal(history.series.length,4);assert.equal(scale.series.length,3);
+  assert.equal(module.exports.fundsView(history,null).flow,history);
+ }finally{globalThis.location=originalLocation;}
+});
+
+test('stock-bond states mark both tails and expose daily percentile ranks without changing returns',async()=>{
+ const source=await readFile(new URL('../../../frontend/src/Observe.jsx',import.meta.url),'utf8');
+ const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const module={exports:{}},draws=[],originalLocation=globalThis.location;
+ const series=[.02,-.02,0,null].map((v,i)=>({trade_date:`2026-10-${i+1}`,stock_symbol:'IM2612',stock_close:6000+i,bond_return20:v,bond_p90:.01,bond_p10:-.01,bond_percentile:[95,5,50,null][i]}));
+ new Function('module','exports','require',code)(module,module.exports,id=>id==='./charts.js'?{...sharedRequire('./src/charts.js'),usePreference:(_k,v)=>[v,()=>{}],useResource:()=>({data:{product:'IM',bond:'T',series}}),useChart:(_ref,draw)=>draws.push(draw)}:id==='./preferences.js'?{}:sharedRequire(id));
+ try{
+  globalThis.location={search:'?view=stock&product=IM'};
+  const html=renderToStaticMarkup(React.createElement(module.exports.default));
+  assert.match(html,/历史分位/);assert.match(html,/偏强1日 · 偏弱1日/);assert.equal(draws.length,2);
+  let option;draws[0]({setOption:o=>option=o});
+  assert.deepEqual(option.legend.data,['股指主力收盘','国债偏强','国债偏弱']);
+  assert.deepEqual(option.series.slice(1).map(s=>s.data),[[6000,null,null,null],[null,6001,null,null]]);
+  assert.match(option.tooltip.formatter([{dataIndex:1}]),/国债偏弱\n历史分位：5%/);
+  draws[1]({setOption:o=>option=o});assert.deepEqual(option.series[0].data,[.02,-.02,0,null]);
+  assert.deepEqual(option.legend.data,['20日涨跌幅','90%分位','10%分位']);
+ }finally{globalThis.location=originalLocation;}
+});
+
+test('stock-bond overlay keeps two raw index levels, shared dates and missing observations',async()=>{
+ const source=await readFile(new URL('../../../frontend/src/Observe.jsx',import.meta.url),'utf8');
+ const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const module={exports:{}},draws=[],originalLocation=globalThis.location;
+ const data={assets:[{key:'stock',name:'沪深300全收益',color:'#4e7fb9'},{key:'fund',name:'中证非纯债基',color:'#a48b59'},{key:'ordinary',name:'其他'}],series:[{trade_date:'2026-09-01',stock:5000,fund:null},{trade_date:'2026-09-02',stock:5100,fund:2000},{trade_date:'2026-09-03',stock:5200,fund:null},{trade_date:'2026-09-04',stock:5300,fund:2050},{trade_date:'2026-09-05',stock:5400,fund:null}]};
+ new Function('module','exports','require',code)(module,module.exports,id=>id==='./charts.js'?{...sharedRequire('./src/charts.js'),usePreference:(_k,v)=>[v,()=>{}],useResource:()=>({data}),useChart:(_ref,draw)=>draws.push(draw)}:id==='./preferences.js'?{}:sharedRequire(id));
+ const {comparisonView,ComparisonObserve}=module.exports,result=comparisonView(data);
+ assert.deepEqual(result.lines.map(a=>a.key),['stock','fund']);
+ assert.equal(result.start,'2026-09-02');assert.equal(result.end,'2026-09-04');
+ assert.equal(result.series[0].stock,5100);assert.equal(result.series[0].fund,2000);
+ assert.equal(result.series[1].fund,null);assert.equal(result.series[2].stock,5300);
+ assert.deepEqual(comparisonView({assets:data.assets,series:[]}).series,[]);
+ try{
+  globalThis.location={search:'?view=compare&end=2026-10-30'};
+  const html=renderToStaticMarkup(React.createElement(ComparisonObserve));
+  assert.doesNotMatch(html,/<select|相对强弱|滚动相关|滚动一年|区间回撤|起点100/);
+  assert.match(html,/沪深300与债基/);assert.match(html,/指数点位/);
+  let option;draws.pop()({setOption:o=>{option=o;}});
+  assert.deepEqual(option.series.map(s=>s.name),['沪深300全收益','中证非纯债基']);
+  assert.deepEqual(option.series[0].data,[5100,5200,5300]);
+  assert.deepEqual(option.series[1].data,[2000,null,2050]);
+  assert.equal(option.series[1].connectNulls,false);
+  assert.deepEqual(option.series.map(s=>s.yAxisIndex),[0,1]);
+  assert.equal(option.yAxis.length,2);assert.equal(option.yAxis[0].name,'沪深300');assert.equal(option.yAxis[1].name,'债基');
+  assert.equal(option.yAxis[0].min,5088);assert.equal(option.yAxis[0].max,5312);
+  assert.deepEqual(result.anchors,[]);assert.equal(result.axisRatio,2.55);assert.equal(result.axisOffset,0);
+  assert.equal(option.yAxis[1].min,5088/2.55);assert.equal(option.yAxis[1].max,5312/2.55);
+  const position=(value,axis)=>(value-axis.min)/(axis.max-axis.min);
+  assert.ok(Math.abs(position(5100,option.yAxis[0])-position(2000,option.yAxis[1]))<1e-12);
+  const points=[{trade_date:'2014-06-01',stock:4000,fund:1000},{trade_date:'2014-06-02',stock:1500,fund:1000},{trade_date:'2019-01-03',stock:2500,fund:1500},{trade_date:'2024-02-02',stock:3500,fund:2000},{trade_date:'2024-09-13',stock:4500,fund:2500}];
+  const anchored=comparisonView({assets:data.assets,series:points});
+  assert.deepEqual(anchored.anchors.map(p=>p.trade_date),['2014-06-02','2019-01-03','2024-02-02','2024-09-13']);
+  assert.equal(anchored.axisRatio,2);assert.equal(anchored.axisOffset,-500);
+  assert.equal(comparisonView({assets:data.assets,series:points.slice(0,2)}).axisRatio,4);
+  assert.equal(option.yAxis[1].axisLabel.color,'#a48b59');assert.equal(option.yAxis[1].splitLine.show,false);
+  assert.match(option.tooltip.formatter([{value:5100,seriesName:'沪深300全收益',axisValue:'2026-09-02'}]),/5,100/);
+  renderToStaticMarkup(React.createElement(module.exports.ContextChart,{data:anchored,lines:anchored.lines,dualAxis:true}));
+  draws.pop()({setOption:o=>{option=o;}});
+  for(const p of anchored.anchors)assert.ok(Math.abs(position(p.stock,option.yAxis[0])-position(p.fund,option.yAxis[1]))<1e-12);
+ }finally{globalThis.location=originalLocation;}
 });
