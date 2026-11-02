@@ -493,6 +493,10 @@ def create_app(store=None):
             cutoff = (end or date.today()).isoformat()
             mapping = store.root.parent/'cfuturescontractmapping/part.parquet'
             files = store._files(None,cutoff)
+            history=store.runtime.parent/'observation-history'
+            if history.is_dir():
+                mapping=history/'mapping.parquet'
+                files=[history/'prices.parquet'] if (history/'prices.parquet').is_file() else []
             if not mapping.is_file() or not files:
                 return {'product':product,'bond':bond,'series':[], 'as_of':None,'preview':True,'missing':'日线或主力映射尚未接入'}
             segments = store._query([mapping], '''SELECT product,symbol,start_date::VARCHAR start_date,end_date::VARCHAR end_date
@@ -502,9 +506,19 @@ def create_app(store=None):
                 AND right(symbol,4) NOT IN ('8888','9998','9999') AND regexp_extract(symbol,'^([A-Z]+)',1) IN (?,?)
                 AND trade_date<=?::DATE ORDER BY trade_date,symbol''', [product,bond,cutoff])
             series = analytics.stock_bond_observation(rows,segments,product,bond)
+            history_start=next((p['trade_date'] for p in series if p['bond_return20'] is not None),None)
+            first=next((i for i,p in enumerate(series) if p['stock_close'] is not None and p['bond_close'] is not None),len(series))
+            series=series[first:]
             return clean({'product':product,'bond':bond,'series':series,'as_of':series[-1]['trade_date'] if series else None,
-                          'bond_history_start':next((p['trade_date'] for p in series if p['bond_return20'] is not None),None),
+                          'bond_history_start':history_start,
                           'preview':True,'missing':None if {s['product'] for s in segments}=={product,bond} else '主力映射覆盖不足'})
+
+    if os.environ.get('DASHBOARD_INTRADAY_PREVIEW')=='1':
+        @app.get('/api/intraday-preview')
+        def intraday_preview(view: str = Query('basis',pattern='^(basis|options)$')):
+            path=store.runtime.parent/'intraday-preview.json'
+            if not path.is_file():return {'missing':'本地预览快照尚未接入'}
+            return json.loads(path.read_text('utf-8')).get(view,{'missing':'该视图尚未接入'})
 
     @app.get('/api/basis-reference')
     def basis_reference(product: str, symbol: Optional[str] = None, price_type: str = 'close',

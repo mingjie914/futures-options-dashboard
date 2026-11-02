@@ -31,9 +31,10 @@ def test_development_gateway_is_default_closed(tmp_path,monkeypatch,enabled,intr
         assert client.get('/observe/unknown').status_code==404
         for path in ('/intraday','/intraday/'):
             assert client.get(path).status_code==(200 if intraday else 404)
+        assert client.get('/api/futures/v1/intraday-preview').status_code==(200 if intraday else 404)
         assert client.get('/intraday/unknown').status_code==404
         assert client.get('/api/realtime/v1/snapshot').status_code==404
-        assert len(called)==int(enabled)
+        assert len(called)==int(enabled)+int(intraday)
         for path in ('/futures/','/seats/','/options/'):
             assert client.get(path).status_code==200
 

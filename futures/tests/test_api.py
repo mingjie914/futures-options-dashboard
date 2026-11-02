@@ -9,6 +9,41 @@ from backend.api import create_app
 from backend.data import DailyStore
 
 
+def test_intraday_preview_is_closed_by_default_and_uses_only_saved_view(setup,monkeypatch):
+    import json
+    _,store,_=setup
+    monkeypatch.delenv('DASHBOARD_INTRADAY_PREVIEW',raising=False)
+    assert TestClient(create_app(store)).get('/api/intraday-preview').status_code==404
+    monkeypatch.setenv('DASHBOARD_INTRADAY_PREVIEW','1')
+    client=TestClient(create_app(store))
+    assert 'missing' in client.get('/api/intraday-preview').json()
+    (store.runtime.parent/'intraday-preview.json').write_text(json.dumps({'basis':{'products':[],'as_of':'2026-10-30'},'options':{'months':[],'test_only':True}}))
+    assert client.get('/api/intraday-preview?view=basis').json()=={'products':[],'as_of':'2026-10-30'}
+    assert client.get('/api/intraday-preview?view=options').json()=={'months':[],'test_only':True}
+    assert client.get('/api/intraday-preview?view=unknown').status_code==422
+
+
+def test_observation_full_preview_history_precedes_common_display_without_future_rows(setup,monkeypatch):
+    from datetime import timedelta
+    _,store,_=setup
+    monkeypatch.setenv('DASHBOARD_OBSERVE_PREVIEW','1')
+    history=store.runtime.parent/'observation-history';history.mkdir()
+    days=[date(2025,1,1)+timedelta(days=i) for i in range(60)]
+    with duckdb.connect() as con:
+        con.execute('CREATE TABLE prices(symbol VARCHAR,trade_date DATE,close DOUBLE)')
+        con.executemany('INSERT INTO prices VALUES (?,?,?)',[('T2506',d,100+i*i/1000) for i,d in enumerate(days)]+[('IM2506',d,6000+i) for i,d in enumerate(days) if i>=42])
+        con.execute('COPY prices TO ? (FORMAT PARQUET)',[str(history/'prices.parquet')])
+        con.execute('CREATE TABLE mapping(product VARCHAR,symbol VARCHAR,start_date DATE,end_date DATE)')
+        con.executemany('INSERT INTO mapping VALUES (?,?,?,?)',[('T','T2506',days[0],days[-1]),('IM','IM2506',days[42],days[-1])])
+        con.execute('COPY mapping TO ? (FORMAT PARQUET)',[str(history/'mapping.parquet')])
+    client=TestClient(create_app(store));data=client.get('/api/observation?product=IM&end='+days[50].isoformat()).json()
+    assert data['series'][0]['trade_date']==days[42].isoformat()
+    assert data['series'][-1]['trade_date']==days[50].isoformat()
+    assert data['bond_history_start']==days[20].isoformat()
+    assert data['series'][0]['bond_p90'] is not None and data['series'][0]['bond_percentile'] is not None
+    assert all(p['stock_close'] is not None for p in data['series'])
+
+
 def test_observation_default_closed_and_explicit_preview(setup,monkeypatch):
     _,store,_=setup
     monkeypatch.delenv('DASHBOARD_OBSERVE_PREVIEW',raising=False)
