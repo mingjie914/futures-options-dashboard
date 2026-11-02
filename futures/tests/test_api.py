@@ -9,20 +9,6 @@ from backend.api import create_app
 from backend.data import DailyStore
 
 
-def test_intraday_preview_is_closed_by_default_and_uses_only_saved_view(setup,monkeypatch):
-    import json
-    _,store,_=setup
-    monkeypatch.delenv('DASHBOARD_INTRADAY_PREVIEW',raising=False)
-    assert TestClient(create_app(store)).get('/api/intraday-preview').status_code==404
-    monkeypatch.setenv('DASHBOARD_INTRADAY_PREVIEW','1')
-    client=TestClient(create_app(store))
-    assert 'missing' in client.get('/api/intraday-preview').json()
-    (store.runtime.parent/'intraday-preview.json').write_text(json.dumps({'basis':{'products':[],'as_of':'2026-10-30'},'options':{'months':[],'test_only':True}}))
-    assert client.get('/api/intraday-preview?view=basis').json()=={'products':[],'as_of':'2026-10-30'}
-    assert client.get('/api/intraday-preview?view=options').json()=={'months':[],'test_only':True}
-    assert client.get('/api/intraday-preview?view=unknown').status_code==422
-
-
 def test_observation_full_preview_history_precedes_common_display_without_future_rows(setup,monkeypatch):
     from datetime import timedelta
     _,store,_=setup

@@ -47,8 +47,6 @@ async def proxy(module:str,path:str,request:Request):
     if module not in TARGETS:raise HTTPException(404,'未知模块')
     if module=='futures' and path.split('/')[0]=='observation' and not OBSERVE_PREVIEW:
         raise HTTPException(404,'文件不存在')
-    if module=='futures' and path.split('/')[0]=='intraday-preview' and not INTRADAY_PREVIEW:
-        raise HTTPException(404,'文件不存在')
     if os.environ.get('DASHBOARD_PUBLIC_READONLY')=='1':
         if module=='futures' and path=='watchlists' and request.method=='GET':
             return JSONResponse({'items':[],'read_only':True})

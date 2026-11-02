@@ -434,17 +434,10 @@ test('ETF funds share one page and chart height, preserving monthly gaps and sep
  }finally{globalThis.location=originalLocation;}
 });
 
-test('intraday preview reuses saved data, natural-day basis and existing chart engine',async()=>{
+test('intraday is independent of daily data, history samples and refresh controls',async()=>{
  const source=await readFile(new URL('../../../frontend/src/Intraday.jsx',import.meta.url),'utf8');
- const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- const module={exports:{}},requests=[],originalLocation=globalThis.location;
- new Function('module','exports','require',code)(module,module.exports,id=>id==='./charts.js'?{...sharedRequire('./src/charts.js'),usePreference:(_k,v)=>[v,()=>{}],useResource:url=>{requests.push(url);return {data:{as_of:'2026-10-30',products:[{product:'IF',spot:100,contracts:[{symbol:'IF2611',price:98,last_trade_date:'2026-11-09'}]}]}};},useChart:()=>{}}:sharedRequire(id));
- assert.deepEqual(module.exports.basisMetrics(100,98,'2026-11-09','2026-10-30'),{basis:2,days:10,annual:73,daily:.2});
- assert.equal(module.exports.basisMetrics(100,100,'2026-11-09','2026-10-30').annual,0);
- assert.equal(module.exports.basisMetrics(100,98,'2026-10-30','2026-10-30').annual,null);
- assert.equal(module.exports.basisMetrics(0,98,null,'2026-10-30').basis,null);
- try{globalThis.location={search:'?view=basis'};const html=renderToStaticMarkup(React.createElement(module.exports.default));assert.equal(requests.length,1);assert.match(html,/行情尚未连接/);assert.match(html,/IF2611/);assert.match(html,/收盘快照/);}finally{globalThis.location=originalLocation;}
- assert.doesNotMatch(source,/new WebSocket|setInterval|fetch\(/);
+ assert.doesNotMatch(source,/useResource|RefreshButton|api\/futures|api\/options|intraday-preview|ricequant/i);
+ assert.match(source,/实时订阅/);
 });
 
 test('stock-bond states mark both tails and expose daily percentile ranks without changing returns',async()=>{

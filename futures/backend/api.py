@@ -513,13 +513,6 @@ def create_app(store=None):
                           'bond_history_start':history_start,
                           'preview':True,'missing':None if {s['product'] for s in segments}=={product,bond} else '主力映射覆盖不足'})
 
-    if os.environ.get('DASHBOARD_INTRADAY_PREVIEW')=='1':
-        @app.get('/api/intraday-preview')
-        def intraday_preview(view: str = Query('basis',pattern='^(basis|options)$')):
-            path=store.runtime.parent/'intraday-preview.json'
-            if not path.is_file():return {'missing':'本地预览快照尚未接入'}
-            return json.loads(path.read_text('utf-8')).get(view,{'missing':'该视图尚未接入'})
-
     @app.get('/api/basis-reference')
     def basis_reference(product: str, symbol: Optional[str] = None, price_type: str = 'close',
                         start: Optional[date] = None, end: Optional[date] = None, all_contracts: bool = False):
