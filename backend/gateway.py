@@ -34,7 +34,7 @@ async def lifespan(app):
 
 
 app=FastAPI(lifespan=lifespan,docs_url=None,redoc_url=None)
-app.add_middleware(ResearchHTTP)
+app.add_middleware(ResearchHTTP, compress=False)  # Caddy negotiates Zstd/Gzip at the public boundary.
 if INTRADAY_PREVIEW and os.environ.get('DASHBOARD_INTRADAY_UPSTREAM'):
     from backend.intraday import enable
     live_run=enable(app,os.environ['DASHBOARD_INTRADAY_UPSTREAM'],os.environ.get('DASHBOARD_INTRADAY_ORIGIN','http://127.0.0.1:8799'))
@@ -68,7 +68,7 @@ async def proxy(module:str,path:str,request:Request):
     body=await request.body()
     if len(body)>1024*1024:raise HTTPException(413,'请求过大')
     headers={k:v for k,v in request.headers.items() if k.lower() in ('host','origin','content-type','if-none-match','a-im','sec-fetch-site')}
-    headers['accept-encoding']='identity'  # httpx returns decoded content; compress once at this boundary.
+    headers['accept-encoding']='identity'  # Keep decoded bytes through the gateway; Caddy compresses once.
     try:
         r=await request.app.state.client.request(request.method,target,content=body,headers=headers)
         return Response(r.content,status_code=r.status_code,headers={k:v for k,v in r.headers.items() if k.lower() in ('content-type','etag','cache-control','x-snapshot-state','vary','im','delta-base','x-data-version','x-request-id')})

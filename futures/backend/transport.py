@@ -90,11 +90,12 @@ def accepts_gzip(header):
 
 
 class ResearchHTTP:
-    def __init__(self, app, *, version=None, cache=None, paths=(), code_version='', concurrency=1, session=None):
+    def __init__(self, app, *, version=None, cache=None, paths=(), code_version='', concurrency=1, session=None, compress=True):
         self.app, self.version, self.cache = app, version, cache
         self.paths, self.code_version = set(paths), code_version
         self.slots = asyncio.Semaphore(concurrency)
         self.session = session
+        self.compress = compress
 
     async def __call__(self, scope, receive, send):
         if scope['type'] != 'http' or scope['method'] != 'GET' or not scope['path'].startswith('/api/'):
@@ -163,8 +164,7 @@ class ResearchHTTP:
                     headers.update({'im': DELTA, 'delta-base': previous, 'content-type': 'application/vnd.mingjiec.delta+json', 'cache-control': 'no-store'})
         await self.emit(scope, receive, send, request_headers, body, status, headers)
 
-    @staticmethod
-    async def emit(scope, receive, send, request_headers, body, status, headers):
+    async def emit(self, scope, receive, send, request_headers, body, status, headers):
         headers = dict(headers)
         vary = {v.strip() for v in headers.get('vary', '').split(',') if v.strip()}
         vary.update(('Accept-Encoding', 'A-IM'))
@@ -173,7 +173,8 @@ class ResearchHTTP:
             body = b''
             headers.pop('content-encoding', None)
             headers.pop('content-type', None)
-        elif len(body) >= 1024 and not headers.get('content-encoding') and accepts_gzip(request_headers.get('accept-encoding', '')):
+        # Caddy's default MIME matcher excludes our custom delta media type.
+        elif (self.compress or headers.get('im') == DELTA) and len(body) >= 1024 and not headers.get('content-encoding') and accepts_gzip(request_headers.get('accept-encoding', '')):
             body = gzip.compress(body, compresslevel=4, mtime=0)
             headers['content-encoding'] = 'gzip'
         await Response(body, status_code=status, headers=headers)(scope, receive, send)
