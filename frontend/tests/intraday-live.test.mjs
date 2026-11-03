@@ -83,6 +83,10 @@ test('intraday snapshots/upserts preserve source observations, minute gaps, zero
   assert.equal(mergeIntraday(merged,correction).points.at(-1).future_last,6020);
   assert.equal(mergeIntraday(merged,merged),merged);
   assert.deepEqual(mergeIntraday(merged,{...next,trade_date:'2026-11-04'}).points,next.points);
+  const provenance={...merged,price_time_basis:'wind_bar',iv_time_basis:'work_observation'};
+  assert.equal(mergeIntraday(provenance,correction).price_time_basis,'wind_bar');
+  assert.equal(mergeIntraday(provenance,{...correction,price_time_basis:null}).price_time_basis,null);
+  assert.equal(mergeIntraday(provenance,{...next,trade_date:'2026-11-04'}).price_time_basis,undefined);
   const state={quotes:new Map([['I',{last:10}]]),series:'MO2611',epoch:'a',version:1,health:{receiver_age_seconds:5}};
   const quotes=state.quotes,health=state.health;
   applyLivePacket(state,{type:'intraday',epoch:'a',version:2,intraday:initial});

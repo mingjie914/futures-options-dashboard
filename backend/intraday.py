@@ -34,9 +34,10 @@ def enable(app, base):
                             state['catalog']=packet['catalog'];state['quotes']={};state['intraday']=None
                         if (latest:=packet.get('intraday')) is not None:
                             previous=state['intraday']
-                            points={p['time']:p for p in previous['points']} if previous and (previous['series'],previous['trade_date'])==(latest['series'],latest['trade_date']) else {}
+                            if not previous or (previous['series'],previous['trade_date'])!=(latest['series'],latest['trade_date']):previous={}
+                            points={p['time']:p for p in previous.get('points',[])}
                             points.update((p['time'],p) for p in latest['points'])
-                            state['intraday']={**latest,'points':sorted(points.values(),key=lambda p:p['time'])}
+                            state['intraday']={**previous,**latest,'points':sorted(points.values(),key=lambda p:p['time'])}
                         for code,quote in packet.get('quotes',{}).items():
                             if code not in state['catalog']['metadata']:continue
                             if quote is None:state['quotes'].pop(code,None)

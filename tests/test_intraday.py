@@ -90,7 +90,10 @@ def test_intraday_minute_upserts_keep_quotes_and_reset_on_source_day_change(monk
                      dict(type='intraday',intraday=minutes('2026-11-03',2,[{'time':'09:31','future_last':6010,'atm_iv':None}])),
                      dict(type='intraday',intraday=minutes('2026-11-03',3,[{'time':'09:31','future_last':6020,'atm_iv':.31}])),
                      dict(type='intraday',intraday=minutes('2026-11-04',4,[{'time':'09:30','future_last':6100,'atm_iv':.32}]))]
-            for version,packet in enumerate(packets):yield json.dumps(dict(epoch='a',version=version,**packet))
+            packets[0]['intraday']['price_time_basis']='wind_bar'
+            for version,packet in enumerate(packets):
+                yield json.dumps(dict(epoch='a',version=version,**packet))
+                if version==2:assert app.state.intraday['intraday']['price_time_basis']=='wind_bar'
             raise OSError('disconnected')
     @asynccontextmanager
     async def connect(*args,**kwargs):yield Socket()
@@ -100,5 +103,6 @@ def test_intraday_minute_upserts_keep_quotes_and_reset_on_source_day_change(monk
     state=app.state.intraday
     assert state['quotes']=={'I':{'last':10}}
     assert state['intraday']['trade_date']=='2026-11-04'
+    assert 'price_time_basis' not in state['intraday']
     assert state['intraday']['points']==[{'time':'09:30','future_last':6100,'atm_iv':.32}]
     assert state['health']=={'source_mode':'wind','receiver_age_seconds':2}

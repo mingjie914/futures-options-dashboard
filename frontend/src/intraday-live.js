@@ -27,7 +27,7 @@ export function mergeIntraday(current,next,replace=false) {
   if(current.revision===next.revision)return current;
   const points=new Map(current.points.map(p=>[p.time,p]));
   for(const p of next.points)points.set(p.time,p);
-  return {...next,points:[...points.values()].sort((a,b)=>a.time.localeCompare(b.time))};
+  return {...current,...next,points:[...points.values()].sort((a,b)=>a.time.localeCompare(b.time))};
 }
 
 const intradayClock=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
