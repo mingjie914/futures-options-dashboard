@@ -7,7 +7,7 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake
 
 
-def enable(app, base):
+def enable(app, base, origin='http://127.0.0.1:8799'):
     state=dict(catalog={'codes':[],'metadata':{},'revision':None},quotes={},intraday={},health={},epoch='waiting',version=-1,connected=False,received=0)
     app.state.intraday=state
 
@@ -27,14 +27,14 @@ def enable(app, base):
         delay=1
         while True:
             try:
-                async with connect(base.replace('http','ws',1).rstrip('/')+'/api/realtime/v1/stream',origin='http://127.0.0.1:8799',max_size=2**21) as ws:
+                async with connect(base.replace('http','ws',1).rstrip('/')+'/api/realtime/v1/stream',origin=origin,max_size=2**21) as ws:
                     await ws.send(json.dumps({'type':'subscribe','mirror':True,'kinds':['index','future','option'],'fields':['last','prev_close','iv','oi']}))
                     async for raw in ws:
                         packet=json.loads(raw)
                         if packet['type']=='snapshot':
                             state['catalog']=packet['catalog'];state['quotes']={};state['intraday']={}
                         updates=packet.get('intraday_all') or {}
-                        if (latest:=packet.get('intraday')) is not None:updates={**updates,latest['series']:latest}
+                        if (latest:=packet.get('intraday')) is not None:updates[latest['series']]=latest
                         for name,latest in updates.items():
                             previous=state['intraday'].get(name)
                             if not previous or previous['trade_date']!=latest['trade_date']:previous={}

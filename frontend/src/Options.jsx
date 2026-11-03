@@ -32,13 +32,12 @@ function toNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function formatNumber(value, digits = 0) {
-  const number = toNumber(value);
-  if (number === null) return MISSING;
-  return number.toLocaleString('en-US', {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
+const numberFormats=new Map();
+function formatNumber(value,digits=0) {
+  const number=toNumber(value);
+  if(number===null)return MISSING;
+  if(!numberFormats.has(digits))numberFormats.set(digits,new Intl.NumberFormat('en-US',{minimumFractionDigits:digits,maximumFractionDigits:digits}));
+  return numberFormats.get(digits).format(number);
 }
 
 function formatSigned(value, digits = 0) {
@@ -272,18 +271,10 @@ function VolatilityTab({ rows, month, months, spot, snapshot }) {
         splitLine: { lineStyle: { color: '#eef0f3' } },
       },
       series: [
-        { name: 'Call IV', type: 'line', data: callPoints, showSymbol: true, symbolSize: 7, connectNulls: false, lineStyle: { width: 2 } },
+        { name: 'Call IV', type: 'line', data: callPoints, showSymbol: true, symbolSize: 7, connectNulls: false, lineStyle: { width: 2 },markLine:{silent:true,symbol:'none',lineStyle:{color:'#505c6b',type:'dashed'},label:{formatter:'现货',color:'#505c6b'},data:spotValue===null?[]:[{xAxis:spotValue}]} },
         { name: 'Put IV', type: 'line', data: putPoints, showSymbol: true, symbolSize: 7, connectNulls: false, lineStyle: { width: 2 } },
       ],
     }, true);
-    if (spotValue !== null) {
-      chart.setOption({
-        series: [
-          { markLine: { silent: true, symbol: 'none', lineStyle: { color: '#505c6b', type: 'dashed' }, label: { formatter: '现货', color: '#505c6b' }, data: [{ xAxis: spotValue }] } },
-          { markLine: { silent: true, data: [] } },
-        ],
-      });
-    }
   }, [callPoints, putPoints, spot, view]);
 
   const hasPoints = callPoints.length || putPoints.length;

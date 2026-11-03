@@ -35,7 +35,7 @@ def test_bootstrap_uses_one_catalog_preserves_source_time_and_ages_health():
 
 
 def test_single_readonly_mirror_merges_deltas_and_retains_values_on_disconnect(monkeypatch):
-    app=FastAPI();collect=intraday.enable(app,'http://127.0.0.1:18808');sent=[]
+    app=FastAPI();collect=intraday.enable(app,'http://127.0.0.1:18808','https://mingjiec.com');sent=[]
     class Socket:
         async def send(self,raw):sent.append(json.loads(raw))
         async def __aiter__(self):
@@ -47,6 +47,7 @@ def test_single_readonly_mirror_merges_deltas_and_retains_values_on_disconnect(m
     @asynccontextmanager
     async def connect(url,**kwargs):
         assert url=='ws://127.0.0.1:18808/api/realtime/v1/stream'
+        assert kwargs['origin']=='https://mingjiec.com'
         yield Socket()
     async def stop(_):raise asyncio.CancelledError
     monkeypatch.setattr(intraday,'connect',connect);monkeypatch.setattr(intraday.asyncio,'sleep',stop)

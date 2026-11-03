@@ -1,6 +1,6 @@
 // The live receiver sends absolute field values, not increments.
-const decimal=new Intl.NumberFormat('zh-CN',{maximumFractionDigits:2}),integer=new Intl.NumberFormat('zh-CN',{maximumFractionDigits:0});
-export const formatNumber=(value,digits=2)=>Number.isFinite(value)?(digits===0?integer:decimal).format(value):'—';
+const formats=new Map([0,1,2].map(digits=>[digits,new Intl.NumberFormat('zh-CN',{minimumFractionDigits:digits===1?1:0,maximumFractionDigits:digits})]));
+export const formatNumber=(value,digits=2)=>Number.isFinite(value)?(formats.get(digits)||formats.get(2)).format(value):'—';
 
 export function applyLivePacket(state, packet) {
   if (!['snapshot','delta','status','intraday'].includes(packet.type)) return false;
@@ -31,19 +31,13 @@ export function mergeIntraday(current,next,replace=false) {
 }
 
 const intradayClock=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+const sessionTimes=[570,780].flatMap(start=>Array.from({length:121},(_,i)=>String(Math.floor((start+i)/60)).padStart(2,'0')+':'+String((start+i)%60).padStart(2,'0')));
 export function intradayRows(data) {
   const points=new Map((data?.points||[]).map(p=>[p.time.length>8?intradayClock.format(new Date(p.time)):p.time.slice(0,5),p]));
-  const rows=[];
-  if(!points.size)return rows;
-  for(let m=570;m<=900;m++) {
-    if(m>690&&m<780)continue;
-    const time=String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
-    rows.push({future_last:null,atm_iv:null,...points.get(time),time});
-  }
-  return rows;
+  return points.size?sessionTimes.map(time=>({future_last:null,atm_iv:null,...points.get(time),time})):[];
 }
 
-export function openLive(base, publish,series='MO2611') {
+export function openLive(base, publish,series='MO2611',bootstrapBase='') {
   let socket,retry,stopped=false,delay=1000,received=0;
   const state={quotes:new Map(),catalog:null,intraday:null,series,health:null,epoch:null,version:-1,connection:'connecting'};
   const emit=()=>publish({...state,received});
@@ -64,7 +58,7 @@ export function openLive(base, publish,series='MO2611') {
     if(socket?.readyState===1)socket.send(JSON.stringify({type:'subscribe',kinds:['index','future','option'],fields:['last','prev_close','iv','oi'],...(/^(IO|HO|MO)\d{4}$/.test(series)?{series}:{})}));
   }
   connect();
-  fetch('/api/intraday/v1/bootstrap?series='+encodeURIComponent(series),{signal:controller.signal,cache:'no-store'}).then(async response=>{
+  fetch(bootstrapBase.replace(/\/$/,'')+'/api/intraday/v1/bootstrap?series='+encodeURIComponent(series),{signal:controller.signal,cache:'no-store'}).then(async response=>{
     if(!response.ok)return;
     const cached=await response.json();
     if(stopped||state.epoch!==null||cached.type!=='snapshot'||!cached.catalog)return;
@@ -89,7 +83,8 @@ export function optionRows(catalog,quotes,series) {
 }
 
 export function optionSmile(rows,spot) {
-  const atm=Number.isFinite(spot)?rows.filter(r=>r.C&&r.P).reduce((best,r)=>!best||Math.abs(r.strike-spot)<Math.abs(best.strike-spot)?r:best,null):null;
+  let atm=null;
+  if(Number.isFinite(spot))for(const r of rows)if(r.C&&r.P&&(!atm||Math.abs(r.strike-spot)<Math.abs(atm.strike-spot)))atm=r;
   const valid=v=>Number.isFinite(v)&&v>0;
   return rows.map(r=>{
     const c=r.C?.iv,p=r.P?.iv,iv=!Number.isFinite(spot)?null:r===atm?(valid(c)&&valid(p)?(c+p)/2:null):r.strike<spot?p:c;
@@ -102,10 +97,16 @@ export function basisRows(code,metadata,quotes) {
   return Object.entries(metadata).filter(([,m])=>m.kind==='future'&&m.underlying===code).sort(([a],[b])=>a.localeCompare(b)).map(([contract,m])=>{
     const q=quotes.get(contract),basis=Number.isFinite(spot)&&Number.isFinite(q?.last)?spot-q.last:null;
     const days=m.last_trade_date&&q?.acquired_at?(Date.parse(m.last_trade_date)-Date.parse(q.acquired_at.slice(0,10)))/86400000:null;
-    const absolute=spot>0&&Number.isFinite(basis)?basis/spot*100:null;
-    return {contract,last:q?.last,basis,days,absolute,annual:days>0&&absolute!==null?absolute*365/days:null,
-      daily:days>0&&Number.isFinite(basis)&&Number.isFinite(m.multiplier)&&m.multiplier>0?basis*m.multiplier/days:null,oi:q?.oi};
+    const absolute=Number.isFinite(basis)&&Number.isFinite(m.multiplier)&&m.multiplier>0?basis*m.multiplier/10000:null;
+    return {contract,last:q?.last,basis,days,absolute,annual:days>0&&spot>0&&Number.isFinite(basis)?basis/spot*365/days*100:null,
+      daily:days>0&&absolute!==null?absolute*10000/days:null,oi:q?.oi};
   });
+}
+
+export function liveMatrix(metadata,quotes,index) {
+  const asOf=index?quotes.get(index)?.acquired_at?.slice(0,10):Object.keys(metadata).reduce((day,code)=>{const date=quotes.get(code)?.acquired_at?.slice(0,10)||'';return date>day?date:day;},'');
+  const contracts=Object.entries(metadata).filter(([,m])=>m.kind==='future').map(([code,m])=>{const q=quotes.get(code);return {symbol:code.split('.')[0],close:q?.acquired_at?.slice(0,10)===asOf?q?.last:null,trade_date:asOf,last_trade_date:m.last_trade_date,status:'wind_recorded'};});
+  return {meta:{as_of:asOf},contracts,contract_terms:{as_of:asOf,contracts}};
 }
 
 export function liveOnline(state, now) {

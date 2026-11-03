@@ -137,8 +137,8 @@ test("unified static build keeps seats lazy and shares font/runtime", async () =
   const html = await readFile(new URL("index.html", output), "utf8");
   assert.match(html, /<title>MINGJIE<\/title>/);
   const manifest = JSON.parse(await readFile(new URL(".vite/manifest.json", output), "utf8"));
-  assert.equal(manifest['src/Observe.jsx'],undefined,'default production build must exclude observation preview');
-  assert.equal(manifest['src/Intraday.jsx'],undefined,'default production build must exclude intraday preview');
+  for(const [module,enabled] of [['Observe',process.env.DASHBOARD_OBSERVE_PREVIEW],['Intraday',process.env.DASHBOARD_INTRADAY_PREVIEW]])
+    assert.equal(!!manifest[`src/${module}.jsx`]?.isDynamicEntry,enabled==='1',`${module} must follow its explicit build flag`);
   const seat = manifest["src/seats/Dashboard.tsx"];
   assert.ok(seat?.isDynamicEntry);
   const js = await readFile(new URL(seat.file, output), "utf8");

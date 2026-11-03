@@ -108,9 +108,13 @@ def create_app(store=None):
     app.state.store = store
     radar_lock = Lock()
     observe_preview = os.environ.get('DASHBOARD_OBSERVE_PREVIEW') == '1'
+    observation_root = Path(os.environ.get('DASHBOARD_OBSERVATION_ROOT') or store.runtime.parent)
     def source_version(path):
+        history = observation_root/'observation-history'
+        if path == '/api/observation' and history.is_dir():
+            return [date.today().isoformat(), fingerprint([history/'prices.parquet',history/'mapping.parquet'])]
         if path == '/api/observation/context':
-            return fingerprint([p for p in store.runtime.parent.glob('observation-*.json') if p.is_file()])
+            return fingerprint([observation_root/name for name in ('observation-context.json','observation-comparison-preview.json','observation-etf-flows.json','observation-etf-holders.json')])
         files = list((store.root.parent/'futuresfundamentals').glob('*.parquet')) if path == '/api/inventory' else store._files()
         if not files:
             files = list((store.runtime/'snapshots').glob('*.json'))
@@ -444,21 +448,24 @@ def create_app(store=None):
                                 index: str = Query('000300.SH',pattern=r'^(000001\.SH|000016\.SH|000300\.SH|000905\.SH|000852\.SH|000985\.CSI|399006\.SZ|000688\.SH)$'), end: Optional[date] = None):
             cutoff=(end or date.today()).isoformat()
             if view=='compare':
-                path=store.runtime.parent/'observation-comparison-preview.json'
+                path=observation_root/'observation-comparison-preview.json'
                 if not path.is_file():
                     return {'series':[],'preview':True,'missing':'股债对照数据尚未准备'}
                 source=json.loads(path.read_bytes())
                 return clean(dict(source,series=[p for p in source['series'] if p['trade_date']<=cutoff],preview=True))
             if view=='flow':
-                path=store.runtime.parent/'observation-etf-flows.json'
-                holders=store.runtime.parent/'observation-etf-holders.json'
-                if not path.is_file() or not holders.is_file():
+                path=observation_root/'observation-etf-flows.json'
+                holders=observation_root/'observation-etf-holders.json'
+                if not path.is_file():
                     return {'series':[],'preview':True,'missing':'ETF样本数据尚未准备'}
-                source=json.loads(path.read_bytes());ownership=json.loads(holders.read_bytes())
+                source=json.loads(path.read_bytes())
                 if 'series' in source:
                     return clean(dict(source,series=[p for p in source['series'] if p['trade_date']<=cutoff]))
+                if not holders.is_file():
+                    return {'series':[],'preview':True,'missing':'ETF样本数据尚未准备'}
+                ownership=json.loads(holders.read_bytes())
                 return clean(dict(**analytics.etf_flows(source['funds'],ownership['funds'],cutoff,source.get('trading_days')),meta=source['meta']))
-            path=store.runtime.parent/'observation-context.json'
+            path=observation_root/'observation-context.json'
             if not path.is_file():
                 return {'series':[],'cycles':[],'preview':True,'missing':'预览数据尚未准备'}
             source=json.loads(path.read_bytes())
@@ -493,7 +500,7 @@ def create_app(store=None):
             cutoff = (end or date.today()).isoformat()
             mapping = store.root.parent/'cfuturescontractmapping/part.parquet'
             files = store._files(None,cutoff)
-            history=store.runtime.parent/'observation-history'
+            history=observation_root/'observation-history'
             if history.is_dir():
                 mapping=history/'mapping.parquet'
                 files=[history/'prices.parquet'] if (history/'prices.parquet').is_file() else []

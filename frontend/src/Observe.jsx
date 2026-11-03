@@ -38,7 +38,7 @@ function StockBondObserve() {
   const strong=rows.filter(p=>bondExtreme(p)>0).length,weak=rows.filter(p=>bondExtreme(p)<0).length,correlation=latest?.negative_correlation==null?null:-latest.negative_correlation;
   useEffect(()=>{rememberProduct(product);history.replaceState({},'',location.pathname+'?'+new URLSearchParams({product,bond,...(end?{end}:{})}));},[product,bond,end]);
   return <main className="board-content observation-page" aria-busy={busy}>
-    <div className="observation-heading"><h1>股债联动</h1><span>预览</span></div>
+    <div className="observation-heading"><h1>国债强弱</h1></div>
     <div className="filters observation-controls">
       <select aria-label="股指期货" value={product} onChange={e=>setProduct(e.target.value)}>{Object.entries(products).map(([p,name])=><option key={p} value={p}>{p}/{name}</option>)}</select>
       <select aria-label="国债期货" value={bond} onChange={e=>setBond(e.target.value)}>{Object.entries(bonds).map(([p,name])=><option key={p} value={p}>{p}/{name}</option>)}</select>
@@ -47,14 +47,14 @@ function StockBondObserve() {
     </div>
     {error?<p role="alert">{error}</p>:!data?<p role="status">读取股债日线…</p>:!rows.length?<p>{data.missing||'暂无数据'}</p>:<>
       <div className="observation-section-heading">
-        <Metric label="国债20日涨幅" value={format(latest?.bond_return20,true)} hint="同合约日收益连续20日复合。"/>
-        <Metric label="历史分位" value={format(latest?.bond_percentile==null?null:latest.bond_percentile/100,true)} hint="国债20日涨幅在此前有效样本中的排名；相同值取中间排名。"/>
-        <Metric label="20日相关" value={format(correlation)} hint="股指与国债日收益相关系数；正值同向，负值反向。"/>
+        <Metric label="国债20日涨幅" value={format(latest?.bond_return20,true)}/>
+        <Metric label="历史分位" value={format(latest?.bond_percentile==null?null:latest.bond_percentile/100,true)}/>
+        <Metric label="20日相关" value={format(correlation)}/>
       </div>
       <section className="observation-price"><div className="observation-section-heading"><h2>{data.product} 走势与国债强弱</h2><span className="observation-event-count">偏强{strong}日 · 偏弱{weak}日</span></div><ObservationChart rows={rows} field="stock_close" label="股指主力收盘" zoomGroup={zoomGroup}/></section>
       <section className="observation-price"><div className="observation-section-heading"><h2>{data.bond} 国债20日涨跌幅</h2></div><ObservationChart rows={rows} field="bond_return20" label="20日涨跌幅" percent zoomGroup={zoomGroup}/></section>
     </>}
-    <p className="sub">分位样本自 {data?.bond_history_start||'—'} 起；历史观察，预测效果未验证。{data?.missing}</p>
+    {data?.missing&&<p className="sub">{data.missing}</p>}
   </main>;
 }
 
@@ -111,7 +111,7 @@ export function ComparisonObserve() {
   return <main className="board-content observation-page" aria-busy={busy}>
     <div className="observation-heading"><h1>沪深300与债基</h1></div>
     <div className="filters observation-controls"><input aria-label="观察日" type="date" value={end||result.end||''} onChange={e=>setEnd(e.target.value)}/><RefreshButton busy={busy} onClick={()=>refresh(revision+1)}/></div>
-    {error?<p role="alert">{error}</p>:!data?<p role="status">读取股债数据…</p>:!result.series.length?<p>{data.missing||'暂无共同有效区间'}</p>:<section><div className="observation-section-heading"><span className="observation-event-count">{result.start}—{result.end} · 指数点位</span></div><ContextChart data={result} lines={result.lines} dualAxis height={420} label="沪深300全收益与中证非纯债基走势"/><p className="sub">双轴按{result.anchors.length?`${result.anchors.length}处历史低点校准`:'首日等高对齐'}，非预测；债基以930897替代885007。</p></section>}
+    {error?<p role="alert">{error}</p>:!data?<p role="status">读取股债数据…</p>:!result.series.length?<p>{data.missing||'暂无共同有效区间'}</p>:<section><ContextChart data={result} lines={result.lines} dualAxis height={420} label="沪深300全收益与中证非纯债基走势"/></section>}
   </main>;
 }
 
@@ -124,12 +124,11 @@ function CycleObserve() {
   const zoomGroup=useMemo(()=>new Set(),[data]);
   useEffect(()=>{const q=new URLSearchParams(location.search);end?q.set('end',end):q.delete('end');history.replaceState({},'',location.pathname+'?'+q);},[end]);
   return <main className="board-content observation-page" aria-busy={busy}>
-    <div className="observation-heading"><h1>市场周期</h1><span>预览</span></div>
+    <div className="observation-heading"><h1>市场周期</h1></div>
     <div className="filters observation-controls">{<select aria-label="观察指数" value={index} onChange={e=>setIndex(e.target.value)}>{Object.entries(indices).map(([code,name])=><option key={code} value={code}>{name}</option>)}</select>}<input aria-label="观察日" type="date" value={end||data?.series?.at(-1)?.trade_date||''} onChange={e=>setEnd(e.target.value)}/><RefreshButton busy={busy} onClick={()=>refresh(revision+1)}/></div>
     {error?<p role="alert">{error}</p>:!data?<p role="status">读取研究数据…</p>:!data.series?.length?<p>{data.missing||'暂无数据'}</p>:<>
       {data.current&&<div className="observation-status"><div><strong>{data.current.direction>0?(data.current.drawdown<0?'回撤中':'阶段高位'):(data.current.rebound>0?'反弹中':'阶段低位')}</strong><span>20%口径：{data.current.direction>0?'上行阶段':'下行阶段'} · {data.current.as_of}</span></div><div><strong>{format(data.current.drawdown,true)}</strong><span>较阶段高点 {data.current.peak_date}</span></div><div><strong>{format(data.current.rebound,true)}</strong><span>较阶段低点 {data.current.low_date}</span></div></div>}
-      <section><div className="observation-section-heading"><h2>{indices[data?.index||index]}历史周期</h2><span className="observation-event-count">日收盘 · ±20% · 事后划分</span></div><ContextChart data={data} cycle zoomGroup={zoomGroup}/></section>
-      <p className="sub">上涨对数压缩、下跌百分比；标注为真实涨跌幅。日收盘反向20%确认拐点，灰色虚线为进行中阶段，历史拐点事后划分。</p>
+      <section><div className="observation-section-heading"><h2>{indices[data?.index||index]}历史周期</h2><span className="observation-event-count">上涨对数压缩、下跌百分比</span></div><ContextChart data={data} cycle zoomGroup={zoomGroup}/></section>
     </>}
   </main>;
 }
@@ -154,10 +153,6 @@ export function fundsView(data,allocation) {
   return {flow:trim(data),monthly:trim(monthly),allocation:trim(allocation)};
 }
 
-export function ContextObserve({view}) {
-  return view==='cycle'?<CycleObserve/>:<FundsObserve/>;
-}
-
 function FundsObserve() {
   const [savedEnd,saveEnd]=usePreference('observe.end',''),[end,setEnd]=useState(()=>new URLSearchParams(location.search).get('end')??savedEnd),[revision,refresh]=useState(0);
   const {data,error,busy}=useResource('/api/futures/v1/observation/context?view=flow'+(end?'&end='+end:''),revision,'flow');
@@ -165,22 +160,21 @@ function FundsObserve() {
   const {flow,monthly,allocation:scale}=useMemo(()=>fundsView(data,allocation),[data,allocation]),last=flow?.series?.at(-1),ratio=scale?.series?.findLast(p=>Number.isFinite(p.ratio));
   useEffect(()=>{saveEnd(end);const q=new URLSearchParams(location.search);q.delete('fund_view');end?q.set('end',end):q.delete('end');history.replaceState({},'',location.pathname+'?'+q);},[end]);
   return <main className="board-content observation-page" aria-busy={busy||allocationBusy}>
-    <div className="observation-heading"><h1>ETF资金</h1><span>样本预览</span></div>
+    <div className="observation-heading"><h1>ETF资金</h1></div>
     <div className="filters observation-controls"><input aria-label="观察日" type="date" value={end||last?.trade_date||ratio?.trade_date||''} onChange={e=>setEnd(e.target.value)}/><RefreshButton busy={busy||allocationBusy} onClick={()=>refresh(revision+1)}/></div>
-    {allocationError?<p role="alert">{allocationError}</p>:!allocation?<p role="status">读取规模占比…</p>:!ratio?<p>{allocation.missing||'暂无规模占比数据'}</p>:<section><div className="observation-section-heading"><h2>头部沪深300ETF规模占比</h2><span className="observation-event-count">{ratio.trade_date}</span></div><div className="observation-section-heading"><Metric label="规模占比" value={format(ratio.ratio,true)} hint="四只沪深300ETF净资产合计 ÷ 沪深300流通市值。"/></div><ContextChart data={scale} label="沪深300ETF规模占比"/></section>}
+    {allocationError?<p role="alert">{allocationError}</p>:!allocation?<p role="status">读取规模占比…</p>:!ratio?<p>{allocation.missing||'暂无规模占比数据'}</p>:<section><div className="observation-section-heading"><h2>头部沪深300ETF规模占比</h2><span className="observation-event-count">{ratio.trade_date}</span></div><div className="observation-section-heading"><Metric label="规模占比" value={format(ratio.ratio,true)}/></div><ContextChart data={scale} label="沪深300ETF规模占比"/></section>}
     {error?<p role="alert">{error}</p>:!data?<p role="status">读取资金数据…</p>:!last?<p>{data.missing||'暂无数据'}</p>:<>
       <section><div className="observation-section-heading"><h2>累计净申赎估算 / 亿元{data.meta?.currency_assumed?'（人民币假设）':''}</h2><span className="observation-event-count">已纳入{data.coverage?.included_flow??data.funds.length}只</span></div>
       <div className="observation-section-heading">{Object.entries(flowGroups).filter(([key])=>data.funds.some(f=>f.group===key)).map(([key,name])=><Metric key={key} label={name+'ETF'} value={format(last[key])} hint="自样本起点累计的已观测净申购估算。"/>)}</div>
       <ContextChart data={flow} flow label="ETF累计净申赎估算"/></section>
       <section><div className="observation-section-heading"><h2>月度净申赎 / 亿元</h2><span className="observation-event-count">末月截至 {last.trade_date}</span></div><ContextChart data={monthly} flow monthly label="ETF月度净申赎估算"/></section>
-      <p className="sub">{data.meta?.currency_assumed?'人民币净值假设；':''}按最新持有人占比固定分组，缺少分类者不计；非实际投资者交易，未校正折算。</p>
     </>}
   </main>;
 }
 
 export default function Observe() {
-  const views={cycle:'市场周期',stock:'股债联动',compare:'股债对照',funds:'ETF资金'},query=new URLSearchParams(location.search);
+  const views={cycle:'市场周期',stock:'国债强弱',compare:'股债位置',funds:'ETF资金'},query=new URLSearchParams(location.search);
   const [saved,save]=usePreference('observe.view','stock'),[view,setView]=useState(()=>{const value=query.get('view')||saved;return ['allocation','flow'].includes(value)?'funds':views[value]?value:'stock';});
   useEffect(()=>{save(view);const q=new URLSearchParams(location.search);q.set('view',view);history.replaceState({},'',location.pathname+'?'+q);},[view]);
-  return <><div className="board-content" style={{paddingBottom:0}}><nav className="board-tabs" aria-label="观察页签">{Object.entries(views).map(([key,label])=><button key={key} aria-pressed={view===key} onClick={()=>setView(key)}>{label}</button>)}</nav></div>{view==='stock'?<StockBondObserve/>:view==='compare'?<ComparisonObserve/>:<ContextObserve view={view}/>}</>;
+  return <><div className="board-content" style={{paddingBottom:0}}><nav className="board-tabs" aria-label="观察页签">{Object.entries(views).map(([key,label])=><button key={key} aria-pressed={view===key} onClick={()=>setView(key)}>{label}</button>)}</nav></div>{view==='stock'?<StockBondObserve/>:view==='compare'?<ComparisonObserve/>:view==='cycle'?<CycleObserve/>:<FundsObserve/>}</>;
 }

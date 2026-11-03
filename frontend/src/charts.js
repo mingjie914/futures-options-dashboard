@@ -40,7 +40,7 @@ export function ChartFrame({children}) {
     error&&createElement('p',{role:'status'},error),children);
 }
 
-// Six chart views share one engine, loaded only after a chart is mounted.
+// Charts share one engine, loaded only near the viewport.
 export function useChart(ref, draw, dependencies, zoomGroup, syncLegend = false) {
   const active=useRef();
   useEffect(() => {
@@ -56,7 +56,7 @@ export function useChart(ref, draw, dependencies, zoomGroup, syncLegend = false)
         import('./chart-engine.js').then(({init})=>{
           if(active.current!==state)return;
           state.chart=init(node);state.update();
-          state.observer=new ResizeObserver(()=>state.chart.resize());state.observer.observe(node);
+          state.observer=new ResizeObserver(()=>{const width=node.clientWidth,height=node.clientHeight;if(state.chart.getWidth()!==width||state.chart.getHeight()!==height)state.chart.resize({width,height});});state.observer.observe(node);
         }).catch(()=>{if(active.current===state)node.textContent='图表暂时无法加载，请刷新页面重试。';});
       },{rootMargin:'200px'});
       state.dispose=()=>{visibility.disconnect();state.observer?.disconnect();state.unlink?.();state.chart?.dispose();};
@@ -120,6 +120,7 @@ export function Metric({label, value, hint, valueClassName}) {
     return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',escape);window.removeEventListener('scroll',hide,true);window.removeEventListener('resize',hide);};
   },[open]);
   useEffect(()=>()=>clearTimeout(timer.current),[]);
+  if (!hint) return createElement('div',{className:'research-metric'},createElement('span',{className:'research-metric-label'},label),createElement('strong',{className:valueClassName},value));
   return createElement('div',{className:'research-metric',ref,onPointerEnter:e=>{if(e.pointerType==='mouse')show();},onPointerLeave:()=>{timer.current=setTimeout(hide,120);},onBlur:e=>{if(!e.currentTarget.contains(e.relatedTarget))hide();}},
     createElement('button',{type:'button','aria-describedby':id,onFocus:show,onClick:show},label),
     createElement('strong',{className:valueClassName},value),

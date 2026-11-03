@@ -2,7 +2,8 @@ import { useChart, ChartFrame, usePreference, observedRows, useResource } from '
 import {useMemo, useRef} from 'react';
 import {lineSegments, tooltipRows, seasonalSelection, inventoryHistory, holdingLeaders} from './lineSegments.mjs';
 
-const quantity = value => value == null ? '—' : Number(value).toLocaleString('zh-CN',{maximumFractionDigits:2});
+const quantityFormat=new Intl.NumberFormat('zh-CN',{maximumFractionDigits:2});
+const quantity=value=>value==null?'—':quantityFormat.format(Number(value));
 const historyHeight = 'clamp(380px, 56vh, 600px)';
 const inventoryHeight = 'clamp(320px, 44vh, 460px)';
 const inventoryLabel = s => (s.id.endsWith('_W')?'仓库':s.id.endsWith('_F')?'厂库':s.kind==='库存'?'交易所':'')+s.kind;

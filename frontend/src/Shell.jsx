@@ -1,33 +1,41 @@
 import { watchVersion } from './version-check.js';
 import { selectedProduct } from './preferences.js';
-import { Component, lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { Component, useEffect, useRef, useState } from 'react';
 
-const FuturesApp = lazy(async () => {
+const loadFutures = async () => {
   const [module] = await Promise.all([import('./futures/App.jsx'), import('./futures/styles.css')]);
   return { default: module.App };
-});
-const OptionsApp = lazy(() => import('./Options.jsx'));
-const SeatsApp = lazy(() => import('./seats/Dashboard.tsx'));
-const ObserveApp = import.meta.env.OBSERVE_PREVIEW ? lazy(() => import('./Observe.jsx')) : null;
-const IntradayApp = import.meta.env.INTRADAY_PREVIEW ? lazy(() => import('./Intraday.jsx')) : null;
+};
+const loadOptions = () => import('./Options.jsx');
+const loadSeats = () => import('./seats/Dashboard.tsx');
+const loadObserve = import.meta.env.OBSERVE_PREVIEW ? () => import('./Observe.jsx') : null;
+const loadIntraday = import.meta.env.INTRADAY_PREVIEW ? () => import('./Intraday.jsx') : null;
 // Only confirmed destinations are visible; deployment can set these at build time.
 const HOME = import.meta.env.VITE_HOME_URL || 'https://mingjiec.com/';
 const BASE = import.meta.env.BASE_URL;
 const touchNavigation = '(hover: none), (pointer: coarse)';
-const modules = [['seats', '席位', SeatsApp], ['futures', '期货', FuturesApp], ['options', '期权(Beta)', OptionsApp]];
-const previews = [...(ObserveApp ? [['observe','观察',ObserveApp]] : []), ...(IntradayApp ? [['intraday','日内',IntradayApp]] : [])];
+const modules = [['seats', '席位', loadSeats], ['futures', '期货', loadFutures], ['options', '期权(Beta)', loadOptions]];
+const previews = [...(loadObserve ? [['observe','观察',loadObserve]] : []), ...(loadIntraday ? [['intraday','日内',loadIntraday]] : [])];
 const currentModule = () => previews.find(([id]) => [BASE+id,BASE+id+'/'].includes(location.pathname))?.[0] || modules.find(([id]) => location.pathname.startsWith(`${BASE}${id}/`) || location.pathname === `${BASE}${id}`)?.[0] || 'futures';
 
 class ModuleErrorBoundary extends Component {
   state = { error: null };
   static getDerivedStateFromError(error) { return { error }; }
   render() {
-    return this.state.error ? <section className="module-error" role="alert"><h2>页面暂时无法加载</h2><p>{this.state.error.message}</p><button onClick={() => location.reload()}>重新加载</button></section> : this.props.children;
+    const error=this.state.error||this.props.error;
+    return error ? <section className="module-error" role="alert"><h2>页面暂时无法加载</h2><p>{error.message}</p><button onClick={() => location.reload()}>重新加载</button></section> : this.props.children;
   }
 }
 
 export default function Shell() {
   const [active, setActive] = useState(currentModule);
+  const [page,setPage]=useState({});
+  useEffect(()=>{
+    let cancelled=false;
+    const load=[...modules,...previews].find(([id])=>id===active)[2];
+    load().then(module=>{if(!cancelled)setPage({id:active,Component:module.default});},error=>{if(!cancelled)setPage({id:active,error});});
+    return()=>{cancelled=true;};
+  },[active]);
   const [touch, setTouch] = useState(() => matchMedia(touchNavigation).matches);
   const [versionState, setVersionState] = useState({ updated: false, failed: false });
   useEffect(() => {
@@ -64,7 +72,7 @@ export default function Shell() {
     menu.current.open = false;
     window.scrollTo({top: 0, left: 0, behavior: 'instant'});
   }
-  const ActiveModule = [...modules,...previews].find(([id]) => id === active)[2];
+  const ActiveModule = page.id===active?page.Component:null;
   return <div className="unified-shell">
     <script async src={new URL('site-footer.js', HOME).href} />
     <header className="unified-topbar"><nav aria-label="站点导航">
@@ -81,9 +89,9 @@ export default function Shell() {
       {previews.map(([id,label]) => <a key={id} href={`${BASE}${id}/`} aria-current={active===id?'page':undefined} onClick={event=>select(event,id)}>{label}</a>)}
     </nav></header>
     <div className={`module-frame ${active === 'futures' ? 'futures-module' : ''}`}>
-      <ModuleErrorBoundary key={active}><Suspense fallback={<p className="module-loading" role="status">加载看板…</p>}>
-        <ActiveModule />
-      </Suspense></ModuleErrorBoundary>
+      <ModuleErrorBoundary key={active} error={page.id===active?page.error:null}>
+        {ActiveModule?<ActiveModule/>:<p className="module-loading" role="status">加载看板…</p>}
+      </ModuleErrorBoundary>
     </div>
     {(versionState.updated || versionState.failed) && <div className="board-update" role="status">
       {versionState.updated && <button type="button" onClick={() => location.reload()}>数据已更新 · 更新</button>}

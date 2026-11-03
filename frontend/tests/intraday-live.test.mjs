@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {applyLivePacket,basisRows,intradayRows,liveOnline,mergeIntraday,openLive,optionRows,optionSeries,optionSmile} from '../src/intraday-live.js';
+import {applyLivePacket,basisRows,formatNumber,intradayRows,liveMatrix,liveOnline,mergeIntraday,openLive,optionRows,optionSeries,optionSmile} from '../src/intraday-live.js';
 
 test('live snapshots replace; deltas merge absolute values and preserve null/removal semantics',()=>{
   const state={quotes:new Map([['OLD',{last:1}]]),epoch:null,version:-1};
@@ -65,12 +65,29 @@ test('live basis matches the reference units and keeps unavailable OI/multiplier
   const quotes=new Map([['I',{last:2762.54}],['IH2611',{last:2744.2,acquired_at:'2026-11-02T15:00:00+08:00',oi:0}],['IH2612',{last:2700}]]);
   const [r,missing]=basisRows('I',metadata,quotes);
   assert.ok(Math.abs(r.basis-18.34)<1e-8);assert.equal(r.days,18);
-  assert.ok(Math.abs(r.absolute-18.34/2762.54*100)<1e-8);
+  assert.ok(Math.abs(r.absolute-.5502)<1e-8);
   assert.ok(Math.abs(r.annual-18.34/2762.54*365/18*100)<1e-8);
   assert.ok(Math.abs(r.daily-305.6666666667)<1e-8);assert.equal(r.oi,0);
-  assert.equal(missing.daily,null);assert.equal(missing.annual,null);assert.equal(missing.days,null);assert.equal(missing.oi,undefined);
+  assert.equal(formatNumber(r.absolute,1),'0.6');assert.equal(formatNumber(r.daily,1),'305.7');assert.equal(formatNumber(0,1),'0.0');
+  assert.equal(missing.absolute,null);assert.equal(missing.daily,null);assert.equal(missing.annual,null);assert.equal(missing.days,null);assert.equal(missing.oi,undefined);
+  quotes.set('IH2612',{last:2700,acquired_at:'2026-11-02T15:00:00+08:00'});
+  const noMultiplier=basisRows('I',metadata,quotes)[1];assert.equal(noMultiplier.absolute,null);assert.equal(noMultiplier.daily,null);assert.ok(noMultiplier.annual>0);
   quotes.set('IH2611',{last:2800,acquired_at:'2026-11-20T15:00:00+08:00'});
   const expired=basisRows('I',metadata,quotes)[0];assert.ok(expired.absolute<0);assert.equal(expired.annual,null);assert.equal(expired.daily,null);
+});
+
+test('live matrices retain every listed month, missing quotes and exact source expiry dates',()=>{
+  const metadata=Object.fromEntries(Array.from({length:12},(_,i)=>['CU27'+String(i+1).padStart(2,'0')+'.SHF',{kind:'future',last_trade_date:i?'2027-02-15':null}]));
+  const quotes=new Map(Object.keys(metadata).map((code,i)=>[code,{last:i,oi:0,acquired_at:i===1?'2026-11-02T15:00:00+08:00':'2026-11-03T15:00:00+08:00'}]));
+  quotes.delete('CU2703.SHF');
+  const result=liveMatrix(metadata,quotes);
+  assert.equal(result.meta.as_of,'2026-11-03');assert.equal(result.contracts.length,12);
+  assert.deepEqual(result.contracts.slice(0,3).map(r=>r.close),[0,null,null]);
+  assert.equal(result.contract_terms.contracts[0].last_trade_date,null);
+  assert.equal(result.contract_terms.contracts[1].last_trade_date,'2027-02-15');
+  assert.equal(liveMatrix(metadata,new Map(),'INDEX').contracts.length,12);
+  const index=new Map([...quotes,['INDEX',{acquired_at:'2026-11-02T15:00:00+08:00'}]]);
+  assert.deepEqual(liveMatrix(metadata,index,'INDEX').contracts.slice(0,2).map(r=>r.close),[null,1]);
 });
 
 test('intraday snapshots/upserts preserve source observations, minute gaps, zeros and selection boundaries',()=>{
@@ -136,8 +153,10 @@ test('first subscription needs no directory HTTP; one combined socket reconnects
 
 test('warm RAM bootstrap displays before remote handshake; newer stream supersedes it',async t=>{
   const cached={type:'snapshot',epoch:'a',version:10,catalog,quotes:{I:{last:10,acquired_at:'original'}},health:{source_mode:'wind'},connection:'connected'};
-  const {sockets,states}=setup(t,cached);
-  const live=openLive('http://127.0.0.1:18808',s=>states.push(s));await flush();
+  const {sockets,states,requests}=setup(t,cached);
+  const live=openLive('https://live.example',s=>states.push(s),'MO2611','https://live.example/');await flush();
+  assert.deepEqual(requests,['https://live.example/api/intraday/v1/bootstrap?series=MO2611']);
+  assert.equal(sockets[0].url,'wss://live.example/api/realtime/v1/stream');
   assert.equal(sockets[0].readyState,0);assert.equal(states.at(-1).quotes.get('I').last,10);
   assert.equal(states.at(-1).quotes.get('I').acquired_at,'original');
   sockets[0].onmessage({data:JSON.stringify({...cached,version:11,quotes:{I:{last:12}}})});

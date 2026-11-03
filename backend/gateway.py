@@ -1,6 +1,5 @@
 """Local same-origin entry. Only fixed internal destinations; no business logic."""
-from contextlib import asynccontextmanager
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 import asyncio
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -38,7 +37,7 @@ app=FastAPI(lifespan=lifespan,docs_url=None,redoc_url=None)
 app.add_middleware(ResearchHTTP)
 if INTRADAY_PREVIEW and os.environ.get('DASHBOARD_INTRADAY_UPSTREAM'):
     from backend.intraday import enable
-    live_run=enable(app,os.environ['DASHBOARD_INTRADAY_UPSTREAM'])
+    live_run=enable(app,os.environ['DASHBOARD_INTRADAY_UPSTREAM'],os.environ.get('DASHBOARD_INTRADAY_ORIGIN','http://127.0.0.1:8799'))
 
 
 @app.middleware('http')

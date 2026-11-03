@@ -37,6 +37,10 @@ jobs:
           (cd seats/backend && ../../.venv-seats/bin/python -m pytest -q)
       - name: Build and test unified frontend
         working-directory: frontend
+        env:
+          DASHBOARD_OBSERVE_PREVIEW: '1'
+          DASHBOARD_INTRADAY_PREVIEW: '1'
+          VITE_INTRADAY_BASE: https://mingjiec.com
         run: |
           pnpm install --frozen-lockfile
           pnpm build

@@ -1,9 +1,10 @@
 import './SpreadMatrix.css';
 import {useMemo} from 'react';
-const fmt=v=>v==null?'—':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:2});
+const decimal=new Intl.NumberFormat('zh-CN',{maximumFractionDigits:2});
+const fmt=v=>v==null?'—':decimal.format(Number(v));
 
 export function spreadMatrix(contracts, asOf, terms) {
- const nodes=contracts.filter(c=>c.trade_date===asOf&&/^[A-Z]+\d{4}$/.test(c.symbol)&&Number(c.symbol.slice(-2))>=1&&Number(c.symbol.slice(-2))<=12).slice().sort((a,b)=>a.symbol.localeCompare(b.symbol));
+ const nodes=contracts.filter(c=>c.trade_date===asOf&&/^[A-Z]+\d{4}$/.test(c.symbol)&&Number(c.symbol.slice(-2))>=1&&Number(c.symbol.slice(-2))<=12).sort((a,b)=>a.symbol.localeCompare(b.symbol));
  const dates=new Map((terms?.as_of===asOf?terms.contracts||[]:[]).filter(c=>['rds_recorded','wind_recorded'].includes(c.status)&&/^\d{4}-\d{2}-\d{2}$/.test(c.last_trade_date)).map(c=>[c.symbol,Date.parse(c.last_trade_date)]));
  let minimum=Infinity,maximum=-Infinity;
  const rows=nodes.map((row,i)=>({symbol:row.symbol,cells:nodes.map((col,j)=>{

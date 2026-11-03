@@ -15,6 +15,21 @@ const module={exports:{}},chartDraws=[];
 new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.startsWith('react')?sharedRequire(id):id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),useChart:(_ref,draw)=>chartDraws.push(draw)}:createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
 const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel,spreadMatrix,SpreadMatrix,SeasonalSpreadChart,RolloverProgress}=module.exports;
 
+test('option formats preserve rounding and smile/spot render in one update',async()=>{
+ const source=await readFile(new URL('../../../frontend/src/Options.jsx',import.meta.url),'utf8'),draws=[],module={exports:{}};
+ const code=ts.transpileModule(source+'\nexport {formatNumber,VolatilityTab};',{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('.css')?{}:id==='./charts.js'?{...sharedRequire('./src/charts.js'),useChart:(_ref,draw)=>draws.push(draw),usePreference:()=>['single',()=>{}]}:id==='./SurfaceComparison.jsx'?{IvHistory:()=>null}:sharedRequire(id.startsWith('./')?'./src/'+id.slice(2):id));
+ for(const digits of [0,1,2,3])for(const value of [null,undefined,'',NaN,Infinity,0,-1234.5678,'1234.5678']){
+  const n=value===null||value===undefined||value===''?NaN:Number(value);
+  assert.equal(module.exports.formatNumber(value,digits),Number.isFinite(n)?n.toLocaleString('en-US',{minimumFractionDigits:digits,maximumFractionDigits:digits}):'—');
+ }
+ const rows=['C','P'].map(cp=>({month:'202612',cp,strike:6000,iv:.3,code:'MO2612-'+cp+'-6000'})),month={id:'202612'};
+ renderToStaticMarkup(React.createElement(module.exports.VolatilityTab,{rows,month,months:[month],spot:6010,snapshot:{}}));
+ const options=[];for(const draw of draws)draw({setOption:option=>options.push(option)});
+ assert.equal(options.length,1);assert.deepEqual(options[0].series[0].markLine.data,[{xAxis:6010}]);
+ assert.deepEqual(options[0].series.map(s=>s.data),[[[6000,30]],[[6000,30]]]);
+});
+
 test('intraday chart keeps the trading session, real gaps and independent price/IV scales',async()=>{
  const draws=[],module={exports:{}};
  const code=ts.transpileModule(await readFile(new URL('../../../frontend/src/IntradayOptions.jsx',import.meta.url),'utf8'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
@@ -24,12 +39,12 @@ test('intraday chart keeps the trading session, real gaps and independent price/
   draws.length=0;
   renderToStaticMarkup(React.createElement(module.exports.default,{catalog:{codes:[],metadata:{}},quotes:new Map([['IM2611.CFE',{prev_close:6320}]]),series:'MO2611',intraday}));
   const options=[];for(const draw of draws)draw({setOption:option=>options.push(option)});
-  return options.find(option=>option.xAxis.type==='category');
+  return options.find(option=>option.xAxis[0]?.type==='category');
  };
  const chart=draw(data);
- assert.equal(chart.xAxis.data.length,242);
- assert.equal(chart.xAxis.data[0],'09:30');assert.equal(chart.xAxis.data.at(-1),'15:00');
- assert.equal(chart.xAxis.data.some(time=>time.startsWith('12:')),false);
+ assert.equal(chart.xAxis[0].data.length,242);
+ assert.equal(chart.xAxis[0].data[0],'09:30');assert.equal(chart.xAxis[0].data.at(-1),'15:00');
+ assert.equal(chart.xAxis[0].data.some(time=>time.startsWith('12:')),false);
  assert.equal(chart.tooltip.axisPointer.type,'cross');
  assert.equal(chart.dataZoom.some(zoom=>zoom.type==='slider'),false);
  assert.deepEqual(chart.series[0].data.slice(0,4).map(p=>p[1]),[null,6300,null,6301]);
@@ -39,7 +54,7 @@ test('intraday chart keeps the trading session, real gaps and independent price/
  assert.equal(chart.legend,undefined);assert.equal(chart.yAxis[0].position,'right');assert.equal(chart.yAxis[1].show,false);
  assert.deepEqual(chart.visualMap[0].pieces.map((piece,i)=>i?piece.min:piece.max),[6320,6320]);
  assert.deepEqual(chart.series.map(series=>series.yAxisIndex),[0,1]);
- assert.equal(chart.series[1].itemStyle.color,'#4e7fb9');
+ assert.equal(chart.series[1].itemStyle.color,'#3d70ad');
  assert.equal(chart.series.every(series=>series.connectNulls===false),true);
  const lunch=draw({...data,volume_unit:'contracts',points:[...data.points,{time:'11:29',future_last:6290,future_volume:60},{time:'11:30',future_last:null,future_volume:null},{time:'13:00',future_last:6240,future_volume:0},{time:'13:01',future_last:null},{time:'13:03',future_last:6241}]});
  const bridge=lunch.series[0].markLine.data.find(Array.isArray);
@@ -56,7 +71,37 @@ test('intraday chart keeps the trading session, real gaps and independent price/
  assert.equal(ivOnly.yAxis[0].show,false);assert.equal(ivOnly.yAxis[1].show,true);
  assert.deepEqual(ivOnly.series.map(series=>series.id),['atm_iv']);
  const renderer=sharedRequire('echarts').init(null,null,{renderer:'svg',ssr:true,width:600,height:320});
- try{renderer.setOption(lunch);assert.match(renderer.renderToSVGString(),/<svg/);renderer.setOption(ivOnly,{replaceMerge:['series','visualMap']});assert.match(renderer.renderToSVGString(),/<svg/);}finally{renderer.dispose();}
+ try{
+  renderer.setOption(lunch);assert.match(renderer.renderToSVGString(),/<svg/);
+  const main=renderer.getModel().getComponent('grid',0).coordinateSystem.getRect(),volume=renderer.getModel().getComponent('grid',1).coordinateSystem.getRect();
+  assert.ok(volume.y>main.y+main.height+10,'volume has its own pane below both curves');
+  for(const seriesIndex of [0,1,2])for(const point of lunch.series[seriesIndex].data){
+   const coord=point.value||point;if(!Number.isFinite(coord[1]))continue;
+   const y=renderer.convertToPixel({seriesIndex},coord)[1];
+   assert.ok(seriesIndex===2?y>=volume.y:y<=main.y+main.height+1);
+  }
+  assert.deepEqual(lunch.dataZoom[0].xAxisIndex,[0,1]);assert.equal(lunch.series[2].xAxisIndex,1);
+  renderer.setOption(ivOnly,{replaceMerge:['series','visualMap','grid','xAxis','yAxis']});assert.match(renderer.renderToSVGString(),/<svg/);
+  assert.equal(renderer.getModel().getComponent('grid',1),undefined);assert.equal(renderer.getModel().getComponent('yAxis',2),undefined);
+ }finally{renderer.dispose();}
+});
+
+test('intraday cold start and source-selected commodity codes keep candidate metadata off the page',async t=>{
+ const originalLocation=globalThis.location;t.after(()=>{globalThis.location=originalLocation;});globalThis.location={search:'?series=MO2611'};
+ const source=(await readFile(new URL('../../../frontend/src/Intraday.jsx',import.meta.url),'utf8')).replace(/import\.meta\.env\.VITE_INTRADAY_\w+/g,'undefined');
+ const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const selected=['CU2612.SHF','CU2701.SHF','CU2702.SHF'],all=[...selected,'CU2712.SHF'];
+ const feed={connection:'connected',health:{source_mode:'wind'},catalog:{codes:all,commodity_selection:{CU:selected},metadata:Object.fromEntries(all.map((code,i)=>[code,{kind:'future',product:'CU',product_name:'铜',unit:'CNY/t',last_trade_date:['2026-12-15','2027-01-15','2027-02-15','2027-12-15'][i]}]))},quotes:new Map(all.map((code,i)=>[code,{last:60000+i,oi:i===3?999999:1,acquired_at:'2026-11-03T15:00:00+08:00'}]))};
+ function render(data){
+  const module={exports:{}};
+  new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('.css')?{}:id==='react'?{...React,lazy:()=>()=>null,useState:initial=>{const value=typeof initial==='function'?initial():initial;return React.useState(data&&value?.quotes instanceof Map?data:value);}}:id==='./preferences.js'?{usePreference:()=>['MO2611',()=>{}]}:id==='./SpreadMatrix.jsx'?matrixModule.exports:id==='./IntradayOptions.jsx'?{default:()=>null}:sharedRequire(id.startsWith('./')?'./src/'+id.slice(2):id));
+  return renderToStaticMarkup(React.createElement(module.exports.default));
+ }
+ assert.match(render(),/月份待接入/);
+ const html=render(feed);assert.match(html,/CU\/铜/);assert.match(html,/intraday-commodities/);assert.doesNotMatch(html,/CU2712/);assert.equal((html.match(/<td /g)||[]).length,9);
+ feed.catalog.commodity_selection.CU=[];assert.doesNotMatch(render(feed),/CU\/铜/);
+ delete feed.catalog.commodity_selection;assert.match(render(feed),/CU2712/);
+ feed.catalog.codes=selected;assert.doesNotMatch(render(feed),/CU2712/);
 });
 
 test('spread matrix uses recorded last trading days, preserves missing values and marks valid extrema',()=>{
@@ -283,17 +328,49 @@ test('rollover overlay uses separate relative-day axes and real dates without jo
 });
 
 
-async function sharedHooks(overrides={}) {
- const source=await readFile(new URL('../../../frontend/src/charts.js',import.meta.url),'utf8');
- const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+async function sharedHooks(overrides={},file='charts.js') {
+ const source=(await readFile(new URL('../../../frontend/src/'+file,import.meta.url),'utf8')).replaceAll('import.meta.env.OBSERVE_PREVIEW','false').replaceAll('import.meta.env.INTRADAY_PREVIEW','false').replaceAll('import.meta.env.VITE_HOME_URL','undefined').replaceAll('import.meta.env.BASE_URL',"'/'");
+ const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const slots=[],effects=[],module={exports:{}};let index=0;
  const hooks={...React,useState:initial=>{const i=index++;slots[i]||={value:typeof initial==='function'?initial():initial};return [slots[i].value,next=>{slots[i].value=typeof next==='function'?next(slots[i].value):next;}];},
   useRef:value=>slots[index++]||=( {current:value} ),
   useEffect:(effect,deps)=>{const i=index++,old=slots[i];if(!old||!deps||deps.some((v,j)=>!Object.is(v,old.deps[j])))effects.push(()=>{old?.cleanup?.();slots[i]={deps,cleanup:effect()};});}};
- new Function('module','exports','require',code)(module,module.exports,id=>id==='react'?hooks:overrides[id]||{});
+ new Function('module','exports','require',code)(module,module.exports,id=>id==='react'?hooks:overrides[id]||(id.startsWith('react/')?sharedRequire(id):{}));
  return {render:(name,...args)=>{index=0;const value=module.exports[name](...args);effects.splice(0).forEach(fn=>fn());return value;},unmount:()=>slots.forEach(slot=>slot.cleanup?.())};
 }
 const settleHooks=()=>new Promise(resolve=>setImmediate(resolve));
+
+test('module loading paints the shell, ignores a departed module and isolates import failures',async t=>{
+ const originals=Object.fromEntries(['location','history','window','document','matchMedia'].map(key=>[key,globalThis[key]]));
+ t.after(()=>Object.assign(globalThis,originals));
+ globalThis.location={pathname:'/futures/',search:'',origin:'http://localhost'};
+ globalThis.history={pushState:(_a,_b,url)=>{globalThis.location.pathname=url.pathname;globalThis.location.search=url.search;}};
+ globalThis.window={addEventListener(){},removeEventListener(){},scrollTo(){}};
+ globalThis.document={addEventListener(){},removeEventListener(){}};
+ globalThis.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
+ let finishFutures;
+ const future=()=>null,seats=()=>null;
+ const h=await sharedHooks({'./version-check.js':{watchVersion:()=>()=>{}},'./preferences.js':{selectedProduct:()=>null},
+  './futures/App.jsx':new Promise(resolve=>finishFutures=()=>resolve({App:future})), './seats/Dashboard.tsx':{default:seats},
+  './Options.jsx':{then:(_resolve,reject)=>reject(Error('asset unavailable'))}},'Shell.jsx');
+ const nodes=node=>!node||typeof node!=='object'?[]:[node,...React.Children.toArray(node.props?.children).flatMap(nodes)];
+ const boundary=tree=>nodes(tree).find(node=>node.type?.name==='ModuleErrorBoundary');
+ const navigate=id=>{
+  const tree=h.render('default'),all=nodes(tree);
+  all.find(node=>node.type==='details').props.ref.current={open:false,querySelector:()=>({focus(){}})};
+  all.find(node=>node.type==='a'&&node.props.href==='/'+id+'/').props.onClick({preventDefault(){}});
+  return h.render('default');
+ };
+ assert.ok(nodes(h.render('default')).some(node=>node.props?.['aria-label']==='站点导航'));
+ navigate('seats');await settleHooks();
+ assert.ok(nodes(h.render('default')).some(node=>node.type===seats));
+ finishFutures();await settleHooks();assert.ok(nodes(h.render('default')).some(node=>node.type===seats));
+ navigate('options');await settleHooks();const failed=h.render('default');
+ assert.equal(boundary(failed).props.error.message,'asset unavailable');
+ assert.match(renderToStaticMarkup(failed),/页面暂时无法加载/);
+ navigate('futures');await settleHooks();assert.ok(nodes(h.render('default')).some(node=>node.type===future));
+ h.unmount();
+});
 
 test('selection requests retain the previous view, cancel stale responses and distinguish errors',async()=>{
  const requests=[];
@@ -313,18 +390,19 @@ test('selection requests retain the previous view, cancel stale responses and di
 
 test('chart updates reuse the instance and dispose only when the DOM node leaves',async()=>{
  const oldIntersection=globalThis.IntersectionObserver,oldResize=globalThis.ResizeObserver;
- let created=0,disposed=0,draws=0;
+ let created=0,disposed=0,draws=0,resized=0,resize;
  globalThis.IntersectionObserver=class{constructor(callback){this.callback=callback;}observe(){queueMicrotask(()=>this.callback([{isIntersecting:true}]));}disconnect(){}};
- globalThis.ResizeObserver=class{observe(){}disconnect(){}};
+ globalThis.ResizeObserver=class{constructor(callback){resize=callback;}observe(){resize();}disconnect(){}};
  try{
-  const h=await sharedHooks({'./chart-engine.js':{init:()=>{created++;return {dispose:()=>disposed++,resize(){}};}}});
-  const ref={current:{}},draw=()=>draws++;
+  const h=await sharedHooks({'./chart-engine.js':{init:()=>{created++;return {dispose:()=>disposed++,getWidth:()=>100,getHeight:()=>80,resize(){resized++;}};}}});
+  const ref={current:{clientWidth:100,clientHeight:80}},draw=()=>draws++;
   h.render('useChart',ref,draw,[1]);await settleHooks();
   h.render('useChart',ref,draw,[2]);await settleHooks();
-  assert.equal(created,1);assert.equal(disposed,0);assert.equal(draws,2);
+  assert.equal(created,1);assert.equal(disposed,0);assert.equal(draws,2);assert.equal(resized,0);
+  ref.current.clientWidth=120;resize();assert.equal(resized,1);
   h.render('useChart',ref,draw,[2]);assert.equal(draws,2);
   ref.current=null;h.render('useChart',ref,draw,[2]);assert.equal(disposed,1);
-  ref.current={};h.render('useChart',ref,draw,[3]);await settleHooks();
+  ref.current={clientWidth:100,clientHeight:80};h.render('useChart',ref,draw,[3]);await settleHooks();
   assert.equal(created,2);h.unmount();assert.equal(disposed,2);
  }finally{globalThis.IntersectionObserver=oldIntersection;globalThis.ResizeObserver=oldResize;}
 });
@@ -445,7 +523,7 @@ test('ETF funds share one page and chart height, preserving monthly gaps and sep
    const html=renderToStaticMarkup(React.createElement(module.exports.default));
    assert.equal(requests.length,2);assert.equal(draws.length,3);assert.match(requests[0],/view=flow&end=2026-10-30/);assert.match(requests[1],/view=allocation&end=2026-10-30/);
    assert.doesNotMatch(html,/资金视角|近20日|未分类|<table/);assert.equal((html.match(/height:380px/g)||[]).length,3);
-   assert.match(html,/规模占比<\/button><strong>1%/);assert.match(html,/2026-10-21/);
+   assert.match(html,/规模占比<\/span><strong>1%/);assert.match(html,/2026-10-21/);
    assert.ok(html.indexOf('头部沪深300ETF规模占比')<html.indexOf('累计净申赎估算'));assert.ok(html.indexOf('累计净申赎估算')<html.indexOf('月度净申赎'));
     assert.match(html,/人民币假设/);assert.ok(html.includes('个人为主ETF</button><strong>140'));assert.match(html,/末月截至 2026-10-21/);
     let option;draws[2]({setOption:o=>option=o});
@@ -525,7 +603,7 @@ test('stock-bond overlay keeps two raw index levels, shared dates and missing ob
   globalThis.location={search:'?view=compare&end=2026-10-30'};
   const html=renderToStaticMarkup(React.createElement(ComparisonObserve));
   assert.doesNotMatch(html,/<select|相对强弱|滚动相关|滚动一年|区间回撤|起点100/);
-  assert.match(html,/沪深300与债基/);assert.match(html,/指数点位/);
+  assert.match(html,/沪深300与债基/);assert.doesNotMatch(html,/指数点位/);
   let option;draws.pop()({setOption:o=>{option=o;}});
   assert.deepEqual(option.series.map(s=>s.name),['沪深300全收益','中证非纯债基']);
   assert.deepEqual(option.series[0].data,[5100,5200,5300]);

@@ -13,7 +13,8 @@ def test_observation_full_preview_history_precedes_common_display_without_future
     from datetime import timedelta
     _,store,_=setup
     monkeypatch.setenv('DASHBOARD_OBSERVE_PREVIEW','1')
-    history=store.runtime.parent/'observation-history';history.mkdir()
+    history=store.runtime.parent/'external'/'observation-history';history.mkdir(parents=True)
+    monkeypatch.setenv('DASHBOARD_OBSERVATION_ROOT',str(history.parent))
     days=[date(2025,1,1)+timedelta(days=i) for i in range(60)]
     with duckdb.connect() as con:
         con.execute('CREATE TABLE prices(symbol VARCHAR,trade_date DATE,close DOUBLE)')
@@ -22,12 +23,25 @@ def test_observation_full_preview_history_precedes_common_display_without_future
         con.execute('CREATE TABLE mapping(product VARCHAR,symbol VARCHAR,start_date DATE,end_date DATE)')
         con.executemany('INSERT INTO mapping VALUES (?,?,?,?)',[('T','T2506',days[0],days[-1]),('IM','IM2506',days[42],days[-1])])
         con.execute('COPY mapping TO ? (FORMAT PARQUET)',[str(history/'mapping.parquet')])
-    client=TestClient(create_app(store));data=client.get('/api/observation?product=IM&end='+days[50].isoformat()).json()
+    client=TestClient(create_app(store));url='/api/observation?product=IM&end='+days[50].isoformat()
+    response=client.get(url);data=response.json()
     assert data['series'][0]['trade_date']==days[42].isoformat()
     assert data['series'][-1]['trade_date']==days[50].isoformat()
     assert data['bond_history_start']==days[20].isoformat()
     assert data['series'][0]['bond_p90'] is not None and data['series'][0]['bond_percentile'] is not None
     assert all(p['stock_close'] is not None for p in data['series'])
+    assert client.get(url,headers={'If-None-Match':response.headers['etag']}).status_code==304
+    for filename,update,params,field,value in [
+        ('prices.parquet','UPDATE current SET close=7777 WHERE symbol=? AND trade_date=?',['IM2506',days[50]],'stock_close',7777),
+        ('mapping.parquet','UPDATE current SET end_date=? WHERE product=?',[days[49],'T'],'bond_close',None)]:
+        with duckdb.connect() as con:
+            con.execute('CREATE TABLE current AS SELECT * FROM read_parquet(?)',[str(history/filename)])
+            con.execute(update,params)
+            con.execute('COPY current TO ? (FORMAT PARQUET)',[str(history/'next.parquet')])
+        (history/'next.parquet').replace(history/filename)
+        updated=client.get(url,headers={'If-None-Match':response.headers['etag']})
+        assert updated.status_code==200 and updated.json()['series'][-1][field]==value
+        response=updated
 
 
 def test_observation_default_closed_and_explicit_preview(setup,monkeypatch):
@@ -1529,3 +1543,11 @@ def test_etf_flow_context_stays_preview_only_and_revalidates_holder_changes(setu
     (store.runtime.parent/'observation-etf-flows.json').write_text(json.dumps(updated.json()),encoding='utf8')
     compiled=client.get(url+'&end=2026-09-07').json()
     assert compiled['series']==updated.json()['series'][:1] and compiled['funds']==updated.json()['funds']
+    holders.unlink()
+    assert client.get(url+'&end=2026-09-07').json()['series']==compiled['series']
+    published=store.runtime.parent/'published';published.mkdir()
+    monkeypatch.setenv('DASHBOARD_OBSERVATION_ROOT',str(published))
+    external=TestClient(create_app(store))
+    assert external.get(url).json()['series']==[]
+    (published/'observation-etf-flows.json').write_text(json.dumps(compiled),encoding='utf8')
+    assert external.get(url).json()['series']==compiled['series']
