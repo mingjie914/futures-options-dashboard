@@ -3,10 +3,14 @@ export function applyLivePacket(state, packet) {
   if (!['snapshot','delta','status'].includes(packet.type)) return false;
   const snapshot=packet.type==='snapshot';
   if ((!snapshot && packet.epoch!==state.epoch) || (packet.epoch===state.epoch && packet.version<state.version)) return false;
-  if (snapshot) state.quotes.clear();
-  for (const [code,quote] of Object.entries(packet.quotes||{})) {
-    if (quote===null) state.quotes.delete(code);
-    else state.quotes.set(code,{...state.quotes.get(code),...quote});
+  const entries=Object.entries(packet.quotes||{});
+  if(snapshot||entries.length) {
+    const quotes=new Map(snapshot?[]:state.quotes);
+    for (const [code,quote] of entries) {
+      if (quote===null) quotes.delete(code);
+      else quotes.set(code,{...quotes.get(code),...quote});
+    }
+    state.quotes=quotes;
   }
   Object.assign(state,{epoch:packet.epoch,version:packet.version,health:packet.health||state.health});
   return true;
@@ -16,7 +20,7 @@ export function openLive(base, view, publish) {
   let socket,retry,stopped=false,delay=1000,received=0;
   base+='/api/realtime/v1';
   const state={quotes:new Map(),catalog:null,health:null,epoch:null,version:-1,connection:'connecting'};
-  const emit=()=>publish({...state,quotes:new Map(state.quotes),received});
+  const emit=()=>publish({...state,received});
   const controller=new AbortController();
   async function catalog() {
     const response=await fetch(base+'/catalog',{signal:controller.signal,cache:'no-store'});
