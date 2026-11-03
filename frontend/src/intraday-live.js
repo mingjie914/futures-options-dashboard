@@ -33,12 +33,12 @@ export function mergeIntraday(current,next,replace=false) {
 const intradayClock=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 export function intradayRows(data) {
   const points=new Map((data?.points||[]).map(p=>[p.time.length>8?intradayClock.format(new Date(p.time)):p.time.slice(0,5),p]));
-  const times=[...points.keys()].sort(),rows=[];
-  if(!times.length)return rows;
+  const rows=[];
+  if(!points.size)return rows;
   for(let m=570;m<=900;m++) {
     if(m>690&&m<780)continue;
     const time=String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
-    if(time>=times[0]&&time<=times.at(-1))rows.push({future_last:null,atm_iv:null,...points.get(time),time});
+    rows.push({future_last:null,atm_iv:null,...points.get(time),time});
   }
   return rows;
 }
@@ -61,10 +61,10 @@ export function openLive(base, publish,series='MO2611') {
     socket.onclose=event=>{if(!stopped){state.connection=event.code===1008?'unauthorized':'disconnected';emit();if(event.code!==1008){clearTimeout(retry);retry=setTimeout(connect,delay);delay=Math.min(delay*2,30000);}}};
   }
   function subscribe() {
-    if(socket?.readyState===1)socket.send(JSON.stringify({type:'subscribe',kinds:['index','future','option'],fields:['last','iv','oi'],...(/^(IO|HO|MO)\d{4}$/.test(series)?{series}:{})}));
+    if(socket?.readyState===1)socket.send(JSON.stringify({type:'subscribe',kinds:['index','future','option'],fields:['last','prev_close','iv','oi'],...(/^(IO|HO|MO)\d{4}$/.test(series)?{series}:{})}));
   }
   connect();
-  fetch('/api/intraday/v1/bootstrap',{signal:controller.signal,cache:'no-store'}).then(async response=>{
+  fetch('/api/intraday/v1/bootstrap?series='+encodeURIComponent(series),{signal:controller.signal,cache:'no-store'}).then(async response=>{
     if(!response.ok)return;
     const cached=await response.json();
     if(stopped||state.epoch!==null||cached.type!=='snapshot'||!cached.catalog)return;

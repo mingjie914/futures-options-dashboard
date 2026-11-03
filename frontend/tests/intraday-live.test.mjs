@@ -78,7 +78,8 @@ test('intraday snapshots/upserts preserve source observations, minute gaps, zero
   const next={...initial,revision:2,points:[{time:'2026-11-03T09:32:00+08:00',future_last:0,atm_iv:null,strike:6000}]};
   const merged=mergeIntraday(initial,next);
   assert.equal(initial.points.length,1);assert.equal(merged.points.length,2);
-  assert.deepEqual(intradayRows(merged).map(p=>[p.time,p.future_last,p.atm_iv]),[['09:30',6000,0.3],['09:31',null,null],['09:32',0,null]]);
+  assert.equal(intradayRows(merged).length,242);assert.equal(intradayRows(merged).at(-1).time,'15:00');assert.ok(!intradayRows(merged).some(p=>p.time.startsWith('12:')));
+  assert.deepEqual(intradayRows(merged).slice(0,3).map(p=>[p.time,p.future_last,p.atm_iv]),[['09:30',6000,0.3],['09:31',null,null],['09:32',0,null]]);
   const correction={...next,revision:3,points:[{...next.points[0],future_last:6020}]};
   assert.equal(mergeIntraday(merged,correction).points.at(-1).future_last,6020);
   assert.equal(mergeIntraday(merged,merged),merged);
@@ -113,7 +114,7 @@ test('first subscription needs no directory HTTP; one combined socket reconnects
   const {sockets,requests,timers,states}=setup(t);
   const live=openLive('http://127.0.0.1:18808',state=>states.push(state));
   const ws=sockets[0];ws.readyState=1;ws.onopen();
-  assert.deepEqual(ws.sent[0],{type:'subscribe',kinds:['index','future','option'],fields:['last','iv','oi'],series:'MO2611'});
+  assert.deepEqual(ws.sent[0],{type:'subscribe',kinds:['index','future','option'],fields:['last','prev_close','iv','oi'],series:'MO2611'});
   const message=p=>ws.onmessage({data:JSON.stringify(p)});
   message({type:'snapshot',epoch:'a',version:1,catalog,quotes:{I:{last:10}},health:{source_mode:'wind'}});
   const lastQuotes=states.at(-1).quotes;
@@ -124,12 +125,12 @@ test('first subscription needs no directory HTTP; one combined socket reconnects
   assert.equal(sockets.length,1);
   live.select('MO2612');assert.equal(sockets.length,1);assert.equal(ws.sent.at(-1).series,'MO2612');
   live.select('MO2612');assert.equal(ws.sent.length,2);
-  assert.deepEqual(ws.sent.at(-1).fields,['last','iv','oi']);
+  assert.deepEqual(ws.sent.at(-1).fields,['last','prev_close','iv','oi']);
   assert.deepEqual(states.at(-1).catalog,catalog);
   const retained=states.at(-1).quotes;ws.onclose({code:1006});assert.equal(states.at(-1).quotes,retained);
   const retry=timers.keys().next().value;timers.delete(retry);retry();
   sockets[1].readyState=1;sockets[1].onopen();assert.deepEqual(sockets[1].sent[0].kinds,['index','future','option']);
-  await flush();assert.deepEqual(requests,['/api/intraday/v1/bootstrap']);
+  await flush();assert.deepEqual(requests,['/api/intraday/v1/bootstrap?series=MO2611']);
   live.close();assert.equal(sockets[1].closed,true);assert.equal(timers.size,0);
 });
 

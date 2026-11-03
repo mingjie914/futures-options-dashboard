@@ -12,13 +12,15 @@ def enable(app, base):
     app.state.intraday=state
 
     @app.get('/api/intraday/v1/bootstrap')
-    async def bootstrap():
+    async def bootstrap(series: str=''):
         catalog=state['catalog']
         health={**state['health']}
         age=health.get('receiver_age_seconds')
         if age is not None:health['receiver_age_seconds']=age+max(0,time.monotonic()-state['received'])
         if not state['connected']:health['source_status']='waiting_for_receiver'
-        packet=dict(type='snapshot',epoch=state['epoch'],version=state['version'],catalog=catalog,quotes=state['quotes'],intraday=state['intraday'],health=health,connection='connected' if state['connected'] else 'disconnected' if catalog['codes'] else 'connecting')
+        quotes={code:quote for code,quote in state['quotes'].items() if catalog['metadata'][code].get('kind')!='option' or catalog['metadata'][code].get('series')==series}
+        minutes=state['intraday']
+        packet=dict(type='snapshot',epoch=state['epoch'],version=state['version'],catalog=catalog,quotes=quotes,intraday=minutes if minutes and minutes['series']==series else None,health=health,connection='connected' if state['connected'] else 'disconnected' if catalog['codes'] else 'connecting')
         return JSONResponse(packet,headers={'Cache-Control':'no-store'})
 
 
@@ -27,7 +29,7 @@ def enable(app, base):
         while True:
             try:
                 async with connect(base.replace('http','ws',1).rstrip('/')+'/api/realtime/v1/stream',origin='http://127.0.0.1:8799') as ws:
-                    await ws.send(json.dumps({'type':'subscribe','kinds':['index','future','option'],'fields':['last','iv','oi']}))
+                    await ws.send(json.dumps({'type':'subscribe','kinds':['index','future','option'],'fields':['last','prev_close','iv','oi']}))
                     async for raw in ws:
                         packet=json.loads(raw)
                         if packet['type']=='snapshot':

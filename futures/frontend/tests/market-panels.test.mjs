@@ -15,6 +15,50 @@ const module={exports:{}},chartDraws=[];
 new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.startsWith('react')?sharedRequire(id):id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),useChart:(_ref,draw)=>chartDraws.push(draw)}:createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
 const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel,spreadMatrix,SpreadMatrix,SeasonalSpreadChart,RolloverProgress}=module.exports;
 
+test('intraday chart keeps the trading session, real gaps and independent price/IV scales',async()=>{
+ const draws=[],module={exports:{}};
+ const code=ts.transpileModule(await readFile(new URL('../../../frontend/src/IntradayOptions.jsx',import.meta.url),'utf8'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ new Function('module','exports','require',code)(module,module.exports,id=>id==='./charts.js'?{ChartFrame:({children})=>children,useChart:(_ref,draw)=>draws.push(draw)}:id==='./intraday-live.js'?sharedRequire('./src/intraday-live.js'):sharedRequire(id));
+ const data={series:'MO2611',trade_date:'2026-11-03',future_code:'IM2611.CFE',points:[{time:'09:31',future_last:6300,atm_iv:.30,strike:6300},{time:'09:33',future_last:6301,atm_iv:null}]};
+ const draw=intraday=>{
+  draws.length=0;
+  renderToStaticMarkup(React.createElement(module.exports.default,{catalog:{codes:[],metadata:{}},quotes:new Map([['IM2611.CFE',{prev_close:6320}]]),series:'MO2611',intraday}));
+  const options=[];for(const draw of draws)draw({setOption:option=>options.push(option)});
+  return options.find(option=>option.xAxis.type==='category');
+ };
+ const chart=draw(data);
+ assert.equal(chart.xAxis.data.length,242);
+ assert.equal(chart.xAxis.data[0],'09:30');assert.equal(chart.xAxis.data.at(-1),'15:00');
+ assert.equal(chart.xAxis.data.some(time=>time.startsWith('12:')),false);
+ assert.equal(chart.tooltip.axisPointer.type,'cross');
+ assert.equal(chart.dataZoom.some(zoom=>zoom.type==='slider'),false);
+ assert.deepEqual(chart.series[0].data.slice(0,4).map(p=>p[1]),[null,6300,null,6301]);
+ assert.equal(chart.series[0].data.at(-1)[1],null);
+ assert.deepEqual(chart.series[0].markPoint.data[0].coord,['09:33',6301]);
+ assert.equal(chart.series[1].data[1][1],30);assert.equal(chart.series[1].data[3][1],null);
+ assert.equal(chart.legend,undefined);assert.equal(chart.yAxis[0].position,'right');assert.equal(chart.yAxis[1].show,false);
+ assert.deepEqual(chart.visualMap[0].pieces.map((piece,i)=>i?piece.min:piece.max),[6320,6320]);
+ assert.deepEqual(chart.series.map(series=>series.yAxisIndex),[0,1]);
+ assert.equal(chart.series[1].itemStyle.color,'#4e7fb9');
+ assert.equal(chart.series.every(series=>series.connectNulls===false),true);
+ const lunch=draw({...data,volume_unit:'contracts',points:[...data.points,{time:'11:29',future_last:6290,future_volume:60},{time:'11:30',future_last:null,future_volume:null},{time:'13:00',future_last:6240,future_volume:0},{time:'13:01',future_last:null},{time:'13:03',future_last:6241}]});
+ const bridge=lunch.series[0].markLine.data.find(Array.isArray);
+ assert.deepEqual(bridge.map(p=>p.coord),[['11:29',6290],['13:00',6240]]);
+ const quantity=lunch.series.find(series=>series.id==='future_volume');
+ assert.equal(quantity.type,'bar');assert.equal(quantity.yAxisIndex,2);assert.equal(lunch.yAxis[2].show,false);
+ assert.equal(quantity.data.find(p=>p.value[0]==='13:00').value[1],0);assert.equal(quantity.data.find(p=>p.value[0]==='11:30').value[1],null);
+ assert.equal(draw({...data,points:[{time:'09:31',future_last:6300,future_volume:123}]}).series.some(series=>series.id==='future_volume'),false);
+ assert.equal(bridge[0].lineStyle.type,'dashed');assert.equal(bridge[0].label.show,false);
+ assert.equal(lunch.series[0].data.find(p=>p[0]==='11:30')[1],null);
+ assert.equal(lunch.series[0].data.find(p=>p[0]==='13:01')[1],null);
+ assert.equal(draw({...data,points:[{time:'11:28',future_last:6290},{time:'13:00',future_last:6240}]}).series[0].markLine.data.some(Array.isArray),false);
+ const ivOnly=draw({...data,future_code:null});
+ assert.equal(ivOnly.yAxis[0].show,false);assert.equal(ivOnly.yAxis[1].show,true);
+ assert.deepEqual(ivOnly.series.map(series=>series.id),['atm_iv']);
+ const renderer=sharedRequire('echarts').init(null,null,{renderer:'svg',ssr:true,width:600,height:320});
+ try{renderer.setOption(lunch);assert.match(renderer.renderToSVGString(),/<svg/);renderer.setOption(ivOnly,{replaceMerge:['series','visualMap']});assert.match(renderer.renderToSVGString(),/<svg/);}finally{renderer.dispose();}
+});
+
 test('spread matrix uses recorded last trading days, preserves missing values and marks valid extrema',()=>{
  const trade_date='2026-10-29',row=(symbol,close)=>({symbol,close,trade_date});
  const contracts=[row('IM2706',5986),row('IM2611',6354),row('IM2703',6151.2),row('IM2612',6304.4),row('IM9999',999),{...row('IM2610',6000),trade_date:'2026-10-16'}];

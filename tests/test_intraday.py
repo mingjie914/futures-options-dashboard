@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from backend import intraday
 
 
-CATALOG={'codes':['I','F','O'],'revision':'one','metadata':{'I':{'kind':'index'},'F':{'kind':'future'},'O':{'kind':'option'}}}
+CATALOG={'codes':['I','F','O'],'revision':'one','metadata':{'I':{'kind':'index'},'F':{'kind':'future'},'O':{'kind':'option','series':'MO2611'}}}
 
 
 def test_bootstrap_uses_one_catalog_preserves_source_time_and_ages_health():
@@ -19,15 +19,17 @@ def test_bootstrap_uses_one_catalog_preserves_source_time_and_ages_health():
         assert cold.headers['cache-control']=='no-store'
         state.update(catalog=CATALOG,quotes={'I':{'last':10,'acquired_at':'original','source_time':None},'F':{'last':0},'O':{'iv':0.35,'oi':None}},
                      health={'receiver_age_seconds':2,'source_status':'ok','source_mode':'wind'},received=time.monotonic()-10,epoch='a',version=7,connected=True)
-        data=client.get('/api/intraday/v1/bootstrap').json()
+        data=client.get('/api/intraday/v1/bootstrap?series=MO2611').json()
         assert set(data['quotes'])=={'I','F','O'}
+        assert set(client.get('/api/intraday/v1/bootstrap?series=IO2611').json()['quotes'])=={'I','F'}
+        assert set(client.get('/api/intraday/v1/bootstrap').json()['quotes'])=={'I','F'}
         assert data['catalog']==CATALOG and 'metadata' not in data
         assert data['quotes']['I']['acquired_at']=='original'
         assert data['quotes']['F']['last']==0
         assert data['health']['receiver_age_seconds']>=12
         assert data['epoch']=='a' and data['version']==7
         state['connected']=False
-        stale=client.get('/api/intraday/v1/bootstrap').json()
+        stale=client.get('/api/intraday/v1/bootstrap?series=MO2611').json()
         assert stale['connection']=='disconnected' and stale['quotes']==data['quotes']
         assert stale['health']['source_status']=='waiting_for_receiver'
 
@@ -49,7 +51,7 @@ def test_single_readonly_mirror_merges_deltas_and_retains_values_on_disconnect(m
     async def stop(_):raise asyncio.CancelledError
     monkeypatch.setattr(intraday,'connect',connect);monkeypatch.setattr(intraday.asyncio,'sleep',stop)
     with pytest.raises(asyncio.CancelledError):asyncio.run(collect())
-    assert sent==[{'type':'subscribe','kinds':['index','future','option'],'fields':['last','iv','oi']}]
+    assert sent==[{'type':'subscribe','kinds':['index','future','option'],'fields':['last','prev_close','iv','oi']}]
     state=app.state.intraday
     assert state['quotes']=={'I':{'last':2,'acquired_at':'original'}} and not state['connected']
 
