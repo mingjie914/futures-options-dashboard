@@ -40,7 +40,7 @@ export default function Shell() {
   const [versionState, setVersionState] = useState({ updated: false, failed: false });
   useEffect(() => {
     setVersionState({ updated: false, failed: false });
-    if (modules.some(([id]) => id === active)) return watchVersion(active, setVersionState);
+    if (active !== 'intraday') return watchVersion(active, setVersionState);
   }, [active]);
   const menu = useRef(null);
   const lastView = useRef({});

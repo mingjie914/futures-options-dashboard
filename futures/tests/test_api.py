@@ -49,6 +49,7 @@ def test_observation_default_closed_and_explicit_preview(setup,monkeypatch):
     monkeypatch.delenv('DASHBOARD_OBSERVE_PREVIEW',raising=False)
     closed=TestClient(create_app(store))
     assert closed.get('/api/observation').status_code==404
+    assert closed.get('/api/observation/version').status_code==404
     assert '/api/observation' not in closed.get('/openapi.json').json()['paths']
     monkeypatch.setenv('DASHBOARD_OBSERVE_PREVIEW','1')
     opened=TestClient(create_app(store))
@@ -1534,11 +1535,13 @@ def test_etf_flow_context_stays_preview_only_and_revalidates_holder_changes(setu
     holders=store.runtime.parent/'observation-etf-holders.json'
     holders.write_text(json.dumps(dict(funds=[dict(code='510300',institution=.6,individual=.4)])),encoding='utf8')
     response=client.get(url)
+    version=client.get('/api/observation/version').json()['version']
     assert response.json()['series'][-1]['institution']==30/1e8
     assert client.get(url,headers={'If-None-Match':response.headers['etag']}).status_code==304
     holders.write_text(json.dumps(dict(funds=[dict(code='510300',institution=.4,individual=.6)])),encoding='utf8')
     updated=client.get(url,headers={'If-None-Match':response.headers['etag']})
     assert updated.status_code==200 and updated.json()['funds'][0]['group']=='individual'
+    assert client.get('/api/observation/version').json()['version']!=version
     assert len(client.get(url+'&end=2026-09-07').json()['series'])==1
     (store.runtime.parent/'observation-etf-flows.json').write_text(json.dumps(updated.json()),encoding='utf8')
     compiled=client.get(url+'&end=2026-09-07').json()

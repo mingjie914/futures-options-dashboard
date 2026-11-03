@@ -2,7 +2,7 @@
 
 席位、期货、期权是同一前端下的平级模块。源码在本仓库维护，原席位工程保留作迁移前参考；本机目录名“期权终端”仅为兼容现有路径。
 
-2026-11-04 发布准备：用户已授权观察与日内上线，生产切换和节点清理由云服务器会话执行；下文“仅本地预览”记录描述此前阶段。正式 CI 显式开启 `DASHBOARD_OBSERVE_PREVIEW=1`、`DASHBOARD_INTRADAY_PREVIEW=1`，并设置 `VITE_INTRADAY_BASE=https://mingjiec.com`；默认无环境构建仍关闭。日内首发沿用户确认的新加坡同源入口转发腾讯独立实时源，Work采集和分钟缓存保持独立，不依赖home预览隧道。网关 `DASHBOARD_INTRADAY_UPSTREAM` 指向正式内部入口，`DASHBOARD_INTRADAY_ORIGIN=https://mingjiec.com`；bootstrap默认同源，只有分离实时origin时才需 `VITE_INTRADAY_BOOTSTRAP_BASE`。观察 `DASHBOARD_OBSERVATION_ROOT` 指向同一不可变数据批次的 `observation` 目录，消费已定四份JSON及 `observation-history` 两份Parquet，变化纳入ETag与原差量协议；已编译ETF汇总不要求额外携带未消费的持有人原件。ETF规则、人民币假设元数据、实际数据截止与空值保持原样。尚未宣称生产验收完成。
+2026-11-04 发布准备：用户已授权观察与日内上线，生产切换和节点清理由云服务器会话执行；下文“仅本地预览”记录描述此前阶段。正式 CI 显式开启 `DASHBOARD_OBSERVE_PREVIEW=1`、`DASHBOARD_INTRADAY_PREVIEW=1`，并设置 `VITE_INTRADAY_BASE=https://mingjiec.com`；默认无环境构建仍关闭。日内首发沿用户确认的新加坡同源入口转发腾讯独立实时源，Work采集和分钟缓存保持独立，不依赖home预览隧道。网关 `DASHBOARD_INTRADAY_UPSTREAM` 指向正式内部入口，`DASHBOARD_INTRADAY_ORIGIN=https://mingjiec.com`；bootstrap默认同源，只有分离实时origin时才需 `VITE_INTRADAY_BOOTSTRAP_BASE`。观察 `DASHBOARD_OBSERVATION_ROOT` 指向同一不可变数据批次的 `observation` 目录，消费已定四份JSON及 `observation-history` 两份Parquet，变化纳入ETag与原差量协议；观察复用可见页5分钟轻量版本检测，日内仅走WS更新；已编译ETF汇总不要求额外携带未消费的持有人原件。ETF规则、人民币假设元数据、实际数据截止与空值保持原样。尚未宣称生产验收完成。
 
 ## 运行
 
@@ -81,7 +81,7 @@ cd ..
 
 统一前端回归在 `frontend` 中执行 `pnpm build`、`pnpm typecheck`、`pnpm test`，只安装该目录依赖。期货源码和计算测试由统一构建复用；旧独立 Sites 构建壳已退役。
 
-观察页本地预览现含“市场周期 / 国债强弱 / 股债位置 / ETF资金”。隔离RDS快照放在runtime/observe-preview/observation-context.json，不纳入Git或生产发布。市场周期支持沪深300、中证全指、上证指数、上证50、中证500、中证1000；创业板指（399006.SZ）、科创50（000688.SH）已于2026-11-02接入RDS日收盘，分别覆盖2010-05-31和2019-12-31至2026-10-30，3986/1654条；代码身份分别由RDS目录、上交所官方编制方案核实（科创50的RDS元数据目录缺行，不影响已存在的行情）；日收盘反向20%事后确认并回溯拐点，上涨对数压缩、下跌百分比，标注与悬停仍显示真实涨跌幅，虚线表示进行中阶段。ETF资金的规模占比为510300/510310/510330/159919上市后同日NET_ASSETS合计除以000300.SH正值FLOAT_MARKET_CAP（不替换FREE_FLOAT）；缺任一基金规模即留空，不以份额×价格补值，右轴叠加沪深300。数据为当前RDS修订快照，非历史时点回测档案。885007.WI在windrdf.aindexwindindustrieseod仅18条（2017-08-04—2017-08-29），原指数复现仍暂缓。股债位置固定使用RDS H00300和官方既有快照930897，以原始指数点位双轴叠加（左股指、右债基），不重设起点；中证非纯债基为替代口径，不称作885007。生产默认关闭观察入口、脚本和API。
+观察页本地预览现含“市场周期 / 国债强弱 / 股债位置 / ETF资金”。隔离RDS快照放在runtime/observe-preview/observation-context.json，不纳入Git或生产发布。市场周期支持沪深300、中证全指、上证指数、上证50、中证500、中证1000；创业板指（399006.SZ）、科创50（000688.SH）已于2026-11-02接入RDS日收盘，分别覆盖2010-05-31和2019-12-31至2026-10-30，3986/1654条；代码身份分别由RDS目录、上交所官方编制方案核实（科创50的RDS元数据目录缺行，不影响已存在的行情）；日收盘反向20%事后确认并回溯拐点，上涨对数压缩、下跌百分比，标注与悬停仍显示真实涨跌幅，虚线表示进行中阶段。ETF资金的规模占比为510300/510310/510330/159919上市后同日NET_ASSETS合计除以000300.SH正值FLOAT_MARKET_CAP（不替换FREE_FLOAT）；缺任一基金规模即留空，不以份额×价格补值，右轴叠加沪深300。数据为当前RDS修订快照，非历史时点回测档案。885007.WI在windrdf.aindexwindindustrieseod仅18条（2017-08-04—2017-08-29），原指数复现仍暂缓。股债位置固定使用RDS H00300和官方既有快照930897（原始回执：云服务器实验目录 `results/bond-fund-index-probe-20261101.json.gz`），以原始指数点位双轴叠加（左股指、右债基），不重设起点；中证非纯债基为替代口径，不称作885007。生产默认关闭观察入口、脚本和API。
 
 ETF资金申赎图现为全量股票ETF的本地人民币假设预览：2020-07-01—2026-10-30固定1536观察日，目录1793只（含跨境、退市，排除债券等其他类型），1710只可计算flow，剔除缺少持有人分类的304只后，净申赎统计纳入1406只（个人为主756、机构为主650）。持有人沿用2026-06-30公开快照，按占比固定回溯分组，不视作实际个人/机构交易。净值币种尚待逐项核实，用户明确授权currency_assumed=true/currency_verified=false，页面显式标注人民币假设，不改RDS/catalog、不推送部署。份额差×净值沿用已验导出，空值不补、折算未校正；仅下发编译汇总，不向网页发送百万行原始数据。原10只源数据保留在runtime/observe-preview/etf-flows/ten-fund-source.json，导出及本地编译脚本同目录；持有人文件仍为observation-etf-holders.json。
 

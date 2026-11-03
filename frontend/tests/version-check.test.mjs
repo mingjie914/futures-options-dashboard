@@ -25,13 +25,15 @@ function setup(module = 'futures', values = ['v1']) {
 }
 
 test('baseline is silent; one active endpoint checks every five minutes and detects opaque changes/rollback', async () => {
-  const x = setup('futures', ['v1', 'v0', 'v1']); await flush();
-  assert.equal(x.calls[0].url, '/api/futures/v1/version');
+ for(const module of ['futures','observe']){
+  const x = setup(module, ['v1', 'v0', 'v1']); await flush();
+  assert.equal(x.calls[0].url, module==='observe'?'/api/futures/v1/observation/version':'/api/futures/v1/version');
   assert.deepEqual(x.states.at(-1), { updated: false, failed: false });
   x.focus(); x.focus(); await x.advance(299999); assert.equal(x.calls.length, 1);
   await x.advance(1); assert.deepEqual(x.states.at(-1), { updated: true, failed: false });
   await x.advance(300000); assert.deepEqual(x.states.at(-1), { updated: false, failed: false });
   x.stop(); assert.equal(x.timers.size, 0);
+ }
 });
 
 test('hidden pages pause and visibility/focus share throttling', async () => {

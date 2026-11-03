@@ -1,7 +1,7 @@
 import { conditionalFetch } from './transport.js';
 
 const interval = 5 * 60 * 1000;
-const endpoints = { futures: '/api/futures/v1/version', options: '/api/options/v1/version', seats: '/api/seats/v1/meta/status' };
+const endpoints = { futures: '/api/futures/v1/version', options: '/api/options/v1/version', seats: '/api/seats/v1/meta/status', observe: '/api/futures/v1/observation/version' };
 
 export function watchVersion(module, report, env = globalThis, request = conditionalFetch) {
   let baseline, updated = false, stopped = false, timer, controller, last = -Infinity;
