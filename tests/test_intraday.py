@@ -11,7 +11,7 @@ from backend import intraday
 CATALOG={'codes':['I','F','O'],'revision':'one','metadata':{'I':{'kind':'index'},'F':{'kind':'future'},'O':{'kind':'option'}}}
 
 
-def test_bootstrap_filters_views_preserves_source_time_and_ages_health():
+def test_bootstrap_uses_one_catalog_preserves_source_time_and_ages_health():
     app=FastAPI();intraday.enable(app,'http://127.0.0.1:18808');state=app.state.intraday
     with TestClient(app) as client:
         cold=client.get('/api/intraday/v1/bootstrap')
@@ -20,18 +20,16 @@ def test_bootstrap_filters_views_preserves_source_time_and_ages_health():
         state.update(catalog=CATALOG,quotes={'I':{'last':10,'acquired_at':'original','source_time':None},'F':{'last':0},'O':{'iv':0.35,'oi':None}},
                      health={'receiver_age_seconds':2,'source_status':'ok','source_mode':'wind'},received=time.monotonic()-10,epoch='a',version=7,connected=True)
         data=client.get('/api/intraday/v1/bootstrap').json()
-        assert set(data['quotes'])=={'I','F'}
+        assert set(data['quotes'])=={'I','F','O'}
+        assert data['catalog']==CATALOG and 'metadata' not in data
         assert data['quotes']['I']['acquired_at']=='original'
         assert data['quotes']['F']['last']==0
         assert data['health']['receiver_age_seconds']>=12
         assert data['epoch']=='a' and data['version']==7
-        options=client.get('/api/intraday/v1/bootstrap?view=options').json()
-        assert set(options['quotes'])=={'I','O'} and options['quotes']['O']['iv']==0.35
         state['connected']=False
         stale=client.get('/api/intraday/v1/bootstrap').json()
         assert stale['connection']=='disconnected' and stale['quotes']==data['quotes']
         assert stale['health']['source_status']=='waiting_for_receiver'
-        assert client.get('/api/intraday/v1/bootstrap?view=unknown').status_code==400
 
 
 def test_single_readonly_mirror_merges_deltas_and_retains_values_on_disconnect(monkeypatch):
@@ -51,7 +49,7 @@ def test_single_readonly_mirror_merges_deltas_and_retains_values_on_disconnect(m
     async def stop(_):raise asyncio.CancelledError
     monkeypatch.setattr(intraday,'connect',connect);monkeypatch.setattr(intraday.asyncio,'sleep',stop)
     with pytest.raises(asyncio.CancelledError):asyncio.run(collect())
-    assert sent==[{'type':'subscribe','kinds':['index','future','option'],'fields':['last','prev_close','bid','ask','iv','oi']}]
+    assert sent==[{'type':'subscribe','kinds':['index','future','option'],'fields':['last','iv','oi']}]
     state=app.state.intraday
     assert state['quotes']=={'I':{'last':2,'acquired_at':'original'}} and not state['connected']
 
@@ -79,3 +77,28 @@ def test_real_websocket_disconnect_retains_ram_bootstrap():
             finally:
                 task.cancel();await asyncio.gather(task,return_exceptions=True)
     asyncio.run(run())
+
+
+def test_intraday_minute_upserts_keep_quotes_and_reset_on_source_day_change(monkeypatch):
+    app=FastAPI();collect=intraday.enable(app,'http://source')
+    def minutes(day,revision,points):
+        return dict(series='MO2611',trade_date=day,revision=revision,future_code='IM2611.CFE',time_basis='observation',points=points)
+    class Socket:
+        async def send(self,raw):pass
+        async def __aiter__(self):
+            packets=[dict(type='snapshot',catalog=CATALOG,quotes={'I':{'last':10}},health={'source_mode':'wind','receiver_age_seconds':2},intraday=minutes('2026-11-03',1,[{'time':'09:30','future_last':6000,'atm_iv':.3}])),
+                     dict(type='intraday',intraday=minutes('2026-11-03',2,[{'time':'09:31','future_last':6010,'atm_iv':None}])),
+                     dict(type='intraday',intraday=minutes('2026-11-03',3,[{'time':'09:31','future_last':6020,'atm_iv':.31}])),
+                     dict(type='intraday',intraday=minutes('2026-11-04',4,[{'time':'09:30','future_last':6100,'atm_iv':.32}]))]
+            for version,packet in enumerate(packets):yield json.dumps(dict(epoch='a',version=version,**packet))
+            raise OSError('disconnected')
+    @asynccontextmanager
+    async def connect(*args,**kwargs):yield Socket()
+    async def stop(_):raise asyncio.CancelledError
+    monkeypatch.setattr(intraday,'connect',connect);monkeypatch.setattr(intraday.asyncio,'sleep',stop)
+    with pytest.raises(asyncio.CancelledError):asyncio.run(collect())
+    state=app.state.intraday
+    assert state['quotes']=={'I':{'last':10}}
+    assert state['intraday']['trade_date']=='2026-11-04'
+    assert state['intraday']['points']==[{'time':'09:30','future_last':6100,'atm_iv':.32}]
+    assert state['health']=={'source_mode':'wind','receiver_age_seconds':2}

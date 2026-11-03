@@ -111,37 +111,7 @@ export function ScanPanel({data,onPair}) {
  <div className="table-wrap"><table><thead><tr>{['组合 / 配对日期','价差','前次变动','走势 / 60观测','历史分位','分位样本 / 配对总数','较弱腿成交 / 手','较弱腿持仓 / 手','备注'].map((h,i)=><th className={[1,2,4,5,6,7].includes(i)?'num':undefined} key={h}>{i===4?<Metric label={h} hint="此前最多252个有效价差的分位，不含当日。"/>:h}</th>)}</tr></thead><tbody>{rows.map(o=>{const p=o.latest;const flags=[!p?'无配对数据':p.trade_date!==data.meta.as_of?'配对日期落后':null,p?.historical_percentile==null?'分位不足':null,weak(p,'volume')==null||weak(p,'position')==null?'量仓缺失':null,data.meta.stale?'缓存降级':null].filter(Boolean);return <tr key={o.near+o.far}><td><button className="link" onClick={()=>onPair(o.near,o.far)}>{o.near} / {o.far}</button><small>{p?.trade_date||'—'}</small></td><td className="num">{fmt(p?.spread)}</td><td className="num">{fmt(p?.change)}</td><td><Trend points={o.trend}/></td><td className="num">{p?.historical_percentile==null?'—':fmt(p.historical_percentile)+'%'}</td><td className="num">{fmt(p?.history_n)} / {fmt(o.sample_count)}</td><td className="num">{fmt(weak(p,'volume'))}</td><td className="num">{fmt(weak(p,'position'))}</td><td>{flags.join(' · ')||'—'}</td></tr>;})}</tbody></table></div>{!rows.length&&<p className="empty">当前筛选无组合；可取消分位筛选。</p>}</section>;
 }
 
-export function spreadMatrix(contracts, asOf, terms) {
- const nodes=contracts.filter(c=>c.trade_date===asOf&&/^[A-Z]+\d{4}$/.test(c.symbol)&&Number(c.symbol.slice(-2))>=1&&Number(c.symbol.slice(-2))<=12).slice().sort((a,b)=>a.symbol.localeCompare(b.symbol));
- const dates=new Map((terms?.as_of===asOf?terms.contracts||[]:[]).filter(c=>c.status==='rds_recorded'&&/^\d{4}-\d{2}-\d{2}$/.test(c.last_trade_date)).map(c=>[c.symbol,Date.parse(c.last_trade_date)]));
- let minimum=Infinity,maximum=-Infinity;
- const rows=nodes.map((row,i)=>({symbol:row.symbol,cells:nodes.map((col,j)=>{
-  const near=nodes[Math.min(i,j)],far=nodes[Math.max(i,j)];
-  const spread=Number.isFinite(near.close)&&Number.isFinite(far.close)?near.close-far.close:null;
-  const gap=(dates.get(far.symbol)-dates.get(near.symbol))/86400000,days=Number.isFinite(gap)&&gap>0?gap:null;
-  const value=i===j?(Number.isFinite(row.close)?row.close:null):i<j?spread:days>0&&spread!=null?spread/days:null;
-  if(i>j&&Number.isFinite(value)){minimum=Math.min(minimum,value);maximum=Math.max(maximum,value);}
-  return {near:near.symbol,far:far.symbol,days,value};
- })}));
- rows.forEach((row,i)=>row.cells.forEach((cell,j)=>{if(i>j&&Number.isFinite(cell.value)){cell.maximum=Math.abs(cell.value-maximum)<1e-10;cell.minimum=Math.abs(cell.value-minimum)<1e-10;}}));
- return rows;
-}
-
-export function SpreadMatrix({data,onPair}) {
- const rows=useMemo(()=>spreadMatrix(data.contracts,data.meta.as_of,data.contract_terms),[data.contracts,data.meta.as_of,data.contract_terms]);
- if(!rows.length)return null;
- return <section className="spread-matrix" aria-label="跨期价差矩阵">
-  <h2>跨期矩阵</h2>
-  <div className="table-wrap"><table style={{'--matrix-width':`${64+rows.length*72}px`}}><colgroup><col style={{width:64}}/>{rows.map(row=><col key={row.symbol}/>)}</colgroup><thead><tr><th scope="col">合约</th>{rows.map(row=><th scope="col" key={row.symbol}>{row.symbol}</th>)}</tr></thead><tbody>{rows.map((row,i)=><tr key={row.symbol}><th scope="row">{row.symbol}</th>{row.cells.map((cell,j)=>{
-   const diagonal=i===j,selected=!diagonal&&cell.near===data.near&&cell.far===data.far,mark=[cell.maximum?'多':'',cell.minimum?'空':''].filter(Boolean).join('/');
-   return <td key={rows[j].symbol} className={(diagonal?'matrix-price':i<j?'matrix-spread':'matrix-daily')+(selected?' matrix-selected':'')}>
-    {diagonal?<span>{fmt(cell.value)}</span>:<button type="button" className={mark?'matrix-extreme':undefined} aria-pressed={selected} aria-label={`${cell.near} − ${cell.far}，${i<j?'价差':'日均'} ${fmt(cell.value)}${mark?'，'+mark+'头移仓参考':''}，选择组合`} onClick={()=>onPair(cell.near,cell.far)} title={`${cell.near} − ${cell.far}${mark?`；${mark}头移仓参考`:""}`}>
-     {mark&&<span className="matrix-roll-mark" aria-hidden="true">{cell.maximum&&<span className="direction-long">多</span>}{cell.minimum&&<span className="direction-short">空</span>}</span>}<strong className={cell.value>0?'direction-long':cell.value<0?'direction-short':''}>{fmt(cell.value)}</strong>{i>j&&<small>{cell.days==null?'—':`${cell.days}天`}</small>}
-    </button>}
-   </td>;
-  })}</tr>)}</tbody></table></div>
- </section>;
-}
+export {SpreadMatrix,spreadMatrix} from '../../../frontend/src/SpreadMatrix.jsx';
 
 export function RolloverProgress({data}) {
  const ref=useRef(),rounds=useMemo(()=>(data?.rounds||[]).map(r=>({...r,series:observedRows(r.series,['outgoing','incoming','spread'])})),[data]),available=rounds.some(r=>r.series.length);

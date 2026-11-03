@@ -8,9 +8,11 @@ const React=sharedRequire('react'), {renderToStaticMarkup}=sharedRequire('react-
 
 const source=await readFile(new URL('../src/MarketPanels.jsx',import.meta.url),'utf8');
 const ts=sharedRequire('typescript');
+const matrixModule={exports:{}};
+new Function('module','exports','require',ts.transpileModule(await readFile(new URL('../../../frontend/src/SpreadMatrix.jsx',import.meta.url),'utf8'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(matrixModule,matrixModule.exports,id=>id.endsWith('.css')?{}:sharedRequire(id));
 const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const module={exports:{}},chartDraws=[];
-new Function('module','exports','require',code)(module,module.exports,id=>id.startsWith('react')?sharedRequire(id):id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),useChart:(_ref,draw)=>chartDraws.push(draw)}:createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
+new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.startsWith('react')?sharedRequire(id):id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),useChart:(_ref,draw)=>chartDraws.push(draw)}:createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
 const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel,spreadMatrix,SpreadMatrix,SeasonalSpreadChart,RolloverProgress}=module.exports;
 
 test('spread matrix uses recorded last trading days, preserves missing values and marks valid extrema',()=>{
@@ -37,6 +39,10 @@ test('spread matrix uses recorded last trading days, preserves missing values an
  assert.match(html,/1\.77/);
  assert.equal((html.match(/class="matrix-extreme"/g)||[]).length,2);
  assert.match(html,/title="IM2703 − IM2706；多头移仓参考"/);
+ const liveTerms={...terms,contracts:terms.contracts.map(c=>({...c,status:'wind_recorded'}))};
+ assert.deepEqual(spreadMatrix(contracts,trade_date,liveTerms),matrix);
+ const readonly=renderToStaticMarkup(React.createElement(SpreadMatrix,{data:{contracts,contract_terms:liveTerms,meta:{as_of:trade_date}}}));
+ assert.doesNotMatch(readonly,/<button|选择组合|aria-pressed/);
  const invalid=[undefined,{...terms,as_of:'2026-10-28'},...['calendar_conflict','calendar_uncovered'].map(status=>({...terms,contracts:terms.contracts.map(c=>({...c,status}))})),...['2026-11-20',null,'invalid'].map(last_trade_date=>({...terms,contracts:terms.contracts.map(c=>({...c,last_trade_date}))}))];
  for(const t of invalid){
   const rows=spreadMatrix(contracts,trade_date,t);
@@ -284,7 +290,7 @@ test('single published inventory observation is visible in both charts without i
  const source=await readFile(new URL('../src/HistoryPanel.jsx',import.meta.url),'utf8');
  const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const module={exports:{}},draws=[],data={series:[{id:'SI_W',kind:'仓单',name:'工业硅仓单',unit:'手',points:[{date:'2026-10-29',value:31327}]}]};
- new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),usePreference:(_key,value)=>[value,()=>{}],useResource:()=>({data}),useChart:(_ref,draw)=>draws.push(draw)}:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/HistoryPanel.jsx',import.meta.url))(id));
+ new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),usePreference:(_key,value)=>[value,()=>{}],useResource:()=>({data}),useChart:(_ref,draw)=>draws.push(draw)}:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/HistoryPanel.jsx',import.meta.url))(id));
  renderToStaticMarkup(React.createElement(module.exports.InventoryPanel,{product:'SI',end:'',controls:()=>null}));
  const options=draws.map(draw=>{let option;draw({setOption:value=>option=value,on(){},off(){}});return option;});
  assert.equal(options.length,2);
@@ -298,7 +304,7 @@ test('contract legend highlights every segment without hiding any contract',asyn
  const source=await readFile(new URL('../src/HistoryPanel.jsx',import.meta.url),'utf8');
  const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const module={exports:{}},draws=[];
- new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),useChart:(_ref,draw)=>draws.push(draw)}:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/HistoryPanel.jsx',import.meta.url))(id));
+ new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),useChart:(_ref,draw)=>draws.push(draw)}:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/HistoryPanel.jsx',import.meta.url))(id));
  const result={mode:'overview',metric:'price',axis:['2026-10-01','2026-10-02'],lines:['IM2611','IM2612','IM2703'].map((label,i)=>({label,points:[{x:'2026-10-01',trade_date:'2026-10-01',value:100+i}]}))};
  renderToStaticMarkup(React.createElement(module.exports.HistoryChart,{result,activeContract:'IM2612',secondaryContract:'IM2703'}));
  const options=[];let select;
@@ -317,7 +323,7 @@ test('basis overlays current contracts on one date axis and retains missing pric
  const a={series:[point('2026-09-01',1,99),point('2026-09-02',2,98)],matched:2,latest:point('2026-09-02',2,98)};
  const b={series:[point('2026-09-02',4,96)],matched:1,latest:point('2026-09-02',4,96)};
  const data={...a,contracts:['IM2611','IM2612','IM2703'],contract_positions:{IM2611:10,IM2612:100,IM2703:80},symbol:'IM2612',status:'index_close_basis',meta:{as_of:'2026-09-02'},reference:{name:'中证1000'},comparisons:{IM2611:b,IM2612:a,IM2703:b}};
- new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),usePreference:(_k,v)=>[v,()=>{}],useResource:url=>{assert.match(url,/all_contracts=true/);return {data};}}:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
+ new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),usePreference:(_k,v)=>[v,()=>{}],useResource:url=>{assert.match(url,/all_contracts=true/);return {data};}}:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
  const html=renderToStaticMarkup(React.createElement(module.exports.BasisPanel,{product:'IM',Chart:props=>{charts.push(props);return null;}}));
  assert.match(html,/<h2>股指基差<\/h2>/);assert.match(html,/<h2>期现价格<\/h2>/);
  assert.deepEqual(charts[0].lines,[['IM2612','IM2612'],['IM2703','IM2703'],['IM2611','IM2611']]);
@@ -339,7 +345,7 @@ test('explicit contract colors stay fixed when the index is first and focus chan
  const source=await readFile(new URL('../src/App.jsx',import.meta.url),'utf8');
  const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const module={exports:{}},draws=[],require=createRequire(new URL('../src/App.jsx',import.meta.url));
- new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/charts.js')?{...sharedRequire('./src/charts.js'),useChart:(_ref,draw)=>draws.push(draw)}:id.endsWith('.jsx')?{}:id.startsWith('react')?sharedRequire(id):require(id));
+ new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.endsWith('/charts.js')?{...sharedRequire('./src/charts.js'),useChart:(_ref,draw)=>draws.push(draw)}:id.endsWith('.jsx')?{}:id.startsWith('react')?sharedRequire(id):require(id));
  const props={rows:[{trade_date:'2026-10-30',index:100,near:99,far:null}],lines:[['index','中证1000'],['near','IM2612'],['far','IM2703']],colors:{'中证1000':'#505c6b',IM2612:'#4e7fb9',IM2703:'#a48b59'}};
  for(const focus of ['IM2612','IM2703']){
   renderToStaticMarkup(React.createElement(module.exports.Chart,{...props,focus}));
@@ -355,7 +361,7 @@ test('observation cycle compression retains true returns and allocation uses a s
  const source=await readFile(new URL('../../../frontend/src/Observe.jsx',import.meta.url),'utf8');
  const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const module={exports:{}},draws=[];
- new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/charts.js')?{...sharedRequire('./src/charts.js'),useChart:(_ref,draw)=>draws.push(draw)}:id==='./preferences.js'?{}:sharedRequire(id));
+ new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.endsWith('/charts.js')?{...sharedRequire('./src/charts.js'),useChart:(_ref,draw)=>draws.push(draw)}:id==='./preferences.js'?{}:sharedRequire(id));
  const points=[{trade_date:'2020-01-01',value:0},{trade_date:'2020-01-02',value:4}];
  renderToStaticMarkup(React.createElement(module.exports.ContextChart,{cycle:true,data:{series:points,cycles:[{start:'2020-01-01',end:'2020-01-02',direction:1,points}]}}));
  let option;draws.pop()({setOption:o=>{option=o;}});
