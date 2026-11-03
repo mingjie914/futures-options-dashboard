@@ -51,7 +51,7 @@ def test_single_readonly_mirror_merges_deltas_and_retains_values_on_disconnect(m
     async def stop(_):raise asyncio.CancelledError
     monkeypatch.setattr(intraday,'connect',connect);monkeypatch.setattr(intraday.asyncio,'sleep',stop)
     with pytest.raises(asyncio.CancelledError):asyncio.run(collect())
-    assert sent==[{'type':'subscribe','kinds':['index','future','option'],'fields':['last','prev_close','iv','oi']}]
+    assert sent==[{'type':'subscribe','mirror':True,'kinds':['index','future','option'],'fields':['last','prev_close','iv','oi']}]
     state=app.state.intraday
     assert state['quotes']=={'I':{'last':2,'acquired_at':'original'}} and not state['connected']
 
@@ -59,10 +59,13 @@ def test_single_readonly_mirror_merges_deltas_and_retains_values_on_disconnect(m
 def test_real_websocket_disconnect_retains_ram_bootstrap():
     from websockets.asyncio.server import serve
     async def run():
+        calls=[]
         async def source(ws):
-            await ws.recv()
+            calls.append(json.loads(await ws.recv()))
             await ws.send(json.dumps(dict(type='snapshot',catalog=CATALOG,epoch='a',version=1,
-                health={'source_mode':'wind','source_status':'ok','receiver_age_seconds':0},quotes={'I':{'last':10,'acquired_at':'original'}})))
+                health={'source_mode':'wind','source_status':'ok','receiver_age_seconds':0},quotes={'I':{'last':10,'acquired_at':'original'}},
+                intraday_all={name:dict(series=name,trade_date='2026-11-03',revision=1,volume_unit='contracts',points=[dict(time='09:30',future_last=price,future_volume=0)]) for name,price in [('MO2611',6000),('IO2611',4000)]})))
+            await ws.send(json.dumps(dict(type='intraday_batch',epoch='a',version=2,intraday_all={'MO2611':dict(series='MO2611',trade_date='2026-11-03',revision=2,points=[dict(time='09:31',future_last=6010,future_volume=1)])})))
             await ws.close()
         async with serve(source,'127.0.0.1',0) as server:
             app=FastAPI();collect=intraday.enable(app,'http://127.0.0.1:'+str(server.sockets[0].getsockname()[1]))
@@ -73,9 +76,14 @@ def test_real_websocket_disconnect_retains_ram_bootstrap():
                     await asyncio.sleep(.01)
                 import httpx
                 async with httpx.AsyncClient(transport=httpx.ASGITransport(app),base_url='http://local') as client:
-                    data=(await client.get('/api/intraday/v1/bootstrap')).json()
+                    data=(await client.get('/api/intraday/v1/bootstrap?series=MO2611')).json()
+                    other=(await client.get('/api/intraday/v1/bootstrap?series=IO2611')).json()
                 assert data['connection']=='disconnected' and data['quotes']['I']=={'last':10,'acquired_at':'original'}
                 assert data['health']['source_status']=='waiting_for_receiver'
+                assert data['intraday']['volume_unit']=='contracts'
+                assert [p['future_volume'] for p in data['intraday']['points']]==[0,1]
+                assert other['intraday']['series']=='IO2611' and len(other['intraday']['points'])==1
+                assert len(calls)==1 and calls[0]['mirror'] is True and 'series' not in calls[0]
             finally:
                 task.cancel();await asyncio.gather(task,return_exceptions=True)
     asyncio.run(run())
@@ -95,7 +103,7 @@ def test_intraday_minute_upserts_keep_quotes_and_reset_on_source_day_change(monk
             packets[0]['intraday']['price_time_basis']='wind_bar'
             for version,packet in enumerate(packets):
                 yield json.dumps(dict(epoch='a',version=version,**packet))
-                if version==2:assert app.state.intraday['intraday']['price_time_basis']=='wind_bar'
+                if version==2:assert app.state.intraday['intraday']['MO2611']['price_time_basis']=='wind_bar'
             raise OSError('disconnected')
     @asynccontextmanager
     async def connect(*args,**kwargs):yield Socket()
@@ -104,7 +112,7 @@ def test_intraday_minute_upserts_keep_quotes_and_reset_on_source_day_change(monk
     with pytest.raises(asyncio.CancelledError):asyncio.run(collect())
     state=app.state.intraday
     assert state['quotes']=={'I':{'last':10}}
-    assert state['intraday']['trade_date']=='2026-11-04'
-    assert 'price_time_basis' not in state['intraday']
-    assert state['intraday']['points']==[{'time':'09:30','future_last':6100,'atm_iv':.32}]
+    assert state['intraday']['MO2611']['trade_date']=='2026-11-04'
+    assert 'price_time_basis' not in state['intraday']['MO2611']
+    assert state['intraday']['MO2611']['points']==[{'time':'09:30','future_last':6100,'atm_iv':.32}]
     assert state['health']=={'source_mode':'wind','receiver_age_seconds':2}
