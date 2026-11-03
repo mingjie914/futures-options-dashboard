@@ -437,7 +437,7 @@ test('ETF funds share one page and chart height, preserving monthly gaps and sep
 test('intraday is independent of daily data, history samples and refresh controls',async()=>{
  const source=await readFile(new URL('../../../frontend/src/Intraday.jsx',import.meta.url),'utf8');
  assert.doesNotMatch(source,/useResource|RefreshButton|api\/futures|api\/options|intraday-preview|ricequant/i);
- assert.match(source,/实时订阅/);
+ assert.match(source,/实时行情/);
 });
 
 test('stock-bond states mark both tails and expose daily percentile ranks without changing returns',async()=>{

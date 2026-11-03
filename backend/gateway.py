@@ -1,5 +1,7 @@
 """Local same-origin entry. Only fixed internal destinations; no business logic."""
 from contextlib import asynccontextmanager
+from contextlib import suppress
+import asyncio
 from pathlib import Path
 from urllib.parse import urlsplit
 import httpx
@@ -17,17 +19,26 @@ TARGETS={
 }
 OBSERVE_PREVIEW=os.environ.get('DASHBOARD_OBSERVE_PREVIEW')=='1'
 INTRADAY_PREVIEW=os.environ.get('DASHBOARD_INTRADAY_PREVIEW')=='1'
+live_run=None
 
 
 @asynccontextmanager
 async def lifespan(app):
     async with httpx.AsyncClient(timeout=110,trust_env=False) as client:
         app.state.client=client
-        yield
+        task=asyncio.create_task(live_run()) if live_run else None
+        try:yield
+        finally:
+            if task:
+                task.cancel()
+                with suppress(asyncio.CancelledError):await task
 
 
 app=FastAPI(lifespan=lifespan,docs_url=None,redoc_url=None)
 app.add_middleware(ResearchHTTP)
+if INTRADAY_PREVIEW and os.environ.get('DASHBOARD_INTRADAY_UPSTREAM'):
+    from backend.intraday import enable
+    live_run=enable(app,os.environ['DASHBOARD_INTRADAY_UPSTREAM'])
 
 
 @app.middleware('http')

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {applyLivePacket,liveOnline,openLive} from '../src/intraday-live.js';
+import {applyLivePacket,liveOnline,openLive,optionRows} from '../src/intraday-live.js';
 
 test('live snapshots replace; deltas merge absolute values and preserve null/removal semantics',()=>{
   const state={quotes:new Map([['OLD',{last:1}]]),epoch:null,version:-1};
@@ -32,37 +32,65 @@ test('live snapshots replace; deltas merge absolute values and preserve null/rem
   state.connection='connected';health.source_mode='demo';assert.equal(liveOnline(state,1000),false);
 });
 
-test('one live socket discovers its directory, changes subscription, reconnects and disposes',async t=>{
+test('option curves align source calls/puts by strike without filling missing quotes',()=>{
+  const catalog={codes:['P2','C1','P1','F'],metadata:{P2:{kind:'option',cp:'P',strike:200},C1:{kind:'option',cp:'C',strike:100},P1:{kind:'option',cp:'P',strike:100},F:{kind:'future'}}};
+  const rows=optionRows(catalog,new Map([['C1',{iv:0.35,oi:0}],['P2',{iv:null,oi:20}]]));
+  assert.deepEqual(rows.map(r=>r.strike),[100,200]);
+  assert.equal(rows[0].C.iv,0.35);assert.equal(rows[0].C.oi,0);
+  assert.equal(rows[0].P.iv,undefined);assert.equal(rows[1].P.iv,null);assert.equal(rows[1].C,undefined);
+});
+
+function setup(t,bootstrap=null) {
   const originals={fetch:globalThis.fetch,WebSocket:globalThis.WebSocket,setTimeout:globalThis.setTimeout,clearTimeout:globalThis.clearTimeout};
   t.after(()=>Object.assign(globalThis,originals));
   const sockets=[],requests=[],timers=new Map(),states=[];
-  const directory={codes:['I','F','OTHER'],revision:'one',metadata:{I:{kind:'index'},F:{kind:'future',underlying:'I'},OTHER:{kind:'future',underlying:'absent'}}};
-  globalThis.fetch=async url=>{requests.push(url);return{ok:true,json:async()=>directory};};
-  globalThis.setTimeout=(fn,delay)=>{timers.set(fn,delay);return fn;};
-  globalThis.clearTimeout=id=>timers.delete(id);
-  globalThis.WebSocket=class {constructor(url){this.url=url;this.readyState=1;this.sent=[];sockets.push(this);}send(raw){this.sent.push(JSON.parse(raw));}close(){this.closed=true;}};
-  const flush=()=>new Promise(resolve=>setImmediate(resolve));
+  globalThis.fetch=async url=>{requests.push(url);return{ok:!!bootstrap,json:async()=>bootstrap};};
+  globalThis.setTimeout=(fn,delay)=>{timers.set(fn,delay);return fn;};globalThis.clearTimeout=id=>timers.delete(id);
+  globalThis.WebSocket=class {constructor(url){this.url=url;this.readyState=0;this.sent=[];sockets.push(this);}send(raw){this.sent.push(JSON.parse(raw));}close(){this.closed=true;}};
+  return {sockets,requests,timers,states};
+}
+const flush=()=>new Promise(resolve=>setImmediate(resolve));
+const catalog={codes:['I','F','O'],revision:'one',metadata:{I:{kind:'index'},F:{kind:'future',underlying:'I'},O:{kind:'option',underlying:'I'}}};
+
+test('first subscription needs no directory HTTP; one socket changes kinds, reconnects and disposes',async t=>{
+  const {sockets,requests,timers,states}=setup(t);
   const live=openLive('http://127.0.0.1:18808','basis',state=>states.push(state));
-  assert.equal(states[0].connection,'connecting');
-  await flush();assert.equal(sockets.length,1);assert.deepEqual(requests,['http://127.0.0.1:18808/api/realtime/v1/catalog']);
-  const ws=sockets[0];ws.onopen();
-  assert.equal(ws.url,'ws://127.0.0.1:18808/api/realtime/v1/stream');
-  assert.deepEqual(ws.sent[0],{type:'subscribe',codes:['I','F'],fields:['last','prev_close']});
-  const message=packet=>ws.onmessage({data:JSON.stringify(packet)});
-  message({type:'snapshot',epoch:'a',version:1,quotes:{I:{last:10}},health:{source_mode:'wind'}});
+  const ws=sockets[0];ws.readyState=1;ws.onopen();
+  assert.deepEqual(ws.sent[0],{type:'subscribe',kinds:['index','future'],fields:['last','prev_close']});
+  const message=p=>ws.onmessage({data:JSON.stringify(p)});
+  message({type:'snapshot',epoch:'a',version:1,catalog,quotes:{I:{last:10}},health:{source_mode:'wind'}});
   const lastQuotes=states.at(-1).quotes;
   message({type:'status',epoch:'a',version:1,health:{source_mode:'wind',source_status:'ok'}});
   assert.equal(states.at(-1).quotes,lastQuotes);
-  assert.equal(states.at(-1).health.source_status,'ok');
-  for(let i=2;i<10;i++)message({type:'delta',epoch:'a',version:i,quotes:{I:{last:i}}});
-  assert.equal(requests.length,1);assert.equal(states.at(-1).quotes.get('I').last,9);
-  live.select('options');assert.deepEqual(ws.sent.at(-1).codes,[]);assert.equal(sockets.length,1);
-  message({type:'snapshot',epoch:'a',version:10,quotes:{}});await flush();
-  assert.equal(states.at(-1).quotes.size,0);
-  const beforeDisconnect=states.at(-1).quotes;
-  ws.onclose({code:1006});assert.equal(states.at(-1).connection,'disconnected');
-  assert.equal(states.at(-1).quotes,beforeDisconnect);
-  const retry=timers.keys().next().value;timers.delete(retry);retry();await flush();
-  assert.equal(sockets.length,2);sockets[1].onopen();assert.deepEqual(sockets[1].sent[0].codes,[]);
+  message({type:'delta',epoch:'a',version:2,quotes:{I:{last:11}}});
+  assert.equal(lastQuotes.get('I').last,10);assert.equal(states.at(-1).quotes.get('I').last,11);
+  live.select('options');assert.deepEqual(ws.sent.at(-1).kinds,['index','option']);assert.equal(sockets.length,1);
+  assert.deepEqual(ws.sent.at(-1).fields,['last','prev_close','bid','ask','iv','oi']);
+  assert.deepEqual(states.at(-1).catalog,catalog);
+  const retained=states.at(-1).quotes;ws.onclose({code:1006});assert.equal(states.at(-1).quotes,retained);
+  const retry=timers.keys().next().value;timers.delete(retry);retry();
+  sockets[1].readyState=1;sockets[1].onopen();assert.deepEqual(sockets[1].sent[0].kinds,['index','option']);
+  await flush();assert.deepEqual(requests,['/api/intraday/v1/bootstrap?view=basis']);
   live.close();assert.equal(sockets[1].closed,true);assert.equal(timers.size,0);
+});
+
+test('warm RAM bootstrap displays before remote handshake; newer stream supersedes it',async t=>{
+  const cached={type:'snapshot',epoch:'a',version:10,catalog,quotes:{I:{last:10,acquired_at:'original'}},health:{source_mode:'wind'},connection:'connected'};
+  const {sockets,states}=setup(t,cached);
+  const live=openLive('http://127.0.0.1:18808','basis',s=>states.push(s));await flush();
+  assert.equal(sockets[0].readyState,0);assert.equal(states.at(-1).quotes.get('I').last,10);
+  assert.equal(states.at(-1).quotes.get('I').acquired_at,'original');
+  sockets[0].onmessage({data:JSON.stringify({...cached,version:11,quotes:{I:{last:12}}})});
+  assert.equal(states.at(-1).quotes.get('I').last,12);live.close();
+});
+
+test('late bootstrap cannot overwrite live data or publish after disposal',async t=>{
+  const {sockets,states}=setup(t);let respond;
+  globalThis.fetch=()=>new Promise(resolve=>{respond=resolve;});
+  const cached={type:'snapshot',epoch:'a',version:1,catalog,quotes:{I:{last:1}}};
+  const live=openLive('http://127.0.0.1:18808','basis',s=>states.push(s));
+  sockets[0].onmessage({data:JSON.stringify({...cached,version:2,quotes:{I:{last:2}}})});
+  respond({ok:true,json:async()=>cached});await flush();assert.equal(states.at(-1).quotes.get('I').last,2);
+  live.close();assert.equal(sockets[0].closed,true);
+  const count=states.length;sockets[0].onclose?.({code:1006});await flush();assert.equal(states.length,count);
 });

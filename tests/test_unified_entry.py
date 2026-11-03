@@ -16,6 +16,7 @@ def test_development_gateway_is_default_closed(tmp_path,monkeypatch,enabled,intr
     monkeypatch.delenv('DASHBOARD_OBSERVE_PREVIEW',raising=False)
     if enabled:monkeypatch.setenv('DASHBOARD_OBSERVE_PREVIEW','1')
     monkeypatch.delenv('DASHBOARD_INTRADAY_PREVIEW',raising=False)
+    monkeypatch.delenv('DASHBOARD_INTRADAY_UPSTREAM',raising=False)
     if intraday:monkeypatch.setenv('DASHBOARD_INTRADAY_PREVIEW','1')
     gateway=load_script('observe_gateway_test',ROOT/'backend/gateway.py')
     gateway.dist=tmp_path
@@ -33,6 +34,7 @@ def test_development_gateway_is_default_closed(tmp_path,monkeypatch,enabled,intr
             assert client.get(path).status_code==(200 if intraday else 404)
         assert client.get('/intraday/unknown').status_code==404
         assert client.get('/api/realtime/v1/snapshot').status_code==404
+        assert client.get('/api/intraday/v1/bootstrap').status_code==404
         assert len(called)==int(enabled)
         for path in ('/futures/','/seats/','/options/'):
             assert client.get(path).status_code==200
