@@ -44,6 +44,33 @@ def test_observation_full_preview_history_precedes_common_display_without_future
         response=updated
 
 
+def test_observation_request_pins_price_and_mapping_batch(setup,tmp_path,monkeypatch):
+    _,store,_=setup
+    roots=[tmp_path/'first',tmp_path/'next']
+    for root,price,bond_symbol in [(roots[0],6000,'T2612'),(roots[1],7000,'T2703')]:
+        history=root/'observation-history';history.mkdir(parents=True)
+        with duckdb.connect() as con:
+            con.execute("CREATE TABLE prices AS SELECT 'IM2611' symbol,DATE '2026-11-03' trade_date,? AS \"close\" UNION ALL SELECT ?,DATE '2026-11-03',100",[price,bond_symbol])
+            con.execute('COPY prices TO ? (FORMAT PARQUET)',[str(history/'prices.parquet')])
+            con.execute("CREATE TABLE mapping AS SELECT 'IM' product,'IM2611' symbol,DATE '2026-11-03' start_date,DATE '2026-11-03' end_date UNION ALL SELECT 'T',?,DATE '2026-11-03',DATE '2026-11-03'",[bond_symbol])
+            con.execute('COPY mapping TO ? (FORMAT PARQUET)',[str(history/'mapping.parquet')])
+    link=tmp_path/'current';selected=[roots[0]];resolve=Path.resolve
+    monkeypatch.setattr(Path,'resolve',lambda p,*a,**kw:selected[0] if p==link else resolve(p,*a,**kw))
+    monkeypatch.setenv('DASHBOARD_OBSERVATION_ROOT',str(link))
+    monkeypatch.setenv('DASHBOARD_OBSERVE_PREVIEW','1')
+    query=store._query
+    def switching_query(*args,**kwargs):
+        result=query(*args,**kwargs);selected[0]=roots[1];return result
+    monkeypatch.setattr(store,'_query',switching_query)
+    client=TestClient(create_app(store));url='/api/observation?end=2026-11-03'
+    first=client.get(url)
+    assert first.status_code==200 and first.json()['series'][-1]['stock_close']==6000
+    assert first.json()['series'][-1]['bond_close']==100
+    next_=client.get(url,headers={'If-None-Match':first.headers['etag']})
+    assert next_.status_code==200 and next_.json()['series'][-1]['stock_close']==7000
+    assert next_.json()['series'][-1]['bond_symbol']=='T2703' and next_.json()['series'][-1]['bond_close']==100
+
+
 def test_observation_default_closed_and_explicit_preview(setup,monkeypatch):
     _,store,_=setup
     monkeypatch.delenv('DASHBOARD_OBSERVE_PREVIEW',raising=False)
