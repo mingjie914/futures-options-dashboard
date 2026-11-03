@@ -5,12 +5,22 @@ import tarfile
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
 
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('freeze_artifacts', ROOT/'tools/freeze_backend.py')
 freeze = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(freeze)
+
+
+def test_runtime_requirements_are_locked_in_release():
+    assert 'requirements.lock.txt' in freeze.LOCKS
+    locked = {r.name: r for r in map(Requirement, (ROOT/'requirements.lock.txt').read_text().splitlines())}
+    for line in (ROOT/'requirements.txt').read_text().splitlines():
+        requirement = Requirement(line)
+        version, = locked[requirement.name].specifier
+        assert version.operator == '==' and requirement.specifier.contains(version.version)
 
 
 def test_release_packages_only_runtime_inputs_and_is_reproducible(tmp_path, monkeypatch):
