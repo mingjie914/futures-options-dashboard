@@ -174,3 +174,15 @@ test('late bootstrap cannot overwrite live data or publish after disposal',async
   const count=states.length;sockets[0].onclose?.({code:1006});await flush();assert.equal(states.length,count);
   sockets[0].onmessage({data:JSON.stringify({...cached,version:99})});assert.equal(states.length,count);
 });
+
+test('valid stream snapshot cancels bootstrap and late headers skip parsing',async t=>{
+  const {sockets,states}=setup(t);let respond,signal,parses=0;
+  globalThis.fetch=(_url,options)=>{signal=options.signal;return new Promise(resolve=>{respond=resolve;});};
+  const live=openLive('https://live.example',s=>states.push(s));
+  sockets[0].onmessage({data:JSON.stringify({type:'delta',epoch:'wrong',version:1,quotes:{I:{last:1}}})});
+  assert.equal(signal.aborted,false);
+  sockets[0].onmessage({data:JSON.stringify({type:'snapshot',epoch:'a',version:2,catalog,quotes:{I:{last:2}}})});
+  assert.equal(signal.aborted,true);
+  respond({ok:true,json:async()=>{parses++;return {type:'snapshot',epoch:'a',version:1,catalog,quotes:{I:{last:1}}};}});
+  await flush();assert.equal(parses,0);assert.equal(states.at(-1).quotes.get('I').last,2);live.close();
+});

@@ -2,6 +2,8 @@
 from contextlib import asynccontextmanager, suppress
 import asyncio
 from pathlib import Path
+from functools import lru_cache
+import hashlib
 from urllib.parse import urlsplit
 import httpx
 import os
@@ -88,21 +90,39 @@ if pointer.exists():dist.relative_to(runtime)
 asset_roots=[dist/'assets',*(p/'assets' for p in sorted((runtime/'releases').glob('web-*')) if not p.name.startswith('web-stage-'))]
 
 
+@lru_cache(maxsize=128)
+def content_tag(file, stamp):
+    with file.open('rb') as source:
+        return 'W/"' + hashlib.file_digest(source, 'sha256').hexdigest() + '"'
+
+
+def static_response(file, request, policy):
+    stat = file.stat()
+    tag = content_tag(file, (stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_ino))
+    headers = {'ETag': tag, 'Cache-Control': policy}
+    if any(value.strip().removeprefix('W/') in ('*', tag.removeprefix('W/'))
+           for value in request.headers.get('if-none-match', '').split(',')):
+        return Response(status_code=304, headers=headers)
+    response = FileResponse(file, stat_result=stat, headers=headers)
+    del response.headers['last-modified']  # Reproducible archives set every mtime to zero.
+    return response
+
+
 @app.get('/assets/{path:path}')
-def asset(path:str):
+def asset(path:str, request:Request):
     for folder in asset_roots:
         file=(folder/path).resolve()
         if file.is_relative_to(folder.resolve()) and file.is_file():
-            return FileResponse(file,headers={'Cache-Control':'public, max-age=31536000, immutable'})
+            return static_response(file,request,'public, max-age=31536000, immutable')
     raise HTTPException(404,'文件不存在')
 
 
 @app.get('/inter-OFL.txt')
-def font_license():return FileResponse(dist/'inter-OFL.txt')
+def font_license(request:Request):return static_response(dist/'inter-OFL.txt',request,'no-cache')
 
 
 @app.get('/{path:path}')
-def index(path:str):
+def index(path:str, request:Request):
     if path and path.rstrip('/') not in TARGETS and not (OBSERVE_PREVIEW and path.rstrip('/')=='observe') and not (INTRADAY_PREVIEW and path.rstrip('/')=='intraday'):raise HTTPException(404,'文件不存在')
     if not (dist/'index.html').exists():raise HTTPException(503,'请先完成前端构建')
-    return FileResponse(dist/'index.html',headers={'Cache-Control':'no-cache'})
+    return static_response(dist/'index.html',request,'no-cache')

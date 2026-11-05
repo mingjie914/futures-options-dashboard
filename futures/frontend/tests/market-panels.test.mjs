@@ -346,11 +346,12 @@ test('module loading paints the shell, ignores a departed module and isolates im
  globalThis.location={pathname:'/futures/',search:'',origin:'http://localhost'};
  globalThis.history={pushState:(_a,_b,url)=>{globalThis.location.pathname=url.pathname;globalThis.location.search=url.search;}};
  globalThis.window={addEventListener(){},removeEventListener(){},scrollTo(){}};
- globalThis.document={addEventListener(){},removeEventListener(){}};
+ globalThis.document={addEventListener(){},removeEventListener(){},getElementById:()=>({textContent:JSON.stringify({seats:'assets/seats.js',futures:'assets/futures.js',options:'assets/options.js'})})};
  globalThis.matchMedia=()=>({matches:false,addEventListener(){},removeEventListener(){}});
  let finishFutures;
  const future=()=>null,seats=()=>null;
- const h=await sharedHooks({'./version-check.js':{watchVersion:()=>()=>{}},'./preferences.js':{selectedProduct:()=>null},
+ const warmed=[];
+ const h=await sharedHooks({'./transport.js':{warmNavigation:urls=>{warmed.push(urls);return()=>{};}},'./version-check.js':{watchVersion:()=>()=>{}},'./preferences.js':{selectedProduct:()=>null},
   './futures/App.jsx':new Promise(resolve=>finishFutures=()=>resolve({App:future})), './seats/Dashboard.tsx':{default:seats},
   './Options.jsx':{then:(_resolve,reject)=>reject(Error('asset unavailable'))}},'Shell.jsx');
  const nodes=node=>!node||typeof node!=='object'?[]:[node,...React.Children.toArray(node.props?.children).flatMap(nodes)];
@@ -364,6 +365,7 @@ test('module loading paints the shell, ignores a departed module and isolates im
  assert.ok(nodes(h.render('default')).some(node=>node.props?.['aria-label']==='站点导航'));
  navigate('seats');await settleHooks();
  assert.ok(nodes(h.render('default')).some(node=>node.type===seats));
+ assert.deepEqual(warmed.at(-1),['/assets/futures.js','/assets/options.js','https://mingjiec.com/']);
  finishFutures();await settleHooks();assert.ok(nodes(h.render('default')).some(node=>node.type===seats));
  navigate('options');await settleHooks();const failed=h.render('default');
  assert.equal(boundary(failed).props.error.message,'asset unavailable');
@@ -397,6 +399,7 @@ test('chart updates reuse the instance and dispose only when the DOM node leaves
   const h=await sharedHooks({'./chart-engine.js':{init:()=>{created++;return {dispose:()=>disposed++,getWidth:()=>100,getHeight:()=>80,resize(){resized++;}};}}});
   const ref={current:{clientWidth:100,clientHeight:80}},draw=()=>draws++;
   h.render('useChart',ref,draw,[1]);await settleHooks();
+  assert.equal(ref.current.ariaBusy,'false');
   h.render('useChart',ref,draw,[2]);await settleHooks();
   assert.equal(created,1);assert.equal(disposed,0);assert.equal(draws,2);assert.equal(resized,0);
   ref.current.clientWidth=120;resize();assert.equal(resized,1);

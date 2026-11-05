@@ -35,5 +35,17 @@ export default defineConfig({
   preview: {
     host: "127.0.0.1",
   },
-  plugins: [react()],
+  plugins: [react(), {
+    name: 'navigation-code',
+    transformIndexHtml: {order:'post', handler(html, context) {
+      if (!context.bundle) return html;
+      const names = {'seats/Dashboard.tsx':'seats','futures/App.jsx':'futures','Options.jsx':'options','Observe.jsx':'observe','Intraday.jsx':'intraday'};
+      const files = Object.values(context.bundle).filter(item=>item.type==='chunk'&&item.facadeModuleId);
+      const code = Object.fromEntries(Object.entries(names).flatMap(([name,id])=>{
+        const chunk=files.find(item=>item.facadeModuleId.replaceAll('\\','/').endsWith('/src/'+name));
+        return chunk?[[id,chunk.fileName]]:[];
+      }));
+      return [{tag:'script',attrs:{id:'navigation-code',type:'application/json'},children:JSON.stringify(code),injectTo:'head'}];
+    }},
+  }],
 });

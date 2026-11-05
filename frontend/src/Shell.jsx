@@ -1,5 +1,6 @@
 import { watchVersion } from './version-check.js';
 import { selectedProduct } from './preferences.js';
+import { warmNavigation } from './transport.js';
 import { Component, useEffect, useRef, useState } from 'react';
 
 const loadFutures = async () => {
@@ -30,6 +31,13 @@ class ModuleErrorBoundary extends Component {
 export default function Shell() {
   const [active, setActive] = useState(currentModule);
   const [page,setPage]=useState({});
+  useEffect(()=>{
+    if(page.id!==active||page.error)return;
+    const code=JSON.parse(document.getElementById('navigation-code')?.textContent||'{}');
+    const peers=modules.some(([id])=>id===active)?modules:previews;
+    const rest=peers===modules?previews:modules;
+    return warmNavigation([...peers,...rest].filter(([id])=>id!==active).map(([id])=>code[id]&&BASE+code[id]).concat(HOME));
+  },[active,page.id,page.error]);
   useEffect(()=>{
     let cancelled=false;
     const load=[...modules,...previews].find(([id])=>id===active)[2];

@@ -53,11 +53,12 @@ export function useChart(ref, draw, dependencies, zoomGroup, syncLegend = false)
       const visibility=new IntersectionObserver(entries=>{
         if(!entries.some(entry=>entry.isIntersecting))return;
         visibility.disconnect();
+        node.ariaBusy='true';
         import('./chart-engine.js').then(({init})=>{
           if(active.current!==state)return;
           state.chart=init(node);state.update();
           state.observer=new ResizeObserver(()=>{const width=node.clientWidth,height=node.clientHeight;if(state.chart.getWidth()!==width||state.chart.getHeight()!==height)state.chart.resize({width,height});});state.observer.observe(node);
-        }).catch(()=>{if(active.current===state)node.textContent='图表暂时无法加载，请刷新页面重试。';});
+        }).catch(()=>{if(active.current===state)node.textContent='图表暂时无法加载，请刷新页面重试。';}).finally(()=>{node.ariaBusy='false';});
       },{rootMargin:'200px'});
       state.dispose=()=>{visibility.disconnect();state.observer?.disconnect();state.unlink?.();state.chart?.dispose();};
       visibility.observe(node);

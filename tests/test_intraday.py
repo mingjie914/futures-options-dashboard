@@ -11,6 +11,91 @@ from backend import intraday
 CATALOG={'codes':['I','F','O'],'revision':'one','metadata':{'I':{'kind':'index'},'F':{'kind':'future'},'O':{'kind':'option','series':'MO2611'}}}
 
 
+def test_same_subscription_shares_upstream_and_rebases_new_visitors(monkeypatch):
+    app=FastAPI();intraday.enable(app,'http://receiver','https://mingjiec.com');calls=[];queues=[];closed=[]
+    initial=dict(type='snapshot',catalog=CATALOG,epoch='a',version=1,health={'receiver_age_seconds':0},
+        quotes={'I':{'last':10},'O':{'iv':.3}},intraday=dict(series='MO2611',trade_date='2026-11-05',revision=1,points=[dict(time='09:30',future_last=10)]))
+    @asynccontextmanager
+    async def connect(*args,**kwargs):
+        queue=asyncio.Queue();queues.append(queue)
+        class Source:
+            async def send(self,raw):calls.append(json.loads(raw))
+            async def __aiter__(self):
+                yield json.dumps(initial)
+                while True:yield await queue.get()
+        try:yield Source()
+        finally:closed.append(True)
+    monkeypatch.setattr(intraday,'connect',connect)
+    sub=dict(type='subscribe',series='MO2611',fields=['last','iv'])
+    with TestClient(app) as client:
+        with client.websocket_connect('/api/realtime/v1/stream') as one:
+            one.send_json(sub);assert one.receive_json()['version']==1
+            patch=dict(type='delta',epoch='a',version=2,quotes={'I':{'last':11},'O':None})
+            client.portal.call(queues[0].put,json.dumps(patch));assert one.receive_json()==patch
+            with client.websocket_connect('/api/realtime/v1/stream') as two:
+                two.send_json(dict(sub,fields=['iv','last']))
+                cached=two.receive_json()
+                assert len(calls)==1 and cached['quotes']=={'I':{'last':11}} and cached['version']==2
+                revision=dict(type='intraday',epoch='a',version=3,intraday=dict(series='MO2611',trade_date='2026-11-05',revision=2,points=[dict(time='09:30',future_last=None)]))
+                client.portal.call(queues[0].put,json.dumps(revision))
+                assert one.receive_json()==two.receive_json()==revision
+            # The remaining visitor still owns the upstream; changing series releases it.
+            assert not closed
+            one.send_json(dict(sub,series='IO2611'))
+            assert one.receive_json()['type']=='snapshot'
+            assert len(calls)==2 and calls[1]['series']=='IO2611' and len(closed)==1
+    assert len(closed)==2 and not app.state.intraday_hubs
+
+
+def test_cross_origin_websocket_is_rejected_before_opening_upstream(monkeypatch):
+    app=FastAPI();intraday.enable(app,'http://receiver')
+    monkeypatch.setattr(intraday,'connect',lambda *a,**k:pytest.fail('unexpected upstream'))
+    from starlette.websockets import WebSocketDisconnect
+    with TestClient(app) as client,pytest.raises(WebSocketDisconnect) as failure:
+        with client.websocket_connect('/api/realtime/v1/stream',headers={'origin':'https://foreign.example'}):pass
+    assert failure.value.code==1008
+
+
+def test_slow_visitor_rebases_without_blocking_upstream_and_disconnect_cleans_hub(monkeypatch):
+    app=FastAPI();intraday.enable(app,'http://receiver');controls={}
+    from starlette.websockets import WebSocket,WebSocketDisconnect
+    send_text=WebSocket.send_text
+    async def slow_send(ws,raw):
+        await controls['release'].wait();await send_text(ws,raw)
+    monkeypatch.setattr(WebSocket,'send_text',slow_send)
+    @asynccontextmanager
+    async def connect(*a,**k):
+        controls.update(queue=asyncio.Queue(),release=asyncio.Event())
+        class Source:
+            async def send(self,raw):pass
+            async def __aiter__(self):
+                yield json.dumps(dict(type='snapshot',catalog=CATALOG,epoch='a',version=1,quotes={'I':{'last':1}}))
+                while True:
+                    raw=await controls['queue'].get()
+                    if raw is None:raise OSError('upstream offline')
+                    yield raw
+        yield Source()
+    monkeypatch.setattr(intraday,'connect',connect)
+    async def feed():
+        while not controls:await asyncio.sleep(0)
+        for n in range(2,71):
+            await controls['queue'].put(json.dumps(dict(type='delta',epoch='a',version=n,quotes={'I':{'last':n}})))
+        while next(iter(app.state.intraday_hubs.values()))['state']['version']<70:await asyncio.sleep(0)
+        assert max(q.qsize() for q in next(iter(app.state.intraday_hubs.values()))['queues'])<=32
+        controls['release'].set()
+    with TestClient(app) as client:
+        with client.websocket_connect('/api/realtime/v1/stream') as ws:
+            ws.send_json({'type':'subscribe'});client.portal.call(feed)
+            seen=[]
+            while not seen or seen[-1]['version']<70:seen.append(ws.receive_json())
+            assert any(p['type']=='snapshot' and p['version']>1 for p in seen)
+            assert seen[-1]['quotes']['I']['last']==70
+            client.portal.call(controls['queue'].put,None)
+            with pytest.raises(WebSocketDisconnect) as failure:ws.receive_json()
+            assert failure.value.code==1013
+    assert not app.state.intraday_hubs
+
+
 def test_bootstrap_uses_one_catalog_preserves_source_time_and_ages_health():
     app=FastAPI();intraday.enable(app,'http://127.0.0.1:18808');state=app.state.intraday
     with TestClient(app) as client:

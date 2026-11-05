@@ -50,6 +50,7 @@ export function openLive(base, publish,series='MO2611',bootstrapBase='') {
       if(stopped)return;
       const packet=JSON.parse(event.data);
       if(!applyLivePacket(state,packet))return;
+      if(packet.type==='snapshot'&&state.catalog)controller.abort();
       if(packet.type!=='intraday')received=performance.now();delay=1000;state.connection='connected';emit();
     };
     socket.onclose=event=>{if(!stopped){state.connection=event.code===1008?'unauthorized':'disconnected';emit();if(event.code!==1008){clearTimeout(retry);retry=setTimeout(connect,delay);delay=Math.min(delay*2,30000);}}};
@@ -59,7 +60,7 @@ export function openLive(base, publish,series='MO2611',bootstrapBase='') {
   }
   connect();
   fetch(bootstrapBase.replace(/\/$/,'')+'/api/intraday/v1/bootstrap?series='+encodeURIComponent(series),{signal:controller.signal,cache:'no-store'}).then(async response=>{
-    if(!response.ok)return;
+    if(!response.ok||stopped||state.epoch!==null)return;
     const cached=await response.json();
     if(stopped||state.epoch!==null||cached.type!=='snapshot'||!cached.catalog)return;
     applyLivePacket(state,cached);received=performance.now();state.connection=cached.connection;emit();

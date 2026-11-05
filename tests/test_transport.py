@@ -1,11 +1,40 @@
 import asyncio
 import json
+import os
 
 import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from futures.backend.transport import ByteCache, DELTA, ResearchHTTP, changes, fingerprint
+
+
+def test_static_content_validator_survives_equal_size_epoch_mtime(monkeypatch, tmp_path):
+    from backend import gateway
+    entry = tmp_path / 'index.html'
+    entry.write_text('entry-a')
+    os.utime(entry, (0, 0))
+    monkeypatch.setattr(gateway, 'dist', tmp_path)
+    monkeypatch.setattr(gateway, 'asset_roots', [tmp_path])
+    gateway.content_tag.cache_clear()
+    with TestClient(gateway.app) as client:
+        first = client.get('/')
+        tag = first.headers['etag']
+        assert first.text == 'entry-a' and 'last-modified' not in first.headers
+        assert client.get('/', headers={'If-None-Match': tag}).status_code == 304
+        replacement = tmp_path / 'next.html'
+        replacement.write_text('entry-b')
+        os.utime(replacement, (0, 0))
+        replacement.replace(entry)
+        changed = client.get('/', headers={'If-None-Match': tag, 'If-Modified-Since': 'Thu, 01 Jan 1970 00:00:00 GMT'})
+        assert changed.status_code == 200 and changed.text == 'entry-b'
+        assert changed.headers['etag'] != tag
+        assert client.get('/', headers={'If-None-Match': '"other", '+changed.headers['etag'].removeprefix('W/')}).status_code == 304
+        asset = client.get('/assets/index.html')
+        unchanged = client.get('/assets/index.html', headers={'If-None-Match': asset.headers['etag']})
+        assert unchanged.status_code == 304 and unchanged.content == b''
+        assert unchanged.headers['cache-control'].endswith('immutable')
+        assert gateway.content_tag.cache_info().maxsize == 128
 
 
 def example():

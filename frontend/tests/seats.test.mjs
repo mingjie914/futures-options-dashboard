@@ -137,6 +137,13 @@ test("unified static build keeps seats lazy and shares font/runtime", async () =
   const html = await readFile(new URL("index.html", output), "utf8");
   assert.match(html, /<title>MINGJIE<\/title>/);
   const manifest = JSON.parse(await readFile(new URL(".vite/manifest.json", output), "utf8"));
+  const warm = JSON.parse(html.match(/id="navigation-code"[^>]*>([^<]+)<\/script>/)[1]);
+  for (const [id, file] of Object.entries(warm)) {
+    const chunk = Object.values(manifest).find(entry => entry.file === file);
+    assert.ok(chunk?.isDynamicEntry, `${id} must warm a built module, not raw source or chart engine`);
+    assert.doesNotMatch(file, /chart-engine/);
+  }
+  assert.deepEqual(Object.keys(warm).sort(), ['futures','options','seats',...(process.env.DASHBOARD_OBSERVE_PREVIEW==='1'?['observe']:[]),...(process.env.DASHBOARD_INTRADAY_PREVIEW==='1'?['intraday']:[])].sort());
   for(const [module,enabled] of [['Observe',process.env.DASHBOARD_OBSERVE_PREVIEW],['Intraday',process.env.DASHBOARD_INTRADAY_PREVIEW]])
     assert.equal(!!manifest[`src/${module}.jsx`]?.isDynamicEntry,enabled==='1',`${module} must follow its explicit build flag`);
   const seat = manifest["src/seats/Dashboard.tsx"];
