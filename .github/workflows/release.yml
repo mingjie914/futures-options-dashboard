@@ -41,6 +41,7 @@ jobs:
           DASHBOARD_OBSERVE_PREVIEW: '1'
           DASHBOARD_INTRADAY_PREVIEW: '1'
           VITE_INTRADAY_BASE: https://mingjiec.com
+          VITE_INTRADAY_PRIMARY_BASE: wss://123.206.250.151:8668
         run: |
           pnpm install --frozen-lockfile
           pnpm build

@@ -37,26 +37,49 @@ export function intradayRows(data) {
   return points.size?sessionTimes.map(time=>({future_last:null,atm_iv:null,...points.get(time),time})):[];
 }
 
-export function openLive(base, publish,series='MO2611',bootstrapBase='') {
-  let socket,retry,stopped=false,delay=1000,received=0;
+export function openLive(base, publish,series='MO2611',bootstrapBase='',primaryBase='') {
+  const routes=[...new Set([primaryBase,base].filter(Boolean).map(url=>url.replace(/\/$/,'')))];
+  let socket,retry,watchdog,wake,route=0,stopped=false,delay=1000,received=0;
   const state={quotes:new Map(),catalog:null,intraday:null,series,health:null,epoch:null,version:-1,connection:'connecting'};
   const emit=()=>publish({...state,received});
   const controller=new AbortController();
+  const visible=()=>globalThis.document?.visibilityState!=='hidden';
+  const visibility=()=>{clearTimeout(watchdog);if(visible())wake?.();};
+  if(routes.length>1)globalThis.document?.addEventListener('visibilitychange',visibility);
   function connect() {
     state.connection='connecting';emit();
-    socket=new WebSocket(base.replace(/^http/,'ws')+'/api/realtime/v1/stream');
-    socket.onopen=subscribe;
-    socket.onmessage=event=>{
-      if(stopped)return;
-      const packet=JSON.parse(event.data);
-      if(!applyLivePacket(state,packet))return;
+    const ws=socket=new WebSocket(routes[route].replace(/^http/,'ws')+'/api/realtime/v1/stream');
+    let ready=false,pending;
+    const active=()=>!stopped&&socket===ws;
+    const arm=ms=>{clearTimeout(watchdog);if(routes.length>1&&visible())watchdog=setTimeout(()=>fail(),ms);};
+    function fail(code) {
+      if(!active())return;
+      socket=null;clearTimeout(watchdog);ws.close();
+      if(routes.length>1&&route===0){route=1;connect();return;}
+      state.connection=code===1008?'unauthorized':'disconnected';emit();
+      if(code!==1008){route=0;retry=setTimeout(connect,delay);delay=Math.min(delay*2,30000);}
+    }
+    wake=()=>arm(ready?45000:route?12000:3000);wake();
+    ws.onopen=()=>{if(active())subscribe();};
+    ws.onmessage=event=>{
+      if(!active())return;
+      let packet;try{packet=JSON.parse(event.data);}catch{return;}
+      if(!packet||!Number.isFinite(packet.version)||typeof packet.epoch!=='string'||(!ready&&(packet.type!=='snapshot'||!packet.catalog)))return;
+      // Keep a lagging full baseline private until this connection catches up.
+      if(!ready){ready=true;if(packet.epoch===state.epoch&&packet.version<state.version)pending={...state,epoch:null,version:-1};}
+      const target=pending||state;
+      if(target.series!==state.series){target.series=state.series;target.intraday=null;}
+      if(!applyLivePacket(target,packet))return;
+      if(packet.type!=='intraday')arm(45000);
+      if(pending){if(pending.epoch===state.epoch&&pending.version<state.version)return;Object.assign(state,pending);pending=null;controller.abort();}
       if(packet.type==='snapshot'&&state.catalog)controller.abort();
       if(packet.type!=='intraday')received=performance.now();delay=1000;state.connection='connected';emit();
     };
-    socket.onclose=event=>{if(!stopped){state.connection=event.code===1008?'unauthorized':'disconnected';emit();if(event.code!==1008){clearTimeout(retry);retry=setTimeout(connect,delay);delay=Math.min(delay*2,30000);}}};
+    ws.onerror=()=>fail();
+    ws.onclose=event=>fail(event.code);
   }
   function subscribe() {
-    if(socket?.readyState===1)socket.send(JSON.stringify({type:'subscribe',kinds:['index','future','option'],fields:['last','prev_close','iv','oi'],...(/^(IO|HO|MO)\d{4}$/.test(series)?{series}:{})}));
+    if(socket?.readyState===1)socket.send(JSON.stringify({type:'subscribe',kinds:['index','future','option'],fields:['last','prev_close','iv','oi'],series:/^(IO|HO|MO)\d{4}$/.test(series)?series:null}));
   }
   connect();
   fetch(bootstrapBase.replace(/\/$/,'')+'/api/intraday/v1/bootstrap?series='+encodeURIComponent(series),{signal:controller.signal,cache:'no-store'}).then(async response=>{
@@ -65,7 +88,7 @@ export function openLive(base, publish,series='MO2611',bootstrapBase='') {
     if(stopped||state.epoch!==null||cached.type!=='snapshot'||!cached.catalog)return;
     applyLivePacket(state,cached);received=performance.now();state.connection=cached.connection;emit();
   }).catch(()=>{});
-  return {select(next){if(next===series)return;state.series=series=next;state.intraday=null;emit();subscribe();},close(){stopped=true;controller.abort();clearTimeout(retry);if(socket){socket.onclose=null;socket.close();}}};
+  return {select(next){if(next===series)return;state.series=series=next;state.intraday=null;emit();subscribe();},close(){stopped=true;controller.abort();clearTimeout(retry);clearTimeout(watchdog);if(routes.length>1)globalThis.document?.removeEventListener('visibilitychange',visibility);socket?.close();}};
 }
 
 export function optionSeries(catalog) {

@@ -186,3 +186,105 @@ test('valid stream snapshot cancels bootstrap and late headers skip parsing',asy
   respond({ok:true,json:async()=>{parses++;return {type:'snapshot',epoch:'a',version:1,catalog,quotes:{I:{last:1}}};}});
   await flush();assert.equal(parses,0);assert.equal(states.at(-1).quotes.get('I').last,2);live.close();
 });
+
+const packet=(type='snapshot',version=1,extra={})=>({type,epoch:'a',version,...(type==='snapshot'?{catalog,quotes:{I:{last:10}}}:{}),...extra});
+const deliver=(ws,p)=>ws.onmessage({data:JSON.stringify(p)});
+function fire(timers,delay){const fn=[...timers].find(([,ms])=>ms===delay)?.[0];assert.ok(fn,`missing ${delay}ms timer`);timers.delete(fn);fn();}
+const primary='wss://123.206.250.151:8668';
+
+for(const failure of ['error','close','snapshot-timeout'])test(`optional primary ${failure} falls back once, rebases and ignores old socket events`,t=>{
+  const {sockets,timers,states}=setup(t),live=openLive('https://sg.example',s=>states.push(s),'MO2611','',primary);
+  const first=sockets[0];assert.equal(first.url,primary+'/api/realtime/v1/stream');
+  if(failure==='error')first.onerror();else if(failure==='close')first.onclose({code:1006});else {
+    first.readyState=1;first.onopen();deliver(first,packet('delta'));first.onmessage({data:'bad JSON'});
+    assert.equal(timers.size,1);fire(timers,3000);
+  }
+  assert.equal(first.closed,true);assert.equal(sockets.length,2);assert.equal(sockets[1].url,'wss://sg.example/api/realtime/v1/stream');
+  const backup=sockets[1];backup.readyState=1;backup.onopen();assert.equal(backup.sent[0].series,'MO2611');
+  deliver(backup,packet());assert.equal(states.at(-1).connection,'connected');
+  deliver(backup,packet('delta',2,{quotes:{I:{last:12}}}));assert.equal(states.at(-1).quotes.get('I').last,12);
+  const count=states.length;deliver(first,packet('snapshot',99));first.onclose({code:1006});first.onerror();first.onopen();
+  assert.equal(states.length,count);assert.equal(sockets.length,2);assert.equal(first.sent.length,failure==='snapshot-timeout'?1:0);
+  assert.deepEqual([...timers.values()],[45000]);live.close();assert.equal(timers.size,0);
+});
+
+for(const failure of ['error','close','silence'])test(`connected primary ${failure} retains prices until fallback snapshot; standby does not probe primary`,t=>{
+  const {sockets,timers,states}=setup(t),live=openLive('https://sg.example',s=>states.push(s),'MO2611','',primary);
+  deliver(sockets[0],packet('snapshot',10,{quotes:{OLD:{last:8},I:{last:10}}}));
+  if(failure==='error')sockets[0].onerror();else if(failure==='close')sockets[0].onclose({code:1006});else fire(timers,45000);
+  assert.equal(states.at(-1).quotes.get('I').last,10);
+  // A stale snapshot cannot replace a newer HTTP/stream state, even at cutover.
+  deliver(sockets[1],packet('snapshot',9));assert.equal(states.at(-1).quotes.get('OLD').last,8);
+  deliver(sockets[1],packet('snapshot',11,{quotes:{I:{last:11}}}));assert.equal(states.at(-1).quotes.has('OLD'),false);
+  deliver(sockets[1],packet('delta',10,{quotes:{I:{last:0}}}));assert.equal(states.at(-1).quotes.get('I').last,11);
+  assert.equal(sockets.length,2);assert.deepEqual([...timers.values()],[45000]);live.close();
+});
+
+test('static status, unchanged/null quotes and offline source remain valid liveness; intraday alone is not a heartbeat',t=>{
+  const {sockets,timers}=setup(t),live=openLive('https://sg.example',()=>{},'MO2611','',primary),ws=sockets[0];
+  deliver(ws,packet());
+  for(const p of [packet('status'),packet('delta',2,{quotes:{I:{last:10}}}),packet('delta',3,{quotes:{I:{last:null}}}),packet('status',3,{health:{source_status:'offline',receiver_age_seconds:999}})]){
+    const previous=timers.keys().next().value;deliver(ws,p);assert.equal(timers.has(previous),false);assert.deepEqual([...timers.values()],[45000]);
+  }
+  const previous=timers.keys().next().value;deliver(ws,packet('intraday',4));assert.equal(timers.has(previous),true);
+  deliver(ws,packet('status',2));assert.equal(timers.has(previous),true);assert.equal(sockets.length,1);live.close();
+});
+
+test('background silence pauses watchdog; foreground starts a fresh window and disposal removes it',t=>{
+  const original=globalThis.document,listeners=new Map();
+  globalThis.document={visibilityState:'visible',addEventListener:(name,fn)=>listeners.set(name,fn),removeEventListener:name=>listeners.delete(name)};
+  t.after(()=>{if(original===undefined)delete globalThis.document;else globalThis.document=original;});
+  const {sockets,timers}=setup(t),live=openLive('https://sg.example',()=>{},'MO2611','',primary);
+  deliver(sockets[0],packet());globalThis.document.visibilityState='hidden';listeners.get('visibilitychange')();assert.equal(timers.size,0);
+  deliver(sockets[0],packet('status'));assert.equal(timers.size,0);globalThis.document.visibilityState='visible';listeners.get('visibilitychange')();
+  assert.deepEqual([...timers.values()],[45000]);assert.equal(sockets.length,1);live.close();assert.equal(listeners.size,0);assert.equal(timers.size,0);
+});
+
+test('full supported selection is resent across series changes, failover and reconnect, without inheriting stale filters',t=>{
+  const {sockets,timers,states}=setup(t),live=openLive('https://sg.example',s=>states.push(s),'MO2611','',primary);
+  sockets[0].readyState=1;sockets[0].onopen();deliver(sockets[0],packet());live.select('IO2612');
+  assert.deepEqual(sockets[0].sent.at(-1),{type:'subscribe',kinds:['index','future','option'],fields:['last','prev_close','iv','oi'],series:'IO2612'});
+  sockets[0].onerror();sockets[1].readyState=1;sockets[1].onopen();assert.equal(sockets[1].sent[0].series,'IO2612');
+  live.select('');assert.equal(sockets[1].sent.at(-1).series,null);deliver(sockets[1],packet('snapshot',1,{epoch:'new',quotes:{I:{last:20}}}));
+  assert.equal(states.at(-1).quotes.get('I').last,20);sockets[1].onclose({code:1006});fire(timers,1000);
+  assert.equal(sockets[2].url,primary+'/api/realtime/v1/stream');sockets[2].readyState=1;sockets[2].onopen();assert.equal(sockets[2].sent[0].series,null);live.close();
+});
+
+test('HTTP still wins the first display while primary is pending; cutover cannot roll it back',async t=>{
+  const cached=packet('snapshot',10,{connection:'connected'}),{sockets,states,requests}=setup(t,cached);
+  const live=openLive('https://sg.example',s=>states.push(s),'MO2611','',primary);await flush();
+  assert.equal(states.at(-1).quotes.get('I').last,10);assert.deepEqual(requests,['/api/intraday/v1/bootstrap?series=MO2611']);
+  deliver(sockets[0],packet('snapshot',9,{quotes:{I:{last:9}}}));assert.equal(states.at(-1).quotes.get('I').last,10);
+  sockets[0].onerror();deliver(sockets[1],packet('snapshot',11,{quotes:{I:{last:11}}}));assert.equal(states.at(-1).quotes.get('I').last,11);live.close();
+});
+
+test('backup allows a slower first snapshot; a received lagging baseline uses the status liveness window',t=>{
+  const {sockets,timers}=setup(t),live=openLive('https://sg.example',()=>{},'MO2611','',primary);
+  deliver(sockets[0],packet('snapshot',100));sockets[0].onerror();
+  assert.deepEqual([...timers.values()],[12000]);assert.equal(sockets[1].closed,undefined);
+  deliver(sockets[1],packet('snapshot',98));assert.deepEqual([...timers.values()],[45000]);assert.equal(sockets.length,2);
+  live.close();assert.equal(timers.size,0);
+});
+
+for(const kind of ['status','delta'])test(`lagging backup V98 stages its full state until V101 ${kind}, without publishing old values or losing reversions`,t=>{
+  const {sockets,timers,states}=setup(t),live=openLive('https://sg.example',s=>states.push(s),'MO2611','',primary);
+  deliver(sockets[0],packet('snapshot',100,{quotes:{I:{last:100,oi:1000},OLD:{last:1}}}));sockets[0].onerror();
+  const count=states.length;
+  deliver(sockets[1],packet('snapshot',98,{quotes:{I:{last:90,oi:900},NEW:{last:2}}}));
+  deliver(sockets[1],packet('delta',99,{quotes:{I:{oi:950}}}));
+  assert.equal(states.length,count);assert.equal(states.at(-1).version,100);assert.equal(states.at(-1).quotes.get('I').last,100);
+  assert.equal(states.at(-1).quotes.has('NEW'),false);
+  deliver(sockets[1],packet(kind,101,kind==='delta'?{quotes:{I:{oi:960}}}:{}));
+  const latest=states.at(-1);assert.equal(latest.version,101);assert.equal(latest.connection,'connected');
+  assert.deepEqual(latest.quotes.get('I'),{last:90,oi:kind==='delta'?960:950});
+  assert.equal(latest.quotes.has('OLD'),false);assert.equal(latest.quotes.get('NEW').last,2);
+  deliver(sockets[1],packet('delta',102,{quotes:{I:{last:91}}}));assert.equal(states.at(-1).quotes.get('I').last,91);
+  const accepted=states.length;deliver(sockets[1],packet('snapshot',98));assert.equal(states.length,accepted);
+  assert.deepEqual([...timers.values()],[45000]);assert.equal(sockets.length,2);live.close();
+});
+
+test('an exhausted backup first-snapshot window reconnects instead of waiting forever',t=>{
+  const {sockets,timers}=setup(t),live=openLive('https://sg.example',()=>{},'MO2611','',primary);
+  fire(timers,3000);fire(timers,12000);assert.equal(sockets[1].closed,true);
+  fire(timers,1000);assert.equal(sockets[2].url,primary+'/api/realtime/v1/stream');live.close();
+});

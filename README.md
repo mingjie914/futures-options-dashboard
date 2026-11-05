@@ -2,6 +2,8 @@
 
 席位、期货、期权是同一前端下的平级模块。源码在本仓库维护，原席位工程保留作迁移前参考；本机目录名“期权终端”仅为兼容现有路径。
 
+2026-11-05 实时线路切换：正式构建显式设置 `VITE_INTRADAY_PRIMARY_BASE=wss://123.206.250.151:8668`，原 `VITE_INTRADAY_BASE` 为 SG 备用；不设置新增变量仍只连原入口。HTTP bootstrap 继续同源抢先首显，不改日度链。候选仅保留一条活动 WS：主入口失败或首份有效 snapshot 超过 3 秒则转备用；备用首份 snapshot 允许 12 秒，收到完整但落后的同 epoch 基线后在内存追平，达到已显示版本后才原子替换，不显示回退数据；连接后前台连续 45 秒未收有效 snapshot/status/delta 才切线；价格不变、休市、null 与采集源离线不触发。后台暂停静默计时，回到前台重新计时。备用正常时不探测主线，备用断线后的新一轮连接或重开页面再优先主线。切线保留最近值，接收完整 snapshot 重基并保留 epoch/version 校验与旧连接事件隔离。订阅始终发送本页完整 kinds/fields/series（无系列显式 null）；本页不提供 codes 筛选，任何新连接都不继承旧筛选。8668 入口、证书与只读权限由云服务器总协调验收；上海优先绕过当前跨境隧道拥塞，SG备用仍可能慢或超时，不代表全链路问题已解决。正式激活与回滚以云端发布回执为准。
+
 2026-11-05 传输优化：静态文件按内容 SHA256 校验，入口不再以统一归零的 mtime/大小判断版本；同版条件请求返回 304。共享 GET 层按 URL/请求头规范键合并在途请求，每个调用者独立取消，全部离开才取消底层请求。日内保留 HTTP/WS 抢先首显，有效 WS 首包取消未完成 bootstrap；迟到响应在解析前后均检查。空闲预热按同组模块、其他顶层模块、同源策略入口顺序逐项取代码/入口，不执行模块、不拉行情；隐藏、慢网和省流暂停，前台 API 请求优先。日内相同规范订阅可在 SG 共用腾讯上游，独立系列仍独立需求；原 RAM mirror 保留供 HTTP 首屏，访客 WS 由 Caddy 指向网关后才生效。代码上线和该路由切换均由云服务器总协调验收。
 
 2026-11-04 发布准备：用户已授权观察与日内上线，生产切换和节点清理由云服务器会话执行；下文“仅本地预览”记录描述此前阶段。正式 CI 显式开启 `DASHBOARD_OBSERVE_PREVIEW=1`、`DASHBOARD_INTRADAY_PREVIEW=1`，并设置 `VITE_INTRADAY_BASE=https://mingjiec.com`；默认无环境构建仍关闭。实时固定为Work→腾讯Wind接收/当日缓存→SG只读转发/RAM→浏览器；快照固定为采集源→RDS→大阪只读提取→OCI私线→SG离线编译/原子发布/API→浏览器。SG不直查RDS、不连Wind/RQ/官网采集、不以日度兜底实时，生产不依赖home预览隧道。网关 `DASHBOARD_INTRADAY_UPSTREAM` 指向正式内部入口，`DASHBOARD_INTRADAY_ORIGIN=https://mingjiec.com`；bootstrap默认同源，只有分离实时origin时才需 `VITE_INTRADAY_BOOTSTRAP_BASE`。观察 `DASHBOARD_OBSERVATION_ROOT` 指向同一不可变数据批次的 `observation` 目录，消费已定四份JSON及 `observation-history` 两份Parquet，请求内固定到同一批次，变化纳入ETag与原差量协议；观察复用可见页5分钟轻量版本检测，日内仅走WS更新；已编译ETF汇总不要求额外携带未消费的持有人原件。ETF规则、人民币假设元数据、实际数据截止与空值保持原样。尚未宣称生产验收完成。

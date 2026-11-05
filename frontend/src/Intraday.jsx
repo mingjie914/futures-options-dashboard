@@ -35,7 +35,7 @@ export default function Intraday() {
   const [feed,setFeed]=useState(()=>({quotes:new Map(),connection:'waiting'}));
   const [saved,save]=usePreference('intraday.series','MO2611'),[selection,select]=useState(()=>new URLSearchParams(location.search).get('series')||saved),live=useRef();
   const available=useMemo(()=>optionSeries(feed.catalog),[feed.catalog]),product=products[selection.slice(0,2)]?selection.slice(0,2):'MO',months=available.filter(s=>s.startsWith(product)),series=months.includes(selection)?selection:months[0]||product;
-  useEffect(()=>{if(BASE){const client=openLive(BASE,setFeed,selection,import.meta.env.VITE_INTRADAY_BOOTSTRAP_BASE);live.current=client;return client.close;}},[]);
+  useEffect(()=>{if(BASE){const client=openLive(BASE,setFeed,selection,import.meta.env.VITE_INTRADAY_BOOTSTRAP_BASE,import.meta.env.VITE_INTRADAY_PRIMARY_BASE);live.current=client;return client.close;}},[]);
   useEffect(()=>{if(months.length&&selection!==series)select(series);if(/^(IO|HO|MO)\d{4}$/.test(series))live.current?.select(series);save(selection);const query=new URLSearchParams(location.search);query.delete('view');query.set('series',selection);history.replaceState({},'',location.pathname+'?'+query);},[series,selection]);
   const groups=useMemo(()=>{
     const entries=(feed.catalog?.codes||[]).map(code=>[code,feed.catalog.metadata[code]]);
