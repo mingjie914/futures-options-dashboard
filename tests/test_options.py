@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from backend.pricing import price, implied, greeks, payoff_bounds, scenario
+from backend.pricing import price, implied, greeks, payoff_bounds
 from backend.data import normalize,ROOT
 from backend.app import app,current
 import backend.app as app_module

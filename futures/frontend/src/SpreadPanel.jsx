@@ -8,7 +8,7 @@ export default function SpreadPanel({data,revision,controls,beforeChart}) {
  const {data:result,error,busy}=useResource('/api/spread-history?'+new URLSearchParams({product:data.product,near:data.near,far:data.far,price_type:data.price_type,end:data.meta.as_of,span}),revision);
  const shownNear=result?.near||data.near,shownFar=result?.far||data.far;
  useChart(ref,c=>{
-  const rows=result.series, dates=rows.map(r=>r.trade_date);
+  const rows=result.series, dates=rows.map(r=>r.trade_date),latest=rows.findLastIndex(r=>r.spread!=null);
   const panels=[{title:'价差',keys:[['spread',`${shownNear} − ${shownFar}`],...(ma?[['ma20','20期均线']]:[])]},
    ...(legs?[{title:'两腿价格',keys:[['near_price',shownNear],['far_price',shownFar]]}]:[]),
    ...(rank?[{title:'历史分位 / %（不含当日）',keys:[['historical_percentile','历史分位']]}]:[])];
@@ -16,7 +16,7 @@ export default function SpreadPanel({data,revision,controls,beforeChart}) {
    data:rows.map(r=>r[key]),connectNulls:false,showSymbol:rows.length<20,symbolSize:5,
    ...(key==='spread'?{markLine:{silent:true,symbol:'none',label:{formatter:'零轴'},data:[{yAxis:0}]},
     markPoint:{symbol:'circle',symbolSize:7,label:{show:true,position:'left',formatter:p=>'最新 '+fmt(p.value)},
-     data:rows.flatMap((r,j)=>r.spread==null?[]:[{coord:[j,r.spread],value:r.spread}]).slice(-1)}}:{})})));
+     data:latest<0?[]:[{coord:[latest,rows[latest].spread],value:rows[latest].spread}]}}:{})})));
   c.setOption({animation:false,color:['#4e7fb9','#a48b59','#568f84','#8c7b9f','#505c6b'],
    tooltip:{trigger:'axis',formatter:params=>{
     const point=rows[params[0]?.dataIndex];if(!point)return '';
@@ -36,7 +36,7 @@ export default function SpreadPanel({data,revision,controls,beforeChart}) {
   </div>
   {beforeChart}
   {error?<p role="alert">{error}</p>:!result?<p role="status">读取所选两腿历史…</p>:<><p className="sub">有效配对 {result.first||'无'} 至 {result.last||'无'} · {result.paired_count}个样本</p>
-   {!result.paired_count?<p className="empty">此范围无有效配对，尝试共同有效历史。</p>:<div ref={ref} style={{height:440+400*(Number(legs)+Number(rank))}} role="img" aria-label={`${shownNear}减${shownFar}价差时间序列，${result.paired_count}个有效配对；最新值${fmt(result.series.filter(r=>r.spread!=null).at(-1)?.spread)}`}/>}
+   {!result.paired_count?<p className="empty">此范围无有效配对，尝试共同有效历史。</p>:<div ref={ref} style={{height:440+400*(Number(legs)+Number(rank))}} role="img" aria-label={`${shownNear}减${shownFar}价差时间序列，${result.paired_count}个有效配对；最新值${fmt(result.series.findLast(r=>r.spread!=null)?.spread)}`}/>}
    </>}
  </section>;
 }

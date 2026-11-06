@@ -13,7 +13,7 @@ new Function('module','exports','require',ts.transpileModule(await readFile(new 
 const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const module={exports:{}},chartDraws=[];
 new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.startsWith('react')?sharedRequire(id):id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),useChart:(_ref,draw)=>chartDraws.push(draw)}:createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
-const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel,basisHistory,basisDistribution,spreadMatrix,SpreadMatrix,SeasonalSpreadChart,RolloverProgress}=module.exports;
+const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel,BasisPrices,BasisDistribution,basisHistory,basisDistribution,spreadMatrix,SpreadMatrix,SeasonalSpreadChart,RolloverProgress}=module.exports;
 
 test('option formats preserve rounding and smile/spot render in one update',async()=>{
  const source=await readFile(new URL('../../../frontend/src/Options.jsx',import.meta.url),'utf8'),draws=[],module={exports:{}};
@@ -259,7 +259,7 @@ test('basis keeps one control row, meaningful units and compact formula hints',(
  assert.doesNotMatch(html,/>CU<|读取基差/);
  assert.equal((html.match(/<button/g)||[]).length,4);
  assert.match(renderToStaticMarkup(React.createElement(BasisPanel,{product:'IH',priceType:'close'})),/读取基差/);
- assert.match(source,/期现价格与基差率/);
+ assert.match(source,/走势图/);
  assert.match(source,/现货 − 期货/);
  assert.match(source,/基差 ÷ 现货 × 365 ÷ 距交割日天数/);
  assert.match(source,/测试样本/);
@@ -391,6 +391,30 @@ test('module loading paints the shell, ignores a departed module and isolates im
  h.unmount();
 });
 
+test('board trigger pins the menu without navigation; hover, outside, Escape and child links retain their roles',async t=>{
+ const originals=Object.fromEntries(['location','history','window','document'].map(k=>[k,globalThis[k]]));t.after(()=>Object.assign(globalThis,originals));
+ const listeners={},pushed=[];
+ globalThis.location={pathname:'/futures/',search:'',origin:'http://localhost'};
+ globalThis.history={pushState:(_a,_b,url)=>pushed.push(url.pathname)};
+ globalThis.window={addEventListener(){},removeEventListener(){},scrollTo(){}};
+ globalThis.document={addEventListener:(name,fn)=>listeners[name]=fn,removeEventListener(){},getElementById:()=>null};
+ const h=await sharedHooks({'./transport.js':{warmNavigation:()=>()=>{}},'./version-check.js':{watchVersion:()=>()=>{}},'./preferences.js':{selectedProduct:()=>null},'./futures/App.jsx':{App:()=>null},'./seats/Dashboard.tsx':{default:()=>null}},'Shell.jsx');
+ const nodes=n=>!n||typeof n!=='object'?[]:[n,...React.Children.toArray(n.props?.children).flatMap(nodes)];
+ const all=nodes(h.render('default')),menu=all.find(n=>n.type==='details'),summary=all.find(n=>n.type==='summary');
+ const element={open:false,contains:target=>target==='inside',querySelector:()=>({focus(){}})};menu.props.ref.current=element;
+ assert.equal(nodes(summary).some(n=>n.type==='a'),false);
+ menu.props.onPointerEnter({pointerType:'mouse'});assert.equal(element.open,true);
+ menu.props.onPointerLeave({pointerType:'mouse'});assert.equal(element.open,false);
+ summary.props.onClick({preventDefault(){}});menu.props.onPointerLeave({pointerType:'mouse'});
+ assert.equal(element.open,true);assert.deepEqual(pushed,[]);
+ listeners.pointerdown({target:'inside'});assert.equal(element.open,true);
+ listeners.pointerdown({target:'outside'});assert.equal(element.open,false);
+ menu.props.onPointerEnter({pointerType:'touch'});assert.equal(element.open,false);
+ summary.props.onClick({preventDefault(){}});menu.props.onKeyDown({key:'Escape',preventDefault(){}});assert.equal(element.open,false);
+ summary.props.onClick({preventDefault(){}});all.find(n=>n.type==='a'&&n.props.href==='/seats/').props.onClick({preventDefault(){}});
+ assert.deepEqual(pushed,['/seats/']);assert.equal(element.open,false);h.unmount();await settleHooks();
+});
+
 test('selection requests retain the previous view, cancel stale responses and distinguish errors',async()=>{
  const requests=[];
  const h=await sharedHooks({'./transport.js':{conditionalFetch:(url,{signal})=>new Promise((resolve,reject)=>requests.push({url,signal,resolve:data=>resolve({ok:true,json:async()=>data}),reject}))}});
@@ -468,10 +492,10 @@ test('basis overlays current contracts on one date axis and retains missing pric
  const a={series:[point('2026-09-01',1,99),point('2026-09-02',2,98)],matched:2,latest:point('2026-09-02',2,98)};
  const b={series:[point('2026-09-02',4,96)],matched:1,latest:point('2026-09-02',4,96)};
  const data={...a,contracts:['IM2611','IM2612','IM2703'],contract_positions:{IM2611:10,IM2612:100,IM2703:80},symbol:'IM2612',status:'index_close_basis',meta:{as_of:'2026-09-02'},reference:{name:'中证1000'},comparisons:{IM2611:b,IM2612:a,IM2703:b}};
- new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),usePreference:(_k,v)=>[v,()=>{}],useResource:url=>url.includes('history=true')?{data:null}:{data},useChart:(_ref,draw)=>draws.push(draw)}:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
+ new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),usePreference:(k,v)=>[k==='futures.basis.scope'?'contract':v,()=>{}],useResource:url=>url.includes('history=true')?{data:null}:{data},useChart:(_ref,draw)=>draws.push(draw)}:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
  const html=renderToStaticMarkup(React.createElement(module.exports.BasisPanel,{product:'IM',Chart:props=>{charts.push(props);return null;}}));
- assert.match(html,/<h2>基差率季节性<\/h2>/);assert.match(html,/<h2>期现价格与基差率<\/h2>/);
- assert.ok(html.indexOf('基差率季节性')<html.indexOf('期现价格与基差率')&&html.indexOf('期现价格与基差率')<html.indexOf('在市合约对照'));
+ assert.match(html,/<h2>基差率季节图<\/h2>/);assert.match(html,/<h2>基差率走势图<\/h2>/);
+ assert.ok(html.indexOf('基差率季节图')<html.indexOf('基差率走势图')&&html.indexOf('基差率走势图')<html.indexOf('上市合约'));
  assert.deepEqual(charts[0].lines,[['IM2612_ratio','IM2612'],['IM2703_ratio','IM2703'],['IM2611_ratio','IM2611']]);
  assert.equal(charts[0].rows[0].IM2703,undefined);
  assert.equal(charts[0].rows[1].IM2703,4);
@@ -485,7 +509,7 @@ test('basis overlays current contracts on one date axis and retains missing pric
  assert.equal(option.series[1].itemStyle.color,charts[0].colors.IM2612);
 });
 
-test('basis comparisons preserve gaps, relative years and real expiry distances; distribution excludes current year and distant tenors',()=>{
+test('basis comparisons preserve gaps and dates; frequency distribution includes every valid observed day before cutoff',()=>{
  const p=(trade_date,days_to_expiry,value)=>({trade_date,days_to_expiry,basis_ratio:value,reference_spread:value==null?null:value*100,annualized_basis_ratio:value==null?null:value*5});
  const data={lines:[{year:2025,label:'IM2512',points:[p('2024-12-01',380,.03),p('2025-10-01',78,null),p('2025-10-02',77,0),p('2025-10-03',76,.02)]},{year:2026,label:'IM2612',points:[p('2026-10-02',77,.01)]}]};
  const calendar=basisHistory(data,'basis_ratio','calendar'),expiry=basisHistory(data,'basis_ratio','expiry');
@@ -493,14 +517,14 @@ test('basis comparisons preserve gaps, relative years and real expiry distances;
  assert.equal(calendar.lines[0].points[2].value,0);assert.equal(calendar.lines[0].points[3].value,2);
  assert.deepEqual(expiry.axis,['-380','-78','-77','-76']);
  const summary=basisDistribution(data,'basis_ratio',data.lines[1].points[0],'IM2612');
- assert.equal(summary.n,2);assert.equal(summary.percentile,50);assert.equal(summary.value,1);
- assert.equal(summary.bins.reduce((n,b)=>n+b.n,0),2);
+ assert.equal(summary.n,4);assert.equal(summary.percentile,37.5);assert.equal(summary.value,1);
+ assert.equal(summary.bins.reduce((n,b)=>n+b.n,0),4);
  assert.equal(basisDistribution(data,'basis_ratio',null,'IM2612').percentile,null);
  const equal=basisDistribution({lines:[data.lines[0],{...data.lines[1],points:[p('2026-10-02',77,0)]}]},'basis_ratio',p('2026-10-02',77,0),'IM2612');
  assert.equal(equal.percentile,25);
 });
 
-test('dominant basis uses a full calendar, current-year marker and comparable past seasons only',()=>{
+test('dominant basis keeps its calendar and counts every observed daily rate across years and expiries',()=>{
  const point=(trade_date,value,days=45)=>({trade_date,basis_ratio:value,reference_spread:value*100,days_to_expiry:days,symbol:'IM'+trade_date.slice(2,4)+'12'});
  const current=point('2026-11-05',.01),data={continuous:true,latest:current,meta:{as_of:'2026-11-05'},lines:[{label:'2025',year:2025,points:[point('2025-03-05',10),point('2025-11-05',0),point('2025-11-06',.02),point('2025-11-07',10,100)]},{label:'2026',year:2026,points:[current]}]};
  const result=basisHistory(data,'basis_ratio','calendar');
@@ -508,7 +532,92 @@ test('dominant basis uses a full calendar, current-year marker and comparable pa
  assert.equal(result.current.label,'2026');assert.equal(result.current.point.value,1);assert.equal(result.current.point.x,'11-05');
  assert.equal(result.colors['2026'],'#4e7fb9');
  const distribution=basisDistribution(data,'basis_ratio',current,'IM2612');
- assert.equal(distribution.n,2);assert.equal(distribution.percentile,50);
+ assert.equal(distribution.n,5);assert.equal(distribution.percentile,30);
+ assert.equal(distribution.bins.reduce((n,b)=>n+b.n,0),5);
+ data.lines[1].points.push(point('2026-12-01',-.5));
+ assert.equal(basisDistribution(data,'basis_ratio',current).n,5);
+});
+
+test('price overlay uses recorded dominant prices and the selected raw or annual rate without changing units',()=>{
+ const rows=[{trade_date:'2026-11-05',reference_price:100,futures_price:98,reference_spread:2,basis_ratio:.02,annualized_basis_ratio:.1,symbol:'IM2612'},
+  {trade_date:'2026-11-06',reference_price:101,futures_price:null,reference_spread:null,basis_ratio:null,annualized_basis_ratio:null,symbol:null}];
+ for(const [metric,label,value,unit] of [['basis_ratio','基差率',2,'%'],['annualized_basis_ratio','年化基差率',10,'%'],['reference_spread','基差',2,'']]){
+  renderToStaticMarkup(React.createElement(BasisPrices,{rows,symbol:'主力',indexName:'中证1000',color:'#4e7fb9',metric}));
+  let option;chartDraws.pop()({setOption:o=>{option=o;}});
+  assert.deepEqual(option.series.map(s=>s.data),[[100,101],[98,null],[value,null]]);
+  assert.equal(option.series[2].name,label);assert.equal(option.yAxis[1].axisLabel.formatter(2),'2'+unit);
+  const tip=option.tooltip.formatter([{axisValue:'2026-11-05',dataIndex:0,seriesName:label,value}]);
+  assert.match(tip,/2026-11-05 · IM2612/);assert.ok(tip.includes(label+'：'+value+unit));
+ }
+});
+
+test('basis panel reuses one published history for prices, seasons and frequency with a one-year initial range',async()=>{
+ const source=await readFile(new URL('../src/MarketPanels.jsx',import.meta.url),'utf8'),module={exports:{}},draws=[],groups=[],requests=[];
+ const points=['2024-01-02','2025-11-05','2026-11-05'].map((trade_date,i)=>({trade_date,reference_price:100+i,futures_price:98+i,basis_ratio:2/(100+i),reference_spread:2,symbol:'IM2612'}));
+ const latest=points.at(-1),data={status:'index_close_basis',symbol:'IM2612',contracts:['IM2612'],contract_positions:{IM2612:20},comparisons:{IM2612:{latest,series:[latest]}},meta:{as_of:latest.trade_date},reference:{name:'中证1000'},input_batch:'batch'};
+ const history={continuous:true,latest,lines:points.map(p=>({label:p.trade_date.slice(0,4),year:Number(p.trade_date.slice(0,4)),points:[p]})),missing:[],meta:data.meta,input_batch:'batch'};
+ const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.endsWith('/charts.js')?{...sharedRequire('./src/charts.js'),usePreference:(_key,value)=>[value,()=>{}],useResource:url=>{requests.push(url);return {data:url.includes('history=true')?history:data};},useChart:(_ref,draw,_deps,group)=>{draws.push(draw);if(group)groups.push(group);}}:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
+ const html=renderToStaticMarkup(React.createElement(module.exports.BasisPanel,{product:'IM',end:'',priceType:'close',revision:0,Chart:()=>null,HistoryChart:()=>null,controls:()=>null}));
+ let option;draws[0]({setOption:o=>{option=o;}});
+ assert.deepEqual(option.xAxis.data,points.map(p=>p.trade_date));assert.deepEqual(option.series[1].data,[98,99,100]);
+ assert.equal(option.series[1].name,'主力');assert.deepEqual(groups[0].range,{startValue:'2025-11-05',endValue:'2026-11-05'});
+ assert.equal(groups[0].byDate,true);assert.equal(requests.length,2);assert.match(requests[1],/continuous=true/);
+ for(const title of ['基差率季节图','基差率走势图','上市合约','基差率频率分布'])assert.ok(html.includes(title));
+ assert.match(html,/3 个观测/);
+});
+
+test('basis frequency colors follow the signed bin position without changing counts',()=>{
+ const summary={bins:[{start:-2,end:0,n:4},{start:0,end:2,n:7}],value:0};
+ renderToStaticMarkup(React.createElement(BasisDistribution,{summary,percent:true}));
+ let option;chartDraws.pop()({setOption:o=>option=o});
+ assert.deepEqual(option.series[0].data,[[-1,4],[1,7]]);
+ const color=value=>option.series[0].itemStyle.color({value:[value,4]});
+ assert.equal(color(-1),'#579981');assert.equal(color(1),'#bc706a');assert.equal(color(0),'#aebdce');
+});
+
+test('one basis selector keeps quotes, history, prices, distribution and contract focus on the same object',()=>{
+ const module={exports:{}},preferences={'futures.basis.IM.symbol':'IM2703'},requests=[],draws=[],metrics=[],charts=[];
+ const point=(symbol,basis)=>({trade_date:'2026-11-05',symbol,reference_price:100,futures_price:100-basis,reference_spread:basis,basis_ratio:basis/100,annualized_basis_ratio:basis/10});
+ const mainPoint=point('IM2612',10),chosenPoint=point('IM2703',2),data={status:'index_close_basis',symbol:'IM2612',contracts:['IM2612','IM2703'],comparisons:{IM2612:{series:[mainPoint],latest:mainPoint},IM2703:{series:[chosenPoint],latest:chosenPoint}},meta:{as_of:'2026-11-05'},reference:{name:'中证1000'},input_batch:'batch'};
+ let historyReady=true,selection;
+ const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.endsWith('/charts.js')?{...sharedRequire('./src/charts.js'),
+  usePreference:(key,value)=>[preferences[key]??value,next=>{preferences[key]=next;}],
+  useResource:(url,revision,scope)=>{requests.push({url,scope});const main=url.includes('continuous=true'),p=main?mainPoint:chosenPoint;return {data:!url.includes('history=true')?data:historyReady?{continuous:main,latest:main?p:undefined,symbol:p.symbol,lines:[{label:main?'2026':p.symbol,year:2026,points:[p]}],missing:[],meta:data.meta,input_batch:'batch'}:null};},
+  Metric:props=>{metrics.push(props);return null;},useChart:(_ref,draw)=>draws.push(draw)
+ }:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
+ const render=()=>{
+  requests.length=draws.length=metrics.length=charts.length=0;
+  const html=renderToStaticMarkup(React.createElement(module.exports.BasisPanel,{product:'IM',end:'2026-11-05',priceType:'close',revision:0,Chart:props=>{charts.push(props);return null;},HistoryChart:()=>null,controls:fragment=>{selection=React.Children.toArray(fragment.props.children).filter(React.isValidElement);return fragment;}}));
+  return draws.map(draw=>{let option;draw({setOption:o=>option=o});return option;});
+ };
+ for(const [value,expected] of [['main',mainPoint],['IM2703',chosenPoint],['main',mainPoint]]){
+  if(selection)selection.find(e=>e.props['aria-label']==='基差合约').props.onChange({target:{value}});
+  const options=render();
+  assert.equal(requests.length,2);assert.equal(requests[0].scope,'IM');assert.ok(requests[1].url.includes(value==='main'?'continuous=true':'symbol=IM2703'));assert.match(requests[1].url,/end=2026-11-05/);
+  assert.equal(metrics.find(m=>m.label==='基差').value,String(expected.reference_spread));assert.equal(metrics.find(m=>m.label===expected.symbol).value,String(expected.futures_price));
+  assert.deepEqual(options[0].series[1].data,[expected.futures_price]);assert.equal(options[1].series[0].markLine.data[0].xAxis,expected.reference_spread);
+  assert.equal(charts[0].focus,expected.symbol);assert.equal(charts[0].lines.length,2);
+  assert.deepEqual(selection.map(e=>e.props['aria-label']),['基差合约','基差指标','基差历史跨度',...(value==='main'?[]:['基差对齐方式'])]);
+ }
+ historyReady=false;const options=render();
+ assert.equal(metrics.find(m=>m.label==='基差').value,'—');assert.deepEqual(options[0].series[1].data,[]);
+ assert.equal(requests[1].scope,'IM:main');
+});
+
+test('spread latest marker skips missing tails and retains a real zero without building a point list',async()=>{
+ const text=await readFile(new URL('../src/SpreadPanel.jsx',import.meta.url),'utf8'),module={exports:{}},draws=[];
+ let series;
+ new Function('module','exports','require',ts.transpileModule(text,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(module,module.exports,id=>id.endsWith('/charts.js')?{usePreference:(_key,value)=>[value,()=>{}],useResource:()=>({data:{series,paired_count:series.filter(r=>r.spread!=null).length}}),useChart:(_ref,draw)=>draws.push(draw)}:sharedRequire(id));
+ for(const values of [[null,0,null],[1,-2,null],[null,null]]){
+  series=values.map((spread,i)=>({trade_date:'2026-11-0'+(i+1),spread}));
+  const html=renderToStaticMarkup(React.createElement(module.exports.default,{data:{product:'IM',near:'IM2612',far:'IM2703',meta:{as_of:'2026-11-05'}},revision:0,controls:()=>null}));
+  let option;draws.pop()({setOption:o=>option=o});
+  const index=values.findLastIndex(v=>v!=null);
+  assert.deepEqual(option.series[0].markPoint.data,index<0?[]:[{coord:[index,values[index]],value:values[index]}]);
+  if(index>=0)assert.ok(html.includes('最新值'+values[index]));
+ }
 });
 
 test('shared axis tooltips omit missing values and retain valid zero across scalar and coordinate series',()=>{

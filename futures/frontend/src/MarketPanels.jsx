@@ -22,81 +22,83 @@ export function basisHistory(data,metric,alignment,currentColor='#4e7fb9') {
  return {lines,axis,mode:'seasonal',metric:'price',unit:ratio?'%':'',current:point?{label,point}:null,colors:Object.fromEntries(lines.map((l,i)=>[l.label,l.label===label?currentColor:palette[i%palette.length]])),accessible_label:data?.continuous?'主力基差历年季节性，按全年月日对齐':'同交割月历年基差，'+(alignment==='expiry'?'按距最后交易日自然天数对齐':'按交割年份相对月日对齐')};
 }
 
-export function basisDistribution(data,metric,current,symbol) {
- const point=data?.lines.find(l=>l.label===(data.continuous?current?.trade_date.slice(0,4):symbol))?.points.find(p=>p.trade_date===current?.trade_date);
- const year=data?.continuous?Number(current?.trade_date.slice(0,4)):Number(symbol?.slice(-4,-2))+2000,scale=metric==='reference_spread'?1:100;
- const seasonDay=day=>Date.parse('2000-'+day.slice(5))/86400000,anchor=current?seasonDay(current.trade_date):0;
- const values=point?(data.lines.flatMap(l=>l.year<year?l.points.filter(p=>p.trade_date<current.trade_date&&Number.isFinite(p.days_to_expiry)&&Math.abs(p.days_to_expiry-point.days_to_expiry)<=15&&(!data.continuous||Math.min(Math.abs(seasonDay(p.trade_date)-anchor),366-Math.abs(seasonDay(p.trade_date)-anchor))<=15)&&Number.isFinite(p[metric])).map(p=>p[metric]*scale):[])):[];
- const value=Number.isFinite(current?.[metric])?current[metric]*scale:null;
+export function basisDistribution(data,metric,current) {
+ const scale=metric==='reference_spread'?1:100,values=[],value=Number.isFinite(current?.[metric])?current[metric]*scale:null;
  let min=Infinity,max=-Infinity,below=0,equal=0;
- for(const v of values){min=Math.min(min,v);max=Math.max(max,v);if(v<value)below++;else if(v===value)equal++;}
- const width=max===min?1:(max-min)/12,bins=values.length?Array.from({length:max===min?1:12},(_,i)=>({start:min+i*width,end:min+(i+1)*width,n:0})):[];
+ for(const line of data?.lines||[])for(const p of line.points)if((!current||p.trade_date<=current.trade_date)&&Number.isFinite(p[metric])){
+  const v=p[metric]*scale;values.push(v);min=Math.min(min,v);max=Math.max(max,v);if(v<value)below++;else if(v===value)equal++;
+ }
+ const count=max===min?1:Math.min(40,Math.ceil(Math.sqrt(values.length))),width=max===min?1:(max-min)/count,bins=values.length?Array.from({length:count},(_,i)=>({start:min+i*width,end:min+(i+1)*width,n:0})):[];
  for(const v of values)bins[Math.min(bins.length-1,Math.floor((v-min)/width))].n++;
  return {bins,value,n:values.length,percentile:values.length&&value!=null?(below+equal/2)/values.length*100:null};
 }
 
 export function BasisDistribution({summary,percent}) {
  const ref=useRef();
- useChart(ref,chart=>chart.setOption({animation:false,grid:{left:52,right:30,top:45,bottom:60},
-  tooltip:{trigger:'axis',confine:true,renderMode:'richText',formatter:params=>{const b=summary.bins[params[0]?.dataIndex];return b?`${fmt(b.start)}—${fmt(b.end)}${percent?'%':''}\n${b.n} 个观测`:'';}},
+ useChart(ref,chart=>chart.setOption({animation:false,grid:{left:52,right:24,top:34,bottom:40},
+  tooltip:{trigger:'axis',confine:true,renderMode:'richText',formatter:params=>{const b=summary.bins[params[0]?.dataIndex];return b?`${fmt(b.start)}—${fmt(b.end)}${percent?'%':''}\n${b.n} 个值`:'';}},
   xAxis:{type:'value',min:Math.min(summary.bins[0].start,summary.value??Infinity),max:Math.max(summary.bins.at(-1).end,summary.value??-Infinity),axisLabel:{hideOverlap:true,formatter:v=>fmt(v)+(percent?'%':'')},splitLine:{show:false}},
-  yAxis:{type:'value',minInterval:1,splitLine:{lineStyle:{color:'#eef0f3'}}},
-  series:[{type:'bar',barWidth:'90%',itemStyle:{color:'#aebdce'},data:summary.bins.map(b=>[(b.start+b.end)/2,b.n]),
-   ...(summary.value!=null?{markLine:{silent:true,symbol:'none',lineStyle:{color:'#315f94',width:1.5},label:{position:'end',rotate:0,formatter:'当前 '+fmt(summary.value)+(percent?'%':'')},data:[{xAxis:summary.value}]}}:{})}]
+  yAxis:{type:'value',minInterval:1,splitNumber:3,splitLine:{lineStyle:{color:'#eef0f3'}}},
+  series:[{type:'bar',barWidth:'96%',itemStyle:{borderRadius:[2,2,0,0],color:p=>p.value[0]>0?'#bc706a':p.value[0]<0?'#579981':'#aebdce'},emphasis:{itemStyle:{color:'#7189a4'}},data:summary.bins.map(b=>[(b.start+b.end)/2,b.n]),
+   ...(summary.value!=null?{markLine:{silent:true,symbol:'none',lineStyle:{color:'#596c82',width:1.2},label:{position:'end',rotate:0,color:'#414d5d',fontWeight:500,formatter:'当前 '+fmt(summary.value)+(percent?'%':'')},data:[{xAxis:summary.value}]}}:{})}]
  },true),[summary,percent]);
- return <ChartFrame><div ref={ref} style={{height:300}} role="img" aria-label="基差历史分布与当前值"/></ChartFrame>;
+ return <ChartFrame><div ref={ref} style={{height:300}} role="img" aria-label="基差频率分布与当前值"/></ChartFrame>;
 }
 
-export function BasisPrices({rows,symbol,indexName,color,zoomGroup}) {
- const ref=useRef();
+export function BasisPrices({rows,symbol,indexName,color,zoomGroup,metric='basis_ratio'}) {
+ const ref=useRef(),ratio=metric!=='reference_spread',label=basisMetrics[metric];
  useChart(ref,chart=>chart.setOption({animation:false,legend:{type:'scroll',top:0},grid:{left:85,right:70,top:45,bottom:60},
-  tooltip:{trigger:'axis',confine:true,renderMode:'richText',formatter:params=>axisTooltip(params,(v,p)=>fmt(v)+(p.seriesName==='基差率'?'%':''))},
-  xAxis:{type:'category',data:rows.map(p=>p.trade_date),boundaryGap:false},
-  yAxis:[{type:'value',scale:true,axisLabel:{formatter:fmt},splitLine:{lineStyle:{color:'#eef0f3'}}},{type:'value',scale:true,axisLabel:{formatter:v=>fmt(v)+'%'},splitLine:{show:false}}],
+  tooltip:{trigger:'axis',confine:true,renderMode:'richText',formatter:params=>axisTooltip(params,(v,p)=>fmt(v)+(ratio&&p.seriesName===label?'%':''),rows[params[0]?.dataIndex]?.symbol?params[0].axisValue+' · '+rows[params[0].dataIndex].symbol:undefined)},
+  xAxis:{type:'category',data:rows.map(p=>p.trade_date),boundaryGap:false,axisLabel:{hideOverlap:true,showMinLabel:true,showMaxLabel:true}},
+  yAxis:[{type:'value',scale:true,axisLabel:{formatter:fmt},splitLine:{lineStyle:{color:'#eef0f3'}}},{type:'value',scale:true,axisLabel:{formatter:v=>fmt(v)+(ratio?'%':'')},splitLine:{show:false}}],
   dataZoom:[{type:'inside'},{type:'slider',bottom:8,height:18}],
-  series:[...[['reference_price',indexName,'#505c6b'],[symbol+'_price',symbol,color]].map(([key,name,color])=>({name,type:'line',showSymbol:false,connectNulls:false,z:3,lineStyle:{width:2},itemStyle:{color},data:rows.map(p=>p[key]??null)})),
-   {name:'基差率',type:'bar',yAxisIndex:1,itemStyle:{color:'#aebdce',opacity:.65},data:rows.map(p=>p[symbol+'_ratio']==null?null:p[symbol+'_ratio']*100),markLine:{silent:true,symbol:'none',label:{show:false},lineStyle:{color:'#7c8590',width:1},data:[{yAxis:0}]}}]
- },true),[rows,symbol,indexName,color],zoomGroup);
- return <ChartFrame><div className="chart" ref={ref} role="img" aria-label={`${indexName}、${symbol}价格与基差率`}/></ChartFrame>;
+  series:[...[['reference_price',indexName,'#505c6b'],['futures_price',symbol,color]].map(([key,name,color])=>({name,type:'line',showSymbol:false,connectNulls:false,z:3,lineStyle:{width:2},itemStyle:{color},data:rows.map(p=>p[key]??null)})),
+   {name:label,type:'bar',yAxisIndex:1,itemStyle:{color:'#aebdce',opacity:.65},data:rows.map(p=>p[metric]==null?null:p[metric]*(ratio?100:1)),markLine:{silent:true,symbol:'none',label:{show:false},lineStyle:{color:'#7c8590',width:1},data:[{yAxis:0}]}}]
+ },true),[rows,symbol,indexName,color,metric],zoomGroup);
+ return <ChartFrame><div className="chart" ref={ref} role="img" aria-label={`${indexName}、${symbol}价格与${label}`}/></ChartFrame>;
 }
 
 export function BasisPanel({product,end,priceType,revision,Chart,HistoryChart,onProduct,controls}) {
  const [symbol,setSymbol]=usePreference('futures.basis.'+product+'.symbol','');
  const [metric,setMetric]=usePreference('futures.basis.metric','basis_ratio'),[years,setYears]=usePreference('futures.basis.years',5),[alignment,setAlignment]=usePreference('futures.basis.alignment','calendar'),[scope,setScope]=usePreference('futures.basis.scope','main');
  const indexProducts=['IM','IF','IC','IH'],supported=indexProducts.includes(product);
- const {data,error,busy}=useResource(supported?'/api/basis-reference?'+new URLSearchParams({product,price_type:priceType,all_contracts:true,...(end?{end}:{})}):null,revision);
- const zoomGroup=useMemo(()=>new Set(),[data]);
+ const {data,error,busy}=useResource(supported?'/api/basis-reference?'+new URLSearchParams({product,price_type:priceType,all_contracts:true,...(end?{end}:{})}):null,revision,product);
  const colors=useMemo(()=>({...contractColors((data?.contracts||[]).map(symbol=>({symbol,position:data.contract_positions?.[symbol]}))),[data?.reference?.name||'指数']:'#505c6b'}),[data]);
  const contracts=Object.keys(colors).filter(s=>data?.contracts?.includes(s));
  const chosen=data?.comparisons?.[symbol]?symbol:data?.symbol,selected=data?.comparisons?.[chosen]||data;
  const main=scope==='main';
  const {data:historyData,error:historyError,busy:historyBusy}=useResource(supported&&(main||chosen?.startsWith(product))?'/api/basis-reference?'+new URLSearchParams({product,...(main?{continuous:true}:{symbol:chosen}),history:true,years,...(end?{end}:{})}):null,revision,product+':'+(main?'main':chosen));
  const mixed=historyData?.input_batch&&data?.input_batch&&historyData.input_batch!==data.input_batch,history=!mixed&&Array.isArray(historyData?.lines)?historyData:null;
- const last=selected?.latest,isIndex=data?.status==='index_close_basis',label=isIndex?'基差':'周频参考价差';
+ const last=main?history?.latest:selected?.latest,isIndex=data?.status==='index_close_basis',label=isIndex?'基差':'周频参考价差';
+ const priceRows=useMemo(()=>observedRows(main?(history?.lines||[]).flatMap(l=>l.points):selected?.series||[],['reference_price','futures_price']),[main,history,selected]);
+ const zoomGroup=useMemo(()=>{
+  const end=priceRows.at(-1)?.trade_date,cutoff=end&&String(Number(end.slice(0,4))-1)+end.slice(4);
+  return Object.assign(new Set(),{byDate:true,range:end?{startValue:priceRows.find(p=>p.trade_date>=cutoff).trade_date,endValue:end}:undefined});
+ },[priceRows]);
  const rows=useMemo(()=>{
   const days=new Map();
   for(const [s,result] of Object.entries(data?.comparisons||{}))for(const p of result.series){
-   if(!days.has(p.trade_date))days.set(p.trade_date,{trade_date:p.trade_date,reference_price:p.reference_price});
-   Object.assign(days.get(p.trade_date),{[s]:p.reference_spread,[s+'_ratio']:p.basis_ratio,[s+'_annual']:p.annualized_basis_ratio,[s+'_price']:p.futures_price});
+   if(!days.has(p.trade_date))days.set(p.trade_date,{trade_date:p.trade_date});
+   Object.assign(days.get(p.trade_date),{[s]:p.reference_spread,[s+'_ratio']:p.basis_ratio,[s+'_annual']:p.annualized_basis_ratio});
   }
   return [...days.values()].sort((a,b)=>a.trade_date.localeCompare(b.trade_date));
  },[data]);
  const seasonal=useMemo(()=>basisHistory(history,metric,alignment,main?'#4e7fb9':colors[chosen]),[history,metric,alignment,main,colors,chosen]);
- const distribution=useMemo(()=>basisDistribution(history,metric,main?history?.latest:last,chosen),[history,metric,last,chosen,main]);
+ const distribution=useMemo(()=>basisDistribution(history,metric,last),[history,metric,last]);
  const suffix={reference_spread:'',basis_ratio:'_ratio',annualized_basis_ratio:'_annual'}[metric];
- const contract=<>{data?.contracts?.length>0&&<select aria-label="重点合约" value={chosen} onChange={e=>setSymbol(e.target.value)}>{data.contracts.map(s=><option key={s}>{s}</option>)}</select>}{supported&&<select aria-label="基差指标" value={metric} onChange={e=>setMetric(e.target.value)}>{Object.entries(basisMetrics).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select>}</>;
- return <><div className="filters page-filters basis-filters">{controls?.(contract,data?.meta?.as_of,busy)}</div>
+ const contract=supported&&<><select aria-label="基差合约" value={main?'main':chosen||symbol} onChange={e=>{if(e.target.value!=='main')setSymbol(e.target.value);setScope(e.target.value==='main'?'main':'contract');}}><option value="main">主力</option>{(data?.contracts||[symbol].filter(Boolean)).map(s=><option key={s}>{s}</option>)}</select><select aria-label="基差指标" value={metric} onChange={e=>setMetric(e.target.value)}>{Object.entries(basisMetrics).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select><select aria-label="基差历史跨度" value={years} onChange={e=>setYears(Number(e.target.value))}>{[3,5,10].map(y=><option key={y} value={y}>{y}年</option>)}</select>{!main&&<select aria-label="基差对齐方式" value={alignment} onChange={e=>setAlignment(e.target.value)}><option value="calendar">同期月日</option><option value="expiry">距到期天数</option></select>}</>;
+ return <><div className="filters page-filters basis-filters">{controls?.(contract,data?.meta?.as_of,busy||historyBusy)}</div>
  {!supported||data?.status==='unavailable'?<section className="panel" aria-busy={busy}><p className="sub">{supported?'所选品种暂无基差数据':['T','TF','TS','TL'].includes(product)?'国债基差暂未接入':'商品基差暂未接入'}</p><div className="scan-controls">{indexProducts.map(p=><button key={p} onClick={()=>onProduct(p)}>{p}</button>)}</div></section>:error?<><p role="alert">{error}</p>{symbol&&<button onClick={()=>setSymbol('')}>重选活跃合约</button>}</>:!data?<p role="status">读取基差…</p>:<>
  <div className="basis-quote">
- <div className="metrics"><Metric label={label} value={fmt(last?.reference_spread)} hint="现货 − 期货"/><Metric label={isIndex?'指数':'参考价'} value={fmt(last?.reference_price)}/><Metric label="期货价" value={fmt(last?.futures_price)}/>{isIndex&&<Metric label="年化基差率" value={last?.annualized_basis_ratio==null?'—':fmt(last.annualized_basis_ratio*100)+'%'} hint="基差 ÷ 现货 × 365 ÷ 距交割日天数"/>}</div>
- {last&&<span className="sub">{last.trade_date}{data.meta.stale?' · 缓存降级':''}{data.reference.source?.includes('测试')?' · 测试样本':''}</span>}</div>
+ <div className="metrics"><Metric label={label} value={fmt(last?.reference_spread)} hint="现货 − 期货"/><Metric label={isIndex?'指数':'参考价'} value={fmt(last?.reference_price)}/><Metric label={main?last?.symbol||'期货价':chosen} value={fmt(last?.futures_price)}/>{isIndex&&<Metric label="年化基差率" value={last?.annualized_basis_ratio==null?'—':fmt(last.annualized_basis_ratio*100)+'%'} hint="基差 ÷ 现货 × 365 ÷ 距交割日天数"/>}</div>
+ {last&&(last.trade_date!==data.meta.as_of||data.meta.stale||data.reference.source?.includes('测试'))&&<span className="sub">{last.trade_date}{data.meta.stale?' · 缓存降级':''}{data.reference.source?.includes('测试')?' · 测试样本':''}</span>}</div>
  {isIndex&&<section className="panel basis-seasonal" aria-busy={historyBusy}>
- <div className="filters history-toolbar"><h2>{basisMetrics[metric]}季节性</h2><select aria-label="基差季节口径" value={scope} onChange={e=>setScope(e.target.value)}><option value="main">主力</option><option value="contract">所选合约</option></select><select aria-label="基差历史跨度" value={years} onChange={e=>setYears(Number(e.target.value))}>{[3,5,10].map(y=><option key={y} value={y}>{y}年</option>)}</select>{!main&&<select aria-label="基差对齐方式" value={alignment} onChange={e=>setAlignment(e.target.value)}><option value="calendar">同期月日</option><option value="expiry">距到期天数</option></select>}</div>
+ <h2>{basisMetrics[metric]}季节图</h2>
  {seasonal.lines.length?<HistoryChart result={seasonal} showAllYears height="clamp(340px,42vh,460px)"/>:<p className="empty">{historyError|| (mixed?'数据批次已更新，请刷新':historyBusy?'读取历史…':'暂无已发布历史')}</p>}{history?.missing.length>0&&<p className="sub">缺 {history.missing.length} 个年份</p>}</section>}
- {!!rows.length&&<section className="panel basis-prices" aria-busy={busy}><h2>期现价格与基差率</h2><BasisPrices rows={rows} symbol={chosen} indexName={data.reference.name} color={colors[chosen]} zoomGroup={zoomGroup}/></section>}
+ {!!rows.length&&<section className="panel basis-prices" aria-busy={main?historyBusy:busy}><h2>{basisMetrics[metric]}走势图</h2><BasisPrices rows={priceRows} symbol={main?'主力':chosen} indexName={data.reference.name} color={main?'#4e7fb9':colors[chosen]} metric={metric} zoomGroup={zoomGroup}/></section>}
  <section className="panel basis-history"><div className="spread-stat-grid">
- <div><div className="stats-heading"><h2>在市合约对照</h2><span>{basisMetrics[metric]}{metric==='reference_spread'?'':' / %'}</span></div>{rows.length?<Chart zoomGroup={zoomGroup} rows={rows} lines={contracts.map(s=>[s+suffix,s])} colors={colors} focus={chosen} percent={metric!=='reference_spread'}/>:<p className="empty">暂无配对数据</p>}</div>
- <div aria-busy={historyBusy}><div className="stats-heading"><h2>{main?'主力历史分布':'合约历史分布'}</h2><Metric label="历史分位" value={distribution.percentile==null?'—':fmt(distribution.percentile)+'%'} hint={main?'此前年份、同期月日±15天、到期天数相差≤15天；相同值取中间排名。':'此前交割年、到期天数相差≤15天；相同值取中间排名。'}/><span>{distribution.n} 个观测</span></div>{distribution.n?<BasisDistribution summary={distribution} percent={metric!=='reference_spread'}/>:<p className="empty">暂无可比历史样本</p>}</div>
+ <div><div className="stats-heading"><h2>上市合约</h2><span>{basisMetrics[metric]}{metric==='reference_spread'?'':' / %'}</span></div>{rows.length?<Chart zoomGroup={zoomGroup} rows={rows} lines={contracts.map(s=>[s+suffix,s])} colors={colors} focus={main?last?.symbol:chosen} percent={metric!=='reference_spread'}/>:<p className="empty">暂无配对数据</p>}</div>
+ <div aria-busy={historyBusy}><div className="stats-heading"><h2>{basisMetrics[metric]}频率分布</h2><Metric label="历史分位" value={distribution.percentile==null?'—':fmt(distribution.percentile)+'%'} hint="所选历史跨度内的日观测；相同值取中间排名。"/><span>{distribution.n} 个观测</span></div>{distribution.n?<BasisDistribution summary={distribution} percent={metric!=='reference_spread'}/>:<p className="empty">暂无历史样本</p>}</div>
  </div></section>
  </>}
  </>;

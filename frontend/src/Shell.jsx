@@ -14,7 +14,6 @@ const loadIntraday = import.meta.env.INTRADAY_PREVIEW ? () => import('./Intraday
 // Only confirmed destinations are visible; deployment can set these at build time.
 const HOME = import.meta.env.VITE_HOME_URL || 'https://mingjiec.com/';
 const BASE = import.meta.env.BASE_URL;
-const touchNavigation = '(hover: none), (pointer: coarse)';
 const modules = [['seats', '席位', loadSeats], ['futures', '期货', loadFutures], ['options', '期权(Beta)', loadOptions]];
 const previews = [...(loadObserve ? [['observe','观察',loadObserve]] : []), ...(loadIntraday ? [['intraday','日内',loadIntraday]] : [])];
 const currentModule = () => previews.find(([id]) => [BASE+id,BASE+id+'/'].includes(location.pathname))?.[0] || modules.find(([id]) => location.pathname.startsWith(`${BASE}${id}/`) || location.pathname === `${BASE}${id}`)?.[0] || 'futures';
@@ -44,23 +43,21 @@ export default function Shell() {
     load().then(module=>{if(!cancelled)setPage({id:active,Component:module.default});},error=>{if(!cancelled)setPage({id:active,error});});
     return()=>{cancelled=true;};
   },[active]);
-  const [touch, setTouch] = useState(() => matchMedia(touchNavigation).matches);
   const [versionState, setVersionState] = useState({ updated: false, failed: false });
   useEffect(() => {
     setVersionState({ updated: false, failed: false });
     if (active !== 'intraday') return watchVersion(active, setVersionState);
   }, [active]);
   const menu = useRef(null);
+  const pinned = useRef(false);
+  const closeMenu = () => { menu.current.open=false; pinned.current=false; };
   const lastView = useRef({});
   useEffect(() => {
-    const media = matchMedia(touchNavigation);
-    const inputChanged = () => { setTouch(media.matches); menu.current.open = false; };
-    media.addEventListener('change', inputChanged);
     const back = () => setActive(currentModule());
-    const outside = event => { if (!menu.current?.contains(event.target)) menu.current?.removeAttribute('open'); };
+    const outside = event => { if (!menu.current.contains(event.target)) closeMenu(); };
     window.addEventListener('popstate', back);
     document.addEventListener('pointerdown', outside);
-    return () => { media.removeEventListener('change', inputChanged); window.removeEventListener('popstate', back); document.removeEventListener('pointerdown', outside); };
+    return () => { window.removeEventListener('popstate', back); document.removeEventListener('pointerdown', outside); };
   }, []);
   function select(event, next) {
     if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
@@ -76,8 +73,8 @@ export default function Shell() {
       history.pushState({}, '', target);
       setActive(next);
     }
-    if (modules.some(([id]) => id === next)) menu.current.querySelector(touch ? 'summary' : 'summary a').focus();
-    menu.current.open = false;
+    if (modules.some(([id]) => id === next)) menu.current.querySelector('summary').focus();
+    closeMenu();
     window.scrollTo({top: 0, left: 0, behavior: 'instant'});
   }
   const ActiveModule = page.id===active?page.Component:null;
@@ -86,12 +83,12 @@ export default function Shell() {
     <header className="unified-topbar"><nav aria-label="站点导航">
       <a className="unified-brand" href={HOME}>MINGJIE</a><a href={HOME}>策略</a>
       <details ref={menu} className="board-menu"
-        onPointerEnter={event=>{if(!touch&&event.pointerType==='mouse')menu.current.open=true;}}
-        onPointerLeave={event=>{if(!touch&&event.pointerType==='mouse')menu.current.open=false;}}
-        onFocus={()=>{if(!touch)menu.current.open=true;}}
-        onBlur={event=>{if(event.relatedTarget&&!event.currentTarget.contains(event.relatedTarget))menu.current.open=false;}}
-        onKeyDown={event => { if (event.key === 'Escape') { menu.current.querySelector(touch ? 'summary' : 'summary a').focus(); menu.current.open=false; event.preventDefault(); } }}>
-        <summary tabIndex={touch ? undefined : -1} aria-label={touch ? '切换看板' : undefined}>{touch ? '看板' : <a href={`${BASE}${modules[0][0]}/`} aria-label="切换看板" onClick={event=>select(event, modules[0][0])}>看板</a>}</summary>
+        onPointerEnter={event=>{if(event.pointerType==='mouse')menu.current.open=true;}}
+        onPointerLeave={event=>{if(event.pointerType==='mouse'&&!pinned.current)closeMenu();}}
+        onFocus={()=>{menu.current.open=true;}}
+        onBlur={event=>{if(event.relatedTarget&&!event.currentTarget.contains(event.relatedTarget))closeMenu();}}
+        onKeyDown={event => { if (event.key === 'Escape') { menu.current.querySelector('summary').focus(); closeMenu(); event.preventDefault(); } }}>
+        <summary aria-label="切换看板" onClick={event=>{event.preventDefault();menu.current.open=true;pinned.current=true;}}>看板</summary>
         <div className="board-menu__items">{modules.map(([id, label]) => <a key={id} href={`${BASE}${id}/`} aria-current={active === id ? 'page' : undefined} onClick={event => select(event, id)}><span>{label}</span></a>)}</div>
       </details>
       {previews.map(([id,label]) => <a key={id} href={`${BASE}${id}/`} aria-current={active===id?'page':undefined} onClick={event=>select(event,id)}>{label}</a>)}

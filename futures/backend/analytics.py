@@ -175,7 +175,7 @@ def basis_history(rows, points, symbols, terms, mappings=None):
         result = index_basis(contract,points,s,delivery)
         histories[s] = [dict(
             trade_date=p['trade_date'], days_to_expiry=(date.fromisoformat(term['last_trade_date'])-date.fromisoformat(p['trade_date'])).days,
-            **{k:p[k] for k in ('reference_spread','basis_ratio','annualized_basis_ratio')}) for p in result['series']]
+            **{k:p[k] for k in ('reference_price','futures_price','reference_spread','basis_ratio','annualized_basis_ratio')}) for p in result['series']]
         lines.append(dict(label=s,year=2000+int(s[-4:-2]),points=histories[s]))
     if mappings is not None:
         segments = sorted(mappings,key=lambda r:r['start_date'])
@@ -189,7 +189,7 @@ def basis_history(rows, points, symbols, terms, mappings=None):
                 cursor += 1
             symbol = segments[cursor]['symbol'] if cursor<len(segments) and segments[cursor]['start_date']<=day else None
             point = dict(indexed.get(symbol,{}).get(day) or dict(trade_date=day,days_to_expiry=None,
-                reference_spread=None,basis_ratio=None,annualized_basis_ratio=None),symbol=symbol)
+                reference_price=None,futures_price=None,reference_spread=None,basis_ratio=None,annualized_basis_ratio=None),symbol=symbol)
             year = int(day[:4])
             years.setdefault(year,dict(label=str(year),year=year,points=[]))['points'].append(point)
             if point['reference_spread'] is not None:

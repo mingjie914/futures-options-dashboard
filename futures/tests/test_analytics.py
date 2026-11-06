@@ -572,6 +572,8 @@ def test_basis_history_uses_listed_cffex_identity_and_retains_missing_closes():
     assert len(result['lines'])==1
     series=result['lines'][0]['points']
     assert [p['reference_spread'] for p in series]==[0,None,-1]
+    assert [p['reference_price'] for p in series]==[100,100,100]
+    assert [p['futures_price'] for p in series]==[100,None,101]
     assert series[0]['days_to_expiry']==109
     assert series[-1]['annualized_basis_ratio']==-.01*365/107
 
@@ -590,6 +592,8 @@ def test_dominant_basis_follows_published_intervals_without_carry_forward_or_oi_
     series=result['lines'][0]['points']
     assert result['continuous'] and [p['symbol'] for p in series]==['IM2611',None,'IM2612','IM2612']
     assert [p['reference_spread'] for p in series]==[1,None,2,2]
+    assert [p['futures_price'] for p in series]==[99,None,98,98]
+    assert [p['reference_price'] for p in series]==[100,None,100,100]
     assert result['latest']['trade_date']==days[-1] and result['latest']['basis_ratio']==.02
     with pytest.raises(ValueError,match='重叠'):
         basis_history(rows,points,['IM2611','IM2612'],terms,[mapping[0],dict(mapping[1],start_date=days[0])])
