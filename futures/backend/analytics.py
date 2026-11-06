@@ -8,6 +8,7 @@ Contract dates inferred here are month anchors, never authoritative expiry dates
 import math
 import re
 import statistics
+from calendar import monthrange
 from bisect import bisect_left, bisect_right, insort
 from datetime import date, datetime
 
@@ -1110,6 +1111,36 @@ def etf_flows(funds, holders, cutoff, trading_days=None):
             row[group+'_observed']=observed
         series.append(row)
     return dict(series=series,funds=members,preview=True)
+
+
+def index_valuation(points, cycles, valuations, metric='pe_ttm', quantile=.85, history_years=10):
+    """Cutoff-date valuation reference, retrospectively drawn; not a trading backtest."""
+    by_day = {p['trade_date']:_number(p.get(metric)) for p in valuations}
+    if len(by_day) != len(valuations):
+        raise ValueError('指数估值日期重复')
+    paired, as_of = {}, None
+    for p in points:
+        if _number(p.get('close')) is None or p['close']<=0:continue
+        as_of, value = p['trade_date'], by_day.get(p['trade_date'])
+        if value is not None and value>0:
+            paired[as_of] = dict(trade_date=as_of,close=p['close'],value=value)
+    as_of = date.fromisoformat(as_of) if as_of else None
+    start = date(as_of.year-history_years,as_of.month,min(as_of.day,monthrange(as_of.year-history_years,as_of.month)[1])).isoformat() if as_of and history_years else ''
+    history = [p for p in paired.values() if p['trade_date']>=start]
+    samples = [dict(paired[c['end']],confirmed_on=c['confirmed_on']) for c in cycles
+               if c['direction']<0 and not c['ongoing'] and c['end']>=start and c['end'] in paired]
+    values = sorted(p['value'] for p in history)
+    median = statistics.median(p['value'] for p in samples) if samples else None
+    lower, deep = (median*1.1,median*.9) if median is not None else (None,None)
+    position = (len(values)-1)*quantile if values else 0
+    i = int(position)
+    upper = values[i]+(values[min(i+1,len(values)-1)]-values[i])*(position-i) if values else None
+    latest = next(reversed(paired.values()),None)
+    return dict(metric=metric,quantile=quantile,lower=lower,deep=deep,deep_factor=.9,upper=upper,samples=samples,
+                observations=len(values),series=[dict(trade_date=p['trade_date'],value=p['value']) for p in paired.values()],latest=latest,
+                history_years=history_years,history_start=history[0]['trade_date'] if history else None,history_end=history[-1]['trade_date'] if history else None,
+                percentile=50*(bisect_left(values,latest['value'])+bisect_right(values,latest['value']))/len(values) if latest and values else None,
+                reference_as_of=as_of.isoformat() if as_of else None,method='cutoff_confirmed_lows')
 
 
 def index_cycles(points, threshold=.2):

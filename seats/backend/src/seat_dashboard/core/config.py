@@ -93,7 +93,3 @@ class Settings:
     @property
     def current_manifest_path(self) -> Path:
         return self.runtime_root / "manifests" / "current.json"
-
-    def ensure_runtime_dirs(self) -> None:
-        for path in (self.runtime_root, self.snapshots_root, self.staging_root, self.current_manifest_path.parent):
-            path.mkdir(parents=True, exist_ok=True)

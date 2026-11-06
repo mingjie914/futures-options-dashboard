@@ -1650,3 +1650,34 @@ def test_etf_flow_context_stays_preview_only_and_revalidates_holder_changes(setu
     assert external.get(url).json()['series']==[]
     (published/'observation-etf-flows.json').write_text(json.dumps(compiled),encoding='utf8')
     assert external.get(url).json()['series']==compiled['series']
+
+
+def test_cycle_valuation_is_index_specific_cutoff_and_cache_versioned(setup,monkeypatch):
+    import json
+    _,store,_=setup
+    monkeypatch.setenv('DASHBOARD_OBSERVE_PREVIEW','1')
+    root=store.runtime.parent
+    points=[dict(trade_date=f'2020-01-{i:02d}',close=p) for i,p in enumerate([100,125,80,100,140,110,70,90,84],1)]
+    (root/'observation-context.json').write_text(json.dumps({'meta':{'input_batch':'price-fixture'},'indices':{code:points for code in ['000300.SH','399006.SZ']}}))
+    client=TestClient(create_app(store));url='/api/observation/context?view=cycle'
+    empty=client.get(url)
+    assert empty.json()['valuation'] is None
+    path=root/'index-valuation.parquet'
+    with duckdb.connect() as con:
+        con.execute('CREATE TABLE v(S_INFO_WINDCODE VARCHAR,TRADE_DT DATE,PE_TTM DECIMAL(20,8),PB DECIMAL(20,8))')
+        con.executemany('INSERT INTO v VALUES (?,?,?,?)',[(code,p['trade_date'],pe,pb) for code,pe,pb in [('000300.SH',10,1),('399006.SZ',20,2)] for p in points])
+        con.execute('COPY v TO ? (FORMAT PARQUET)',[str(path)])
+    full=client.get(url,headers={'If-None-Match':empty.headers['etag']})
+    assert full.status_code==200
+    assert full.json()['valuation']['upper']==10 and full.json()['valuation']['metric']=='pe_ttm'
+    assert client.get(url,headers={'If-None-Match':full.headers['etag']}).status_code==304
+    prefix=client.get(url+'&index=399006.SZ&end=2020-01-06').json()['valuation']
+    assert prefix['metric']=='pb' and prefix['upper']==2 and prefix['quantile']==.75
+    assert len(prefix['series'])==6 and len(prefix['samples'])==1 and prefix['samples'][0]['confirmed_on']=='2020-01-05'
+    assert prefix['low_reversal']==.3 and prefix['deep']==1.8 and prefix['history_years']==10
+    assert client.get(url+'&valuation_years=0').json()['valuation']['history_years']==0
+    assert prefix['reference_as_of']=='2020-01-06'
+    (root/'index-valuation-manifest.json').write_text(json.dumps({'projection_id':'fixture','authority':'RDS fixture','source_query':'not for the client'}))
+    version=client.get(url,headers={'If-None-Match':full.headers['etag']})
+    assert version.status_code==200 and version.json()['valuation']['source']['projection_id']=='fixture'
+    assert 'source_query' not in version.json()['valuation']['source']

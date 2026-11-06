@@ -593,3 +593,44 @@ def test_dominant_basis_follows_published_intervals_without_carry_forward_or_oi_
     assert result['latest']['trade_date']==days[-1] and result['latest']['basis_ratio']==.02
     with pytest.raises(ValueError,match='重叠'):
         basis_history(rows,points,['IM2611','IM2612'],terms,[mapping[0],dict(mapping[1],start_date=days[0])])
+
+
+def test_index_valuation_uses_confirmed_lows_and_cutoff_sample_without_imputed_values():
+    import pytest
+    from backend.analytics import index_cycles,index_valuation
+    points=[dict(trade_date=f'2020-01-{i:02d}',close=p) for i,p in enumerate([100,125,80,100,140,110,70,90,84],1)]
+    values=[dict(trade_date=p['trade_date'],pe_ttm=v,pb=v/10) for p,v in zip(points,[10,12,8,15,14,16,10,11,18])]
+    result=index_valuation(points,index_cycles(points),values)
+    assert [p['trade_date'] for p in result['samples']]==['2020-01-03','2020-01-07']
+    assert [p['confirmed_on'] for p in result['samples']]==['2020-01-04','2020-01-08']
+    assert result['lower']==pytest.approx(9.9) and result['upper']==pytest.approx(15.8)
+    assert result['deep']==pytest.approx(8.1) and result['deep_factor']==.9
+    assert result['series'][-1]==dict(trade_date='2020-01-09',value=18)
+    assert result['percentile']==pytest.approx(100*8.5/9)
+    prefix=index_valuation(points[:6],index_cycles(points[:6]),values[:6])
+    assert len(prefix['samples'])==1 and prefix['lower']==pytest.approx(8.8)
+    pb=index_valuation(points,index_cycles(points),values,'pb',.75)
+    assert pb['metric']=='pb' and pb['upper']==1.5
+    values[2]['pe_ttm']=0;values[-1]['pe_ttm']=-2
+    missing=index_valuation(points,index_cycles(points),values)
+    assert len(missing['samples'])==1 and missing['lower']==11
+    assert '2020-01-03' not in [p['trade_date'] for p in missing['series']]
+    assert missing['latest']['trade_date']=='2020-01-08'
+    assert not index_valuation(points,index_cycles(points),[])['series']
+    with pytest.raises(ValueError,match='重复'):
+        index_valuation(points,index_cycles(points),values+[values[0]])
+
+
+def test_valuation_window_applies_to_all_reference_levels_and_keeps_chart_history():
+    import pytest
+    from backend.analytics import index_valuation
+    points=[dict(trade_date=d,close=100) for d in ['2000-01-01','2001-01-01','2010-02-27','2010-02-28','2020-02-29']]
+    values=[dict(trade_date=p['trade_date'],pe_ttm=v) for p,v in zip(points,[100,100,100,10,10])]
+    cycles=[dict(direction=-1,ongoing=False,end='2000-01-01',confirmed_on='2001-01-01')]
+    recent=index_valuation(points,cycles,values)
+    full=index_valuation(points,cycles,values,history_years=0)
+    assert recent['history_start']=='2010-02-28' and recent['observations']==2 and recent['upper']==10
+    assert full['history_start']=='2000-01-01' and full['observations']==5 and full['upper']==100
+    assert recent['lower'] is None and recent['deep'] is None and recent['samples']==[]
+    assert full['lower']==pytest.approx(110) and full['deep']==90 and len(full['samples'])==1
+    assert len(recent['series'])==len(full['series'])==5

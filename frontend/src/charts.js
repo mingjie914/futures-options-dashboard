@@ -79,14 +79,27 @@ export function useChart(ref, draw, dependencies, zoomGroup, syncLegend = false)
   useEffect(()=>()=>{active.current?.dispose();active.current=null;},[]);
 }
 
-// Group members must use the same ordered date axis, including null gaps.
+// Percent groups share an axis; byDate groups may start on different dates.
 export function linkZoom(chart, group, syncLegend = false) {
-  const apply = target => target.dispatchAction({type:'dataZoom', ...group.range}, {silent:true});
+  const axes=group.byDate?(group.dateAxes ||= new Map()):null;
+  if(axes)axes.set(chart,chart.getOption().xAxis[0].data);
+  const apply = target => {
+    let range=group.range;
+    if(axes){
+      const axis=axes.get(target),clamp=d=>d<axis[0]?axis[0]:d>axis.at(-1)?axis.at(-1):d;
+      range={startValue:clamp(range.startValue),endValue:clamp(range.endValue)};
+    }
+    target.dispatchAction({type:'dataZoom',...range},{silent:true});
+  };
   group.add(chart);
   if (group.range) apply(chart);
   const change = event => {
     const {start, end} = event.batch?.[0] || event;
     group.range = {start, end};
+    if(axes){
+      const {dataZoom}=chart.getOption(),axis=axes.get(chart);
+      group.range={startValue:axis[dataZoom[0].startValue],endValue:axis[dataZoom[0].endValue]};
+    }
     for (const target of group) if (target !== chart) apply(target);
   };
   chart.on('datazoom', change);
@@ -104,7 +117,7 @@ export function linkZoom(chart, group, syncLegend = false) {
     chart.on('legendselectchanged', legend);
   }
   return () => {
-    chart.off('datazoom', change); group.delete(chart);
+    chart.off('datazoom', change); group.delete(chart);axes?.delete(chart);
     if (syncLegend) { chart.off('legendselectchanged', legend); group.legendCharts.delete(chart); }
   };
 }

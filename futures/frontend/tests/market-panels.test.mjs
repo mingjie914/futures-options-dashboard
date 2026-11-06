@@ -207,6 +207,23 @@ test('linked date charts restore late mounts, synchronize both ways and detach w
  linkZoom(a,group);assert.deepEqual(a.range,{start:0,end:100});
  detachB();assert.equal(b.handlers.size,0);assert.equal(group.has(b),false);
 });
+test('date zoom links unequal history starts by actual dates and clamps to available data',()=>{
+ const dates=['2020-01-01','2020-01-02','2020-01-03','2020-01-06'];
+ const chart=axis=>({axis,reads:0,handlers:new Map(),range:{startValue:0,endValue:axis.length-1},
+  on(name,fn){this.handlers.set(name,fn);},off(name){this.handlers.delete(name);},
+  getOption(){this.reads++;return {xAxis:[{data:this.axis}],dataZoom:[this.range]};},
+  dispatchAction({startValue,endValue},options){assert.equal(options.silent,true);this.range={startValue:this.axis.indexOf(startValue),endValue:this.axis.indexOf(endValue)};},
+  drag(startValue,endValue){this.range={startValue,endValue};this.handlers.get('datazoom')({start:0,end:100});}});
+ const group=Object.assign(new Set(),{byDate:true}),full=chart(dates),paired=chart(dates.slice(1));
+ linkZoom(full,group);full.drag(0,2);const detach=linkZoom(paired,group);
+ assert.deepEqual(paired.range,{startValue:0,endValue:1});
+ assert.equal(paired.reads,1);
+ paired.drag(1,2);assert.deepEqual(full.range,{startValue:2,endValue:3});
+ assert.equal(full.reads,2);
+ full.drag(0,0);assert.deepEqual(paired.range,{startValue:0,endValue:0});
+ assert.equal(paired.reads,2);detach();assert.equal(group.dateAxes.has(paired),false);
+});
+
 test('linked contract legends synchronize selections, late mounts and cleanup without affecting ratios',()=>{
  const chart=()=>({selected:{},handlers:new Map(),calls:0,
   on(name,fn){this.handlers.set(name,fn);},off(name){this.handlers.delete(name);},
@@ -667,4 +684,31 @@ test('stock-bond overlay keeps two raw index levels, shared dates and missing ob
   draws.pop()({setOption:o=>{option=o;}});
   for(const p of anchored.anchors)assert.ok(Math.abs(position(p.stock,option.yAxis[0])-position(p.fund,option.yAxis[1]))<1e-12);
  }finally{globalThis.location=originalLocation;}
+});
+
+test('cycle valuation reuses line chart, preserves gaps and shows valuation without bond labels',async()=>{
+ const source=await readFile(new URL('../../../frontend/src/Observe.jsx',import.meta.url),'utf8');
+ const module={exports:{}},draws=[];
+ new Function('module','exports','require',ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(module,module.exports,id=>id.endsWith('/charts.js')?{...sharedRequire('./src/charts.js'),useChart:(_ref,draw)=>draws.push(draw)}:id==='./preferences.js'?{}:sharedRequire(id));
+ const data={metric:'pe_ttm',samples:[{trade_date:'2020-01-01',close:100}],series:[{trade_date:'2020-01-01',close:100,value:10,lower:88,deep:72,upper:140},{trade_date:'2020-01-02',close:110,value:null,lower:null,deep:null,upper:null}]};
+ const lines=[{key:'close',name:'指数点位',color:'#4e7fb9'},{key:'lower',name:'低估参考',color:'#568f84',dashed:true},{key:'deep',name:'深估参考',color:'#b64d49',dashed:true},{key:'upper',name:'高估参考',color:'#a48b59',dashed:true}],zoomGroup=new Set();
+ renderToStaticMarkup(React.createElement(module.exports.ContextChart,{data,lines,zoomGroup,label:'指数点位与估值参考',height:460}));
+ let option;draws.pop()({setOption:o=>{option=o;}});
+ assert.deepEqual(option.series.map(s=>s.data),[[100,110],[88,null],[72,null],[140,null]]);
+ assert.deepEqual(option.series.map(s=>s.lineStyle.type),['solid','dashed','dashed','dashed']);
+ assert.ok(option.series.every(s=>!s.endLabel.show&&!s.connectNulls&&s.yAxisIndex===0));
+ assert.deepEqual(option.series[0].markPoint.data[0].coord,[1,110]);
+ assert.deepEqual(option.series[2].markPoint.data[0].coord,[0,72]);
+ assert.equal(option.yAxis.min({min:100,max:200}),94);assert.equal(option.yAxis.max({min:100,max:200}),206);
+ assert.equal(option.series[0].lineStyle.width,2.6);assert.equal(option.dataZoom[0].start,0);
+ assert.equal(option.dataZoom[0].end,100);assert.equal(option.yAxis.axisLabel.formatter(1234.56),'1,235');
+ assert.match(source,/key:'deep'.*color:'#b64d49'/);
+ assert.match(option.tooltip.formatter([{seriesName:'指数点位',value:100,dataIndex:0,axisValue:'2020-01-01'}]),/PE\(TTM\)：10/);
+ assert.doesNotMatch(option.tooltip.formatter([{seriesName:'指数点位',value:110,dataIndex:1,axisValue:'2020-01-02'},{seriesName:'低估参考',value:null,dataIndex:1}]),/低估参考|PE|—/);
+ const view=module.exports.valuationView({series:[{trade_date:'2019-12-31',close:99},{trade_date:'2020-01-01',close:100},{trade_date:'2020-01-02',close:110}],valuation:{latest:{value:10},lower:8.8,deep:7.2,upper:14,series:[{trade_date:'2020-01-01',value:10}]}});
+ assert.ok(Math.abs(view.series[0].lower-88)<1e-10);assert.equal(view.series[0].upper,140);
+ assert.deepEqual(view.series.map(p=>p.trade_date),['2020-01-01','2020-01-02']);
+ assert.deepEqual(view.series[1],{trade_date:'2020-01-02',close:110,value:null,lower:null,deep:null,upper:null});
+ assert.equal(module.exports.valuationView({}),null);
+ assert.match(source,/ContextChart data=\{valuation\}.*zoomGroup=\{zoomGroup\}/);
 });

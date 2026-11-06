@@ -122,7 +122,7 @@ def create_app(store=None):
         if path == '/api/observation' and history.is_dir():
             return [date.today().isoformat(), fingerprint([history/'prices.parquet',history/'mapping.parquet'])]
         if path == '/api/observation/context':
-            return fingerprint([observation_root.get()/name for name in ('observation-context.json','observation-comparison-preview.json','observation-etf-flows.json','observation-etf-holders.json')])
+            return fingerprint([observation_root.get()/name for name in ('observation-context.json','observation-comparison-preview.json','observation-etf-flows.json','observation-etf-holders.json','index-valuation.parquet','index-valuation-manifest.json')])
         files = list((store.root.parent/'futuresfundamentals').glob('*.parquet')) if path == '/api/inventory' else store._files()
         if not files:
             files = list((store.runtime/'snapshots').glob('*.json'))
@@ -468,7 +468,8 @@ def create_app(store=None):
 
         @app.get('/api/observation/context')
         def observation_context(view: str = Query('allocation',pattern='^(allocation|cycle|flow|compare)$'),
-                                index: str = Query('000300.SH',pattern=r'^(000001\.SH|000016\.SH|000300\.SH|000905\.SH|000852\.SH|000985\.CSI|399006\.SZ|000688\.SH)$'), end: Optional[date] = None):
+                                index: str = Query('000300.SH',pattern=r'^(000001\.SH|000016\.SH|000300\.SH|000905\.SH|000852\.SH|000985\.CSI|399006\.SZ|000688\.SH)$'), end: Optional[date] = None,
+                                valuation_years: int = Query(10,ge=0,le=30)):
             cutoff=(end or date.today()).isoformat()
             if view=='compare':
                 path=observation_root.get()/'observation-comparison-preview.json'
@@ -502,7 +503,18 @@ def create_app(store=None):
                     current=dict(as_of=latest['trade_date'],direction=phase['direction'],change_from_start=latest['value'],
                                  drawdown=(1+latest['value'])/(1+high['value'])-1,peak_date=high['trade_date'],
                                  rebound=(1+latest['value'])/(1+low['value'])-1,low_date=low['trade_date'])
-                return clean(dict(series=series,cycles=cycles,current=current,index=index,meta=source['meta'],preview=True))
+                valuation=None
+                path=observation_root.get()/'index-valuation.parquet'
+                if path.is_file():
+                    metric,quantile=('pb',.75) if index=='399006.SZ' else ('pe_ttm',.85)
+                    values=store._query([path],f'''SELECT TRADE_DT::VARCHAR trade_date, {metric.upper()} {metric}
+                        FROM read_parquet(?) WHERE S_INFO_WINDCODE=? AND TRADE_DT<=?::DATE ORDER BY TRADE_DT''',[index,cutoff])
+                    valuation=analytics.index_valuation(series,analytics.index_cycles(series,.3),values,metric,quantile,valuation_years)
+                    valuation['low_reversal']=.3
+                    manifest=path.with_name('index-valuation-manifest.json')
+                    metadata=json.loads(manifest.read_bytes()) if manifest.is_file() else {}
+                    valuation['source']={k:metadata.get(k) for k in ('projection_id','authority','cutoff','sha256','reference_price_batch','consistency','source_field_contract')}
+                return clean(dict(series=series,cycles=cycles,current=current,index=index,valuation=valuation,meta=source['meta'],preview=True))
             funds=source['funds']
             by_fund=[{p['trade_date']:analytics._number(p.get('net_assets')) for p in f['points'] if (not f.get('listed_date') or p['trade_date']>=f['listed_date']) and (not f.get('delisted_date') or p['trade_date']<=f['delisted_date'])} for f in funds]
             closes={p['trade_date']:analytics._number(p.get('close')) for p in source['indices'].get('000300.SH',[])}

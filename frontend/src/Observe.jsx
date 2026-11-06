@@ -6,6 +6,7 @@ const products={IF:'沪深300',IH:'上证50',IC:'中证500',IM:'中证1000'},bon
 const format=(v,percent=false)=>v==null?'—':(v*(percent?100:1)).toLocaleString('zh-CN',{maximumFractionDigits:2})+(percent?'%':'');
 const indices={'000001.SH':'上证指数','000016.SH':'上证50','000300.SH':'沪深300','000905.SH':'中证500','000852.SH':'中证1000','000985.CSI':'中证全指','399006.SZ':'创业板指','000688.SH':'科创50'};
 const flowGroups={individual:'个人为主',institution:'机构为主'};
+const valuationLines=[{key:'close',name:'指数点位',color:'#4e7fb9'},{key:'lower',name:'低估参考',color:'#568f84',dashed:true},{key:'deep',name:'深估参考',color:'#b64d49',dashed:true},{key:'upper',name:'高估参考',color:'#a48b59',dashed:true}];
 const cycleScale=value=>value>0?Math.log10(1+value):value;
 const cycleValue=value=>value>0?10**value-1:value;
 const bondExtreme=p=>!Number.isFinite(p.bond_return20)?0:Number.isFinite(p.bond_p90)&&p.bond_return20>p.bond_p90?1:Number.isFinite(p.bond_p10)&&p.bond_return20<p.bond_p10?-1:0;
@@ -60,7 +61,7 @@ function StockBondObserve() {
 
 
 export function ContextChart({data,cycle=false,flow=false,monthly=false,zoomGroup,lines,height,label,dualAxis=false}) {
-  const ref=useRef(),first=data.series.findIndex(p=>p.ratio!=null),rows=cycle||flow||lines?data.series:first<0?[]:data.series.slice(first);
+  const ref=useRef(),first=cycle||flow||lines?0:data.series.findIndex(p=>p.ratio!=null),rows=cycle||flow||lines?data.series:first<0?[]:data.series.slice(first);
   useChart(ref,chart=>{
     const axis=rows.map(p=>p.trade_date),positions=new Map(axis.map((d,i)=>[d,i]));
     let limit=1;
@@ -71,21 +72,24 @@ export function ContextChart({data,cycle=false,flow=false,monthly=false,zoomGrou
       const scale=key==='fund'?data.axisRatio:1,offset=key==='fund'?data.axisOffset:0;
       return {type:'value',name:key==='stock'?'沪深300':'债基',scale:true,min:Number.isFinite(low)?(low-padding-offset)/scale:undefined,max:Number.isFinite(high)?(high+padding-offset)/scale:undefined,nameTextStyle:{color},axisLabel:{color,formatter:v=>format(v)},splitLine:{show:i===0,lineStyle:{color:'#eef0f3'}}};
     });
-    const series=lines?lines.map(({key,name,color},i)=>({name,type:'line',yAxisIndex:dualAxis?i:0,showSymbol:false,connectNulls:false,itemStyle:{color},lineStyle:{width:2},data:rows.map(p=>p[key]),endLabel:{show:true,formatter:key==='stock'?'沪深300':'债基',color,fontSize:12,distance:-6,align:'right',verticalAlign:key==='stock'?'bottom':'top'},markPoint:key==='stock'?{symbol:'circle',symbolSize:6,label:{fontSize:11,color},data:(data.anchors||[]).map((p,j)=>({name:p.trade_date.slice(0,7),coord:[positions.get(p.trade_date),p.stock],label:{position:j%2?'top':'bottom',formatter:'{b}'}}))}:undefined})):cycle?data.cycles.map(c=>{
+    const series=lines?lines.map(({key,name,color,dashed},i)=>{
+      const last=data.metric?rows.findLast(p=>Number.isFinite(p[key])):null;
+      return {name,type:'line',yAxisIndex:dualAxis?i:0,showSymbol:false,connectNulls:false,z:data.metric&&key==='close'?4:2,itemStyle:{color},lineStyle:{width:data.metric&&key==='close'?2.6:2,type:dashed?'dashed':'solid'},data:rows.map(p=>p[key]),endLabel:{show:dualAxis,formatter:key==='stock'?'沪深300':'债基',color,fontSize:12,distance:-6,align:'right',verticalAlign:key==='stock'?'bottom':'top'},markPoint:key==='stock'?{symbol:'circle',symbolSize:6,label:{fontSize:11,color},data:(data.anchors||[]).map((p,j)=>({name:p.trade_date.slice(0,7),coord:[positions.get(p.trade_date),p.stock],label:{position:j%2?'top':'bottom',formatter:'{b}'}}))}:last?{silent:true,symbol:'circle',symbolSize:6,label:{show:false},data:[{coord:[positions.get(last.trade_date),last[key]]}]}:undefined};
+    }):cycle?data.cycles.map(c=>{
       const values=Array(axis.length).fill(null);
       for(const p of c.points){const value=cycleScale(p.value);values[positions.get(p.trade_date)]=value;limit=Math.max(limit,Math.ceil(value*4)/4);}
       const color=c.ongoing?'#707b8a':c.direction>0?'#b64d49':'#2b8167',last=c.points.at(-1);
       return {name:c.start,type:'line',showSymbol:false,connectNulls:false,itemStyle:{color},lineStyle:{color,width:2,type:c.ongoing?'dashed':'solid'},areaStyle:{color,opacity:.06},data:values,
         markPoint:{symbol:'circle',symbolSize:6,data:[{coord:[positions.get(last.trade_date),cycleScale(last.value)]}],label:{show:Math.abs(last.value)>=.35||c.ongoing,position:c.direction>0?'top':'bottom',formatter:c.end.slice(0,7)+'\n'+(c.ongoing?'累计 ':'')+format(last.value,true),fontSize:11,color}}};
     }):flow?Object.entries(flowGroups).filter(([key])=>data.funds.some(f=>f.group===key)).map(([key,name])=>({name,type:monthly?'bar':'line',barMaxWidth:14,showSymbol:false,connectNulls:false,itemStyle:{color:key==='institution'?'#a48b59':'#4e7fb9'},lineStyle:{width:2.2},data:rows.map(p=>p[key])})):[{name:'ETF规模占比',type:'line',showSymbol:false,connectNulls:false,itemStyle:{color:'#a48b59'},lineStyle:{width:2},data:rows.map(p=>p.ratio)},{name:'沪深300',type:'line',yAxisIndex:1,showSymbol:false,connectNulls:false,itemStyle:{color:'#4e7fb9'},lineStyle:{width:1.6},data:rows.map(p=>p.index_close)}];
-    chart.setOption({animation:false,legend:cycle?undefined:{top:0,left:'center'},tooltip:{trigger:'axis',confine:true,renderMode:'richText',formatter:params=>{
+    chart.setOption({animation:false,legend:cycle?undefined:{top:0,left:'center',...(data.metric?{type:'scroll',itemWidth:16,itemHeight:8,itemGap:12,textStyle:{fontSize:12}}:{})},tooltip:{trigger:'axis',confine:true,renderMode:'richText',formatter:params=>{
       const list=params.filter(p=>Number.isFinite(p.value)),day=params[0]?.axisValue;if(!list.length)return '';
-      if(lines)return [day,...list.map(p=>`${p.seriesName}：${format(p.value)}`)].join('\n');
+      if(lines)return [day,...list.map(p=>`${p.seriesName}：${format(p.value)}`),...(data.metric&&Number.isFinite(rows[params[0]?.dataIndex]?.value)?[(data.metric==='pb'?'PB':'PE(TTM)')+'：'+format(rows[params[0].dataIndex].value)]:[])].join('\n');
       if(flow){const row=rows[params[0]?.dataIndex];return [monthly?`${day} · 截至 ${row?.period_end}`:day,...list.map(p=>`${p.seriesName}：${format(p.value)}亿元`)].join('\n');}
       if(!cycle){const p=rows[params[0]?.dataIndex];return p?[p.trade_date,...[['沪深300',p.index_close,false,''],['占比',p.ratio,true,''],['ETF规模',p.net_assets==null?null:p.net_assets/1e8,false,'亿元'],['沪深300流通市值',p.float_market_cap==null?null:p.float_market_cap/1e8,false,'亿元']].filter(([,v])=>Number.isFinite(v)).map(([name,v,percent,unit])=>name+'：'+format(v,percent)+unit)].join('\n'):'';}
       return [day,...list.map(p=>{const c=data.cycles[p.seriesIndex];return `${c.direction>0?'上涨':'下跌'} ${format(cycleValue(p.value),true)}\n阶段 ${c.start}—${c.end} · ${Math.round((Date.parse(c.end)-Date.parse(c.start))/86400000)}天${c.ongoing?'（进行中）':'；结束确认 '+c.confirmed_on}`;})].join('\n');
-    }},grid:{left:68,right:dualAxis?68:cycle||flow||lines?24:70,top:dualAxis?60:40,bottom:58},xAxis:{type:'category',boundaryGap:monthly,data:axis,axisLabel:{hideOverlap:true}},
-    yAxis:axes|| (lines?{type:'value',scale:true,axisLabel:{formatter:v=>format(v)},splitLine:{lineStyle:{color:'#eef0f3'}}}:cycle?{type:'value',min:-limit,max:limit,interval:.25,axisLabel:{formatter:v=>format(cycleValue(v),true)},splitLine:{lineStyle:{color:'#eef0f3'}}}:flow?{type:'value',splitLine:{lineStyle:{color:'#eef0f3'}}}:[{type:'value',scale:true,axisLabel:{formatter:v=>format(v,true)},splitLine:{lineStyle:{color:'#eef0f3'}}},{type:'value',scale:true,splitLine:{show:false}}]),dataZoom:[{type:'inside'},{type:'slider',bottom:8,height:18}],series},true);
+    }},grid:{left:68,right:dualAxis?68:cycle||flow||lines?24:70,top:dualAxis?60:40,bottom:58},xAxis:{type:'category',boundaryGap:monthly,data:axis,axisLabel:{hideOverlap:true,...(cycle||data.metric?{showMinLabel:true,showMaxLabel:true}:{})}},
+    yAxis:axes|| (lines?{type:'value',scale:true,...(data.metric?{min:({min,max})=>min-(max-min||Math.abs(max)||1)*.06,max:({min,max})=>max+(max-min||Math.abs(max)||1)*.06}:{}),axisLabel:{...(data.metric?{hideOverlap:true,showMinLabel:false,showMaxLabel:false}:{}),formatter:v=>format(data.metric?Math.round(v):v)},splitLine:{lineStyle:{color:'#eef0f3'}}}:cycle?{type:'value',min:-limit,max:limit,interval:.25,axisLabel:{formatter:v=>format(cycleValue(v),true)},splitLine:{lineStyle:{color:'#eef0f3'}}}:flow?{type:'value',splitLine:{lineStyle:{color:'#eef0f3'}}}:[{type:'value',scale:true,axisLabel:{formatter:v=>format(v,true)},splitLine:{lineStyle:{color:'#eef0f3'}}},{type:'value',scale:true,splitLine:{show:false}}]),dataZoom:[{type:'inside',start:0,end:100},{type:'slider',bottom:8,height:18,start:0,end:100}],series},true);
   },[data,cycle,flow,monthly,lines,dualAxis],zoomGroup);
   return <ChartFrame><div className="observation-chart" style={{height:height??(cycle?460:380)}} ref={ref} role="img" aria-label={label||(cycle?'指数牛熊周期':flow?'ETF累计净申购估算':'沪深300ETF规模占比')}/></ChartFrame>;
 }
@@ -115,13 +119,25 @@ export function ComparisonObserve() {
   </main>;
 }
 
+export function valuationView(data) {
+  const v=data?.valuation;if(!v?.latest)return null;
+  const values=new Map(v.series.map(p=>[p.trade_date,p.value]));
+  const first=data.series.findIndex(p=>values.has(p.trade_date));
+  return {...v,series:(first<0?[]:data.series.slice(first)).map(p=>{
+    const value=values.get(p.trade_date)??null,scale=value==null?null:p.close/value;
+    return {...p,value,lower:scale!=null&&v.lower!=null?scale*v.lower:null,deep:scale!=null&&v.deep!=null?scale*v.deep:null,upper:scale!=null&&v.upper!=null?scale*v.upper:null};
+  })};
+}
+
 function CycleObserve() {
   const [index,setIndex]=usePreference('observe.index','000300.SH'),[savedEnd,saveEnd]=usePreference('observe.end',''),[revision,refresh]=useState(0);
+  const [years,setYears]=usePreference('observe.valuation.years',10);
   const [end,setEnd]=useState(()=>new URLSearchParams(location.search).get('end')??savedEnd);
   useEffect(()=>saveEnd(end),[end]);
-  const params=new URLSearchParams({index,...(end?{end}:{})});
+  const params=new URLSearchParams({index,valuation_years:years,...(end?{end}:{})});
   const {data,error,busy}=useResource('/api/futures/v1/observation/context?view=cycle&'+params,revision,'cycle');
-  const zoomGroup=useMemo(()=>new Set(),[data]);
+  const valuation=useMemo(()=>valuationView(data),[data]);
+  const zoomGroup=useMemo(()=>Object.assign(new Set(),{byDate:true}),[index,end]);
   useEffect(()=>{const q=new URLSearchParams(location.search);end?q.set('end',end):q.delete('end');history.replaceState({},'',location.pathname+'?'+q);},[end]);
   return <main className="board-content observation-page" aria-busy={busy}>
     <div className="observation-heading"><h1>市场周期</h1></div>
@@ -129,6 +145,9 @@ function CycleObserve() {
     {error?<p role="alert">{error}</p>:!data?<p role="status">读取研究数据…</p>:!data.series?.length?<p>{data.missing||'暂无数据'}</p>:<>
       {data.current&&<div className="observation-status"><div><strong>{data.current.direction>0?(data.current.drawdown<0?'回撤中':'阶段高位'):(data.current.rebound>0?'反弹中':'阶段低位')}</strong><span>20%口径：{data.current.direction>0?'上行阶段':'下行阶段'} · {data.current.as_of}</span></div><div><strong>{format(data.current.drawdown,true)}</strong><span>较阶段高点 {data.current.peak_date}</span></div><div><strong>{format(data.current.rebound,true)}</strong><span>较阶段低点 {data.current.low_date}</span></div></div>}
       <section><div className="observation-section-heading"><h2>{indices[data?.index||index]}历史周期</h2><span className="observation-event-count">上涨对数压缩、下跌百分比</span></div><ContextChart data={data} cycle zoomGroup={zoomGroup}/></section>
+      {data.valuation?.latest?<section><div className="filters observation-controls observation-section-heading"><h2>{indices[data.index]}估值参考</h2><select aria-label="估值统计样本" value={years} onChange={e=>setYears(Number(e.target.value))}><option value={10}>近10年样本</option><option value={0}>全历史样本</option></select></div>
+        <div className="observation-section-heading valuation-metrics"><Metric label={data.valuation.metric==='pb'?'PB':'PE(TTM)'} value={format(data.valuation.latest.value)} hint={data.valuation.percentile==null?undefined:'样本分位 '+format(data.valuation.percentile/100,true)}/><Metric label={'深估'+(data.valuation.metric==='pb'?'PB':'PE')} value={format(data.valuation.deep)} hint="低点中位数 ×90%（试验口径）。"/><Metric label={'低估'+(data.valuation.metric==='pb'?'PB':'PE')} value={format(data.valuation.lower)} hint={data.valuation.samples.length+'个30%确认低点中位数 ×110%（回溯）。'}/><Metric label={'高估'+(data.valuation.metric==='pb'?'PB':'PE')} value={format(data.valuation.upper)} hint={data.valuation.history_start+'—'+data.valuation.history_end+' · '+data.valuation.quantile*100+'%分位'}/></div>
+        <ContextChart data={valuation} lines={valuationLines} label="指数点位与估值参考" height={460} zoomGroup={zoomGroup}/></section>:<p className="sub">暂无估值数据</p>}
     </>}
   </main>;
 }
