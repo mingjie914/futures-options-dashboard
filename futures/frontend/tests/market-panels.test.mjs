@@ -98,7 +98,7 @@ test('intraday cold start and source-selected commodity codes keep candidate met
  const feed={connection:'connected',health:{source_mode:'wind'},catalog:{codes:all,commodity_selection:{CU:selected},metadata:Object.fromEntries(all.map((code,i)=>[code,{kind:'future',product:'CU',product_name:'铜',unit:'CNY/t',last_trade_date:['2026-12-15','2027-01-15','2027-02-15','2027-12-15'][i]}]))},quotes:new Map(all.map((code,i)=>[code,{last:60000+i,oi:i===3?999999:1,acquired_at:'2026-11-03T15:00:00+08:00'}]))};
  function render(data){
   const module={exports:{}};
-  new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('.css')?{}:id==='react'?{...React,lazy:()=>()=>null,useState:initial=>{const value=typeof initial==='function'?initial():initial;return React.useState(data&&value?.quotes instanceof Map?data:value);}}:id==='./preferences.js'?{usePreference:()=>['MO2611',()=>{}]}:id==='./SpreadMatrix.jsx'?matrixModule.exports:id==='./IntradayOptions.jsx'?{default:()=>null}:sharedRequire(id.startsWith('./')?'./src/'+id.slice(2):id));
+  new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('.css')?{}:id==='react'?{...React,lazy:()=>()=>null,useState:initial=>{const value=typeof initial==='function'?initial():initial;return React.useState(data&&value?.quotes instanceof Map?data:value);}}:id==='./preferences.js'?{usePreference:(key,initial)=>[key==='intraday.series'?'MO2611':initial,()=>{}]}:id==='./SpreadMatrix.jsx'?matrixModule.exports:id==='./IntradayOptions.jsx'?{default:()=>null}:sharedRequire(id.startsWith('./')?'./src/'+id.slice(2):id));
   return renderToStaticMarkup(React.createElement(module.exports.default));
  }
  assert.match(render(),/月份待接入/);
@@ -109,7 +109,26 @@ test('intraday cold start and source-selected commodity codes keep candidate met
  const future='IM2611.CFE',spot='000852.SH';
  feed.catalog={codes:[spot,future],metadata:{[spot]:{kind:'index',name:'中证1000'},[future]:{kind:'future',underlying:spot,multiplier:200,last_trade_date:'2026-11-20'}}};
  feed.quotes=new Map([[spot,{last:12345.67,acquired_at:'2026-11-06T15:00:00+08:00'}],[future,{last:12340.6,oi:1234567,acquired_at:'2026-11-06T15:00:00+08:00'}]]);
- const index=render(feed);assert.match(index,/>12345.67</);assert.match(index,/>12340.6</);assert.match(index,/>1,234,567</);assert.doesNotMatch(index,/12,345|12,340/);
+ const index=render(feed);assert.match(index,/>12345.67</);assert.match(index,/>12340.6</);assert.doesNotMatch(index,/12,345|12,340/);assert.match(index,/0.1 \/ 72.4/);assert.match(index,/1,234,567 \/ 14/);assert.doesNotMatch(index,/>最新价<|>绝对收益<|>到期天数</);
+ feed.catalog={codes:[],metadata:{}};feed.quotes=new Map();
+ for(const [i,product] of ['IH','IF','IC','IM'].entries()){
+  const index='000'+['016','300','905','852'][i]+'.SH';
+  feed.catalog.codes.push(index);feed.catalog.metadata[index]={kind:'index',name:product};feed.quotes.set(index,{last:100-i,prev_close:100,acquired_at:'2026-11-06T15:00:00+08:00'});
+  for(const month of ['2611','2612','2703','2706']){
+   const contract=product+month+'.CFE';feed.catalog.codes.push(contract);feed.catalog.metadata[contract]={kind:'future',underlying:index,multiplier:i<2?300:200,last_trade_date:month.startsWith('26')?'2026-12-18':'2027-06-18'};
+   feed.quotes.set(contract,{last:90-i,oi:1234567,acquired_at:'2026-11-06T15:00:00+08:00'});
+  }
+ }
+ const comparison=render(feed);
+ assert.equal((comparison.match(/class="intraday-comparison-month"/g)||[]).length,4);
+ assert.doesNotMatch(comparison,/IM · 基准|intraday-benchmark/);
+ assert.equal((comparison.match(/class="intraday-rate-bar"/g)||[]).length,32);
+ assert.doesNotMatch(comparison,/基差对照月份|以IM为基准| pp/);
+ for(const [table] of comparison.matchAll(/<table class="intraday-basis">[\s\S]*?<\/table>/g))assert.doesNotMatch(table,/<small>|<br/);
+ assert.doesNotMatch(comparison,/>同月基差 · /);assert.match(comparison,/>年化基差</);assert.match(comparison,/>绝对 \/ 日均收益</);assert.match(comparison,/>持仓量 \/ 天数</);
+ assert.match(comparison,/left:50%;width:0%/);
+ assert.equal((comparison.match(/class="intraday-strength"/g)||[]).length,4);assert.doesNotMatch(comparison,/intraday-strength-values|相对强弱预览/);assert.match(comparison,/涨跌点数 \/ 涨跌幅 \/ 较中证1000/);assert.match(comparison,/<span class="direction-short">-1 \/ -1%<\/span>/);
+
 
 });
 
@@ -595,12 +614,12 @@ test('one basis selector keeps quotes, history, prices, distribution and contrac
  const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.endsWith('/charts.js')?{...sharedRequire('./src/charts.js'),
   usePreference:(key,value)=>[preferences[key]??value,next=>{preferences[key]=next;}],
-  useResource:(url,revision,scope)=>{requests.push({url,scope});const main=url.includes('continuous=true'),p=main?mainPoint:chosenPoint;return {data:!url.includes('history=true')?data:historyReady?{continuous:main,latest:main?p:undefined,symbol:p.symbol,lines:[{label:main?'2026':p.symbol,year:2026,points:[p]}],missing:[],meta:data.meta,input_batch:'batch'}:null};},
+  useResource:(url,_revision,scope)=>{requests.push({url,scope});const main=url.includes('continuous=true'),p=main?mainPoint:chosenPoint;return {data:!url.includes('history=true')?data:historyReady?{continuous:main,latest:main?p:undefined,symbol:p.symbol,lines:[{label:main?'2026':p.symbol,year:2026,points:[p]}],missing:[],meta:data.meta,input_batch:'batch'}:null};},
   Metric:props=>{metrics.push(props);return null;},useChart:(_ref,draw)=>draws.push(draw)
  }:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
  const render=()=>{
   requests.length=draws.length=metrics.length=charts.length=0;
-  const html=renderToStaticMarkup(React.createElement(module.exports.BasisPanel,{product:'IM',end:'2026-11-05',priceType:'close',revision:0,Chart:props=>{charts.push(props);return null;},HistoryChart:()=>null,controls:fragment=>{selection=React.Children.toArray(fragment.props.children).filter(React.isValidElement);return fragment;}}));
+  renderToStaticMarkup(React.createElement(module.exports.BasisPanel,{product:'IM',end:'2026-11-05',priceType:'close',revision:0,Chart:props=>{charts.push(props);return null;},HistoryChart:()=>null,controls:fragment=>{selection=React.Children.toArray(fragment.props.children).filter(React.isValidElement);return fragment;}}));
   return draws.map(draw=>{let option;draw({setOption:o=>option=o});return option;});
  };
  for(const [value,expected] of [['main',mainPoint],['IM2703',chosenPoint],['main',mainPoint]]){

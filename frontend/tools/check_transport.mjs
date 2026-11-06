@@ -11,7 +11,7 @@ test('conditional requests reconstruct corrections, deletions and empty 304', as
       {status:226,headers:{etag:'W/"2"',im:'dashboard-json-delta','delta-base':'W/"1"'}}),
     new Response(null, {status:304,headers:{etag:'W/"2"'}}),
   ];
-  globalThis.fetch = async (url, options) => {received.push(options.headers);return replies.shift();};
+  globalThis.fetch = async (_url, options) => {received.push(options.headers);return replies.shift();};
   try {
     assert.deepEqual(await (await conditionalFetch('/test/delta')).json(), original);
     const expected = {rows:[{id:1,value:null}]};
@@ -24,7 +24,7 @@ test('conditional requests reconstruct corrections, deletions and empty 304', as
 
 test('invalid or lost delta base retries once without conditional headers', async () => {
   const originalFetch = globalThis.fetch, received = [];
-  globalThis.fetch = async (url, options) => {
+  globalThis.fetch = async (_url, options) => {
     received.push(options.headers);
     return received.length === 1 ? new Response('{}',{status:226}) : new Response('{"recovered":true}',{headers:{etag:'W/"new"'}});
   };
@@ -91,7 +91,7 @@ test('canonical GET singleflight gives independent bodies and isolates caller ca
 test('all callers leaving cancels their shared request; new callers and distinct headers stay separate',async t=>{
   const original=globalThis.fetch;t.after(()=>globalThis.fetch=original);
   const calls=[];
-  globalThis.fetch=(url,options)=>new Promise((resolve,reject)=>{calls.push({options,resolve});options.signal.addEventListener('abort',()=>reject(options.signal.reason),{once:true});});
+  globalThis.fetch=(_url,options)=>new Promise((resolve,reject)=>{calls.push({options,resolve});options.signal.addEventListener('abort',()=>reject(options.signal.reason),{once:true});});
   const request=createConditionalFetch(),a=new AbortController(),b=new AbortController();
   const x=request('/api/rows',{signal:a.signal}),y=request('/api/rows',{signal:b.signal});
   const failures=[assert.rejects(x,{name:'AbortError'}),assert.rejects(y,{name:'AbortError'})];

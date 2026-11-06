@@ -43,9 +43,6 @@ function interpolate(points, target, valueKey) {
     .sort((left, right) => left.x - right.x);
   if (!usable.length) return null;
 
-  for (const point of usable) {
-    if (point.x === target) return point.y;
-  }
   const lower = usable.filter((point) => point.x < target).at(-1);
   const upper = usable.find((point) => point.x > target);
   if (!lower || !upper) return null;

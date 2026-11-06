@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {applyLivePacket,basisRows,formatNumber,intradayRows,liveMatrix,liveOnline,mergeIntraday,openLive,optionRows,optionSeries,optionSmile} from '../src/intraday-live.js';
+import {applyLivePacket,basisComparison,basisRows,formatNumber,intradayRows,liveMatrix,liveOnline,mergeIntraday,openLive,optionRows,optionSeries,optionSmile} from '../src/intraday-live.js';
 
 test('live snapshots replace; deltas merge absolute values and preserve null/removal semantics',()=>{
   const state={quotes:new Map([['OLD',{last:1}]]),epoch:null,version:-1};
@@ -287,4 +287,49 @@ test('an exhausted backup first-snapshot window reconnects instead of waiting fo
   const {sockets,timers}=setup(t),live=openLive('https://sg.example',()=>{},'MO2611','',primary);
   fire(timers,3000);fire(timers,12000);assert.equal(sockets[1].closed,true);
   fire(timers,1000);assert.equal(sockets[2].url,primary+'/api/realtime/v1/stream');live.close();
+});
+
+
+test('same-month cross-index comparison reuses normalized basis rates and preserves quote boundaries',()=>{
+ const products=['IH','IF','IC','IM'],quotes=new Map(),time='2026-11-06T15:00:00+08:00';
+ const groups=products.map((product,i)=>{
+  const code='INDEX'+i,spot=100*2**i,multiplier=i<2?300:200;
+  const metadata={[code]:{kind:'index',name:product}};
+  quotes.set(code,{last:spot,prev_close:spot/(1+i*.01),acquired_at:time});
+  for(const month of ['2612','2703']){
+   const contract=product+month+'.CFE';metadata[contract]={kind:'future',underlying:code,multiplier,last_trade_date:month==='2612'?'2026-12-06':'2027-03-19'};
+   quotes.set(contract,{last:spot*(1-(i+1)/100),acquired_at:time});
+  }
+  return {code,metadata};
+ });
+ const result=basisComparison(groups,quotes),rows=result.months[0].rows;
+ assert.deepEqual(result.months.map(m=>m.month),['2612','2703']);
+ for(const [i,row] of rows.entries()){
+  assert.ok(Math.abs(row.annual-(i+1)*365/30)<1e-10);
+  assert.ok(Math.abs(row.difference-(i-3)*365/30)<1e-10);
+  assert.ok(Math.abs(result.strength[i].change-i)<1e-10);
+  assert.ok(Math.abs(result.strength[i].difference-(i-3))<1e-10);
+ }
+ assert.equal(rows[0].nominal,29700);assert.equal(rows[3].nominal,153600);
+ assert.equal(result.months[1].rows[3].difference,0);
+ for(const r of rows)for(const t of rows)assert.ok(Math.abs((r.difference-t.difference)-(r.annual-t.annual))<1e-10);
+ quotes.set('IF2612.CFE',{last:200,acquired_at:time});
+ assert.equal(basisComparison(groups,quotes).months[0].rows[1].annual,0);
+ groups[0].metadata['IH2612.CFE'].last_trade_date='2026-12-07';
+ assert.equal(basisComparison(groups,quotes).months[0].rows[0].difference,null);
+ quotes.set('IC2612.CFE',{last:null,acquired_at:time});
+ assert.equal(basisComparison(groups,quotes).months[0].rows[2].annual,null);
+ quotes.set('IM2612.CFE',{last:768,acquired_at:'2026-11-05T15:00:00+08:00'});
+ assert.equal(basisComparison(groups,quotes).months[0].rows[3].annual,null);
+ delete groups[0].metadata['IH2703.CFE'];assert.deepEqual(basisComparison(groups,quotes).months.map(m=>m.month),['2612']);
+ const partial=basisComparison(groups.slice(1),quotes);assert.deepEqual([partial.months,partial.strength],[[],[]]);assert.equal(partial.books.length,3);assert.equal(partial.books[0].rows.length,2);
+ for(const prev_close of [null,0,NaN,Infinity]){
+  quotes.set('INDEX3',{last:800,prev_close,acquired_at:time});
+  const strength=basisComparison(groups,quotes).strength;
+  assert.equal(strength[3].change,null);assert.ok(strength.every(r=>r.difference===null));
+ }
+ quotes.set('INDEX3',{last:800,prev_close:800,acquired_at:time});
+ assert.equal(basisComparison(groups,quotes).strength[3].change,0);
+ quotes.set('INDEX0',{last:100,prev_close:100,acquired_at:'2026-11-05T15:00:00+08:00'});
+ assert.equal(basisComparison(groups,quotes).strength[0].change,null);
 });

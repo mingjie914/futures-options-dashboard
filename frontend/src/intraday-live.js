@@ -127,6 +127,24 @@ export function basisRows(code,metadata,quotes) {
   });
 }
 
+export function basisComparison(groups,quotes) {
+  const books=groups.map(group=>({group,rows:basisRows(group.code,group.metadata,quotes),spot:quotes.get(group.code)}));
+  if(groups.length!==4)return {books,months:[],strength:[]};
+  const delivery=r=>r.contract.split('.')[0].slice(-4);
+  const months=books[0].rows.map(delivery).filter(m=>books.every(b=>b.rows.some(r=>delivery(r)===m))).sort();
+  const day=books.reduce((latest,b)=>{const d=b.spot?.acquired_at?.slice(0,10)||'';return d>latest?d:latest;},'');
+  const strength=books.map(({rows,spot})=>({product:rows[0]?.contract.slice(0,2),change:spot?.acquired_at?.slice(0,10)===day&&Number.isFinite(spot.last)&&Number.isFinite(spot.prev_close)&&spot.prev_close>0?(spot.last/spot.prev_close-1)*100:null}));
+  const base=strength.find(r=>r.product==='IM');
+  return {books,strength:strength.map(r=>({...r,difference:Number.isFinite(r.change)&&Number.isFinite(base?.change)?r.change-base.change:null})),months:months.map(month=>{
+    const rows=books.map(({group,rows,spot})=>{
+      const r=rows.find(r=>delivery(r)===month),meta=group.metadata[r.contract],q=quotes.get(r.contract),valid=spot?.acquired_at?.slice(0,10)===day&&q?.acquired_at?.slice(0,10)===day;
+      return {...r,product:r.contract.slice(0,2),name:group.metadata[group.code].name,expiry:meta.last_trade_date,annual:valid?r.annual:null,nominal:valid&&Number.isFinite(r.last)&&Number.isFinite(meta.multiplier)?r.last*meta.multiplier:null};
+    });
+    const base=rows.find(r=>r.product==='IM');
+    return {month,rows:rows.map(r=>({...r,difference:Number.isFinite(r.annual)&&Number.isFinite(base?.annual)&&r.expiry===base.expiry?r.annual-base.annual:null}))};
+  })};
+}
+
 export function liveMatrix(metadata,quotes,index) {
   const asOf=index?quotes.get(index)?.acquired_at?.slice(0,10):Object.keys(metadata).reduce((day,code)=>{const date=quotes.get(code)?.acquired_at?.slice(0,10)||'';return date>day?date:day;},'');
   const contracts=Object.entries(metadata).filter(([,m])=>m.kind==='future').map(([code,m])=>{const q=quotes.get(code);return {symbol:code.split('.')[0],close:q?.acquired_at?.slice(0,10)===asOf?q?.last:null,trade_date:asOf,last_trade_date:m.last_trade_date,status:'wind_recorded'};});
