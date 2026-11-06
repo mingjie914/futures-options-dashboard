@@ -20,7 +20,7 @@ export default function SpreadPanel({data,revision,controls,beforeChart}) {
   c.setOption({animation:false,color:['#4e7fb9','#a48b59','#568f84','#8c7b9f','#505c6b'],
    tooltip:{trigger:'axis',formatter:params=>{
     const point=rows[params[0]?.dataIndex];if(!point)return '';
-    return [point.trade_date,...panels.flatMap(p=>p.keys.map(([key,name])=>
+    return [point.trade_date,...panels.flatMap(p=>p.keys.filter(([key])=>Number.isFinite(point[key])).map(([key,name])=>
      `${name}：${fmt(point[key])}${key==='historical_percentile'&&point[key]!=null?'%':''}`))].join('<br/>');
    }},axisPointer:{link:[{xAxisIndex:'all'}]},
    title:panels.map((p,i)=>({text:p.title,left:12,top:30+i*400,textStyle:{fontSize:12,color:'#505c6b',fontWeight:400}})),

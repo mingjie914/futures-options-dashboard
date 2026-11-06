@@ -130,11 +130,21 @@ def create_app(store=None):
             files += list((store.root.parent/'aindexeodprices').glob('year_month=*/*.parquet'))
             files += [p for name in ('fundamental_lab', 'ceic_lab')
                       for p in (store.runtime/name).rglob('*') if p.is_file()]
+        if path == '/api/basis-reference':
+            files += [basis_context()]
         if path in ('/api/dashboard','/api/basis-reference'):
             files += list((store.root.parent/'cfuturesdescription').glob('*.parquet'))
-        if path in ('/api/dashboard','/api/observation'):
+        if path in ('/api/dashboard','/api/observation','/api/basis-reference'):
             files += list((store.root.parent/'cfuturescontractmapping').glob('*.parquet'))
         return [date.today().isoformat(), fingerprint(files)]
+    def basis_context():
+        publication = store.root.parent.parent
+        if publication.parent.name == 'inputs':
+            manifest = json.loads((publication/'manifest.json').read_bytes())
+            if manifest['batch'] != publication.name:
+                raise ValueError('期货输入批次与清单不一致')
+            publication = publication.parent.parent/'releases'/('data-'+manifest['batch'])
+        return (publication/'observation' if publication.name.startswith('data-') else observation_root.get())/'observation-context.json'
     code_version = sha256(b''.join(p.read_bytes() for p in sorted(Path(__file__).parent.glob('*.py')))).hexdigest()
     app.add_middleware(ResearchHTTP, version=source_version, cache=store.cache, code_version=code_version, session=read_session,
         concurrency=int(os.environ.get('FUTURES_HTTP_CONCURRENCY', '1')),
@@ -535,7 +545,8 @@ def create_app(store=None):
 
     @app.get('/api/basis-reference')
     def basis_reference(product: str, symbol: Optional[str] = None, price_type: str = 'close',
-                        start: Optional[date] = None, end: Optional[date] = None, all_contracts: bool = False):
+                        start: Optional[date] = None, end: Optional[date] = None, all_contracts: bool = False,
+                        history: bool = False, years: int = Query(5, ge=2, le=10), continuous: bool = False):
         product=validate_product(product)
         if price_type not in ('close','settle'):
             raise ValueError('价格口径只允许close/settle')
@@ -552,7 +563,7 @@ def create_app(store=None):
         if is_index and price_type != 'close':
             return {'status':'unavailable','product':product,'execution_eligible':False,
                 'reason':'股指基差仅用期货收盘价对指数收盘价；请将顶部价格口径切换为收盘。结算价不可视为同一收盘时点。'}
-        if is_index and not (store.root.parent/'aindexeodprices').is_dir() and not (store.runtime/'fundamental_lab/index_review.json').exists():
+        if is_index and not basis_context().is_file() and not (store.root.parent/'aindexeodprices').is_dir() and not (store.runtime/'fundamental_lab/index_review.json').exists():
             return {'status':'unavailable','product':product,'execution_eligible':False,
                 'reason':'指数日收盘快照尚未验收；此页面不会自动取数。'}
         if symbol and (not CONTRACT.fullmatch(symbol) or symbol[:-4]!=product):
@@ -566,11 +577,23 @@ def create_app(store=None):
         if not symbol or symbol not in {r['symbol'] for r in snapshot['rows']}:
             raise ValueError('窗口中无所选真实合约')
         if is_index:
+            if history:
+                year = int(snapshot['end'][:4]) if continuous else 2000+int(symbol[-4:-2])
+                snapshot = store.read(product,date(year-years+1 if continuous else min(year,int(snapshot['end'][:4]))-years,1,1).isoformat(),snapshot['end'],max_years=12)
             try:
-                review=index_daily(store.runtime/'fundamental_lab',product,snapshot['start'],snapshot['end'],store.root.parent/'aindexeodprices')
+                review=index_daily(store.runtime/'fundamental_lab',product,snapshot['start'],snapshot['end'],store.root.parent/'aindexeodprices',basis_context())
             except (OSError,RuntimeError,ValueError,KeyError,duckdb.Error) as exc:
                 raise HTTPException(503,'指数快照不可用或校验失败；不会自动取数或替换指标') from exc
             item=next(i for i in review['indicators'] if i['product']==product)
+            if history:
+                mapping=store.root.parent/'cfuturescontractmapping/part.parquet'
+                segments=(store._query([mapping],'''SELECT symbol,start_date::VARCHAR start_date,end_date::VARCHAR end_date
+                    FROM read_parquet(?) WHERE product=? AND start_date<=?::DATE AND end_date>=?::DATE ORDER BY start_date''',
+                    [product,snapshot['end'],snapshot['start']]) if mapping.is_file() else []) if continuous else None
+                symbols=sorted({m['symbol'] for m in segments}) if continuous else [f'{product}{y%100:02d}{symbol[-2:]}' for y in range(year-years+1,year+1)]
+                terms=contract_terms(product,symbols,snapshot['meta']['as_of'],store)
+                return clean(dict(analytics.basis_history(snapshot['rows'],review['points'],symbols,terms,segments),
+                    product=product,symbol=symbol,meta=snapshot['meta'],reference=item,reference_snapshot=review['sha256'],input_batch=review.get('input_batch')))
             symbols=active_symbols if all_contracts else [symbol]
             terms=contract_terms(product,symbols,snapshot['meta']['as_of'],store)
             deliveries={r['symbol']:r.get('last_delivery_date') for r in (terms or {}).get('contracts',[]) if r.get('status')=='rds_recorded' and r.get('last_delivery_date')==r.get('last_trade_date')}
@@ -580,7 +603,7 @@ def create_app(store=None):
                 contract_terms=terms,
                 contracts=symbols if all_contracts else sorted({r['symbol'] for r in snapshot['rows']}),
                 **({'comparisons':comparisons,'contract_positions':{r['symbol']:r.get('position') for r in contracts}} if all_contracts else {}),price_type='close',meta=snapshot['meta'],
-                reference=item,reference_snapshot=review['sha256'],
+                reference=item,reference_snapshot=review['sha256'],input_batch=review.get('input_batch'),
                 warnings=['基差 = 指数收盘 S − 期货收盘 F；正值为期货贴水，负值为期货升水',
                     '年化基差率 = (S−F)/S × 365/距最后交割日自然天数；日期缺失或到期后不计算，不含资金、分红或成本',
                     '只比较同日收盘字段，未验证逐笔收盘同步；不使用期货结算价',

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
-import {linkZoom} from '../../../frontend/src/charts.js';
+import {linkZoom,axisTooltip} from '../../../frontend/src/charts.js';
 const sharedRequire=createRequire(new URL('../../../frontend/package.json',import.meta.url));
 const React=sharedRequire('react'), {renderToStaticMarkup}=sharedRequire('react-dom/server');
 
@@ -13,7 +13,7 @@ new Function('module','exports','require',ts.transpileModule(await readFile(new 
 const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const module={exports:{}},chartDraws=[];
 new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.startsWith('react')?sharedRequire(id):id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),useChart:(_ref,draw)=>chartDraws.push(draw)}:createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
-const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel,spreadMatrix,SpreadMatrix,SeasonalSpreadChart,RolloverProgress}=module.exports;
+const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel,basisHistory,basisDistribution,spreadMatrix,SpreadMatrix,SeasonalSpreadChart,RolloverProgress}=module.exports;
 
 test('option formats preserve rounding and smile/spot render in one update',async()=>{
  const source=await readFile(new URL('../../../frontend/src/Options.jsx',import.meta.url),'utf8'),draws=[],module={exports:{}};
@@ -33,7 +33,7 @@ test('option formats preserve rounding and smile/spot render in one update',asyn
 test('intraday chart keeps the trading session, real gaps and independent price/IV scales',async()=>{
  const draws=[],module={exports:{}};
  const code=ts.transpileModule(await readFile(new URL('../../../frontend/src/IntradayOptions.jsx',import.meta.url),'utf8'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- new Function('module','exports','require',code)(module,module.exports,id=>id==='./charts.js'?{ChartFrame:({children})=>children,useChart:(_ref,draw)=>draws.push(draw)}:id==='./intraday-live.js'?sharedRequire('./src/intraday-live.js'):sharedRequire(id));
+ new Function('module','exports','require',code)(module,module.exports,id=>id==='./charts.js'?{axisTooltip,ChartFrame:({children})=>children,useChart:(_ref,draw)=>draws.push(draw)}:id==='./intraday-live.js'?sharedRequire('./src/intraday-live.js'):sharedRequire(id));
  const data={series:'MO2611',trade_date:'2026-11-03',future_code:'IM2611.CFE',points:[{time:'09:31',future_last:6300,atm_iv:.30,strike:6300},{time:'09:33',future_last:6301,atm_iv:null}]};
  const draw=intraday=>{
   draws.length=0;
@@ -242,7 +242,7 @@ test('basis keeps one control row, meaningful units and compact formula hints',(
  assert.doesNotMatch(html,/>CU<|读取基差/);
  assert.equal((html.match(/<button/g)||[]).length,4);
  assert.match(renderToStaticMarkup(React.createElement(BasisPanel,{product:'IH',priceType:'close'})),/读取基差/);
- assert.match(source,/isIndex\?'点':'元\/吨'/);
+ assert.match(source,/期现价格与基差率/);
  assert.match(source,/现货 − 期货/);
  assert.match(source,/基差 ÷ 现货 × 365 ÷ 距交割日天数/);
  assert.match(source,/测试样本/);
@@ -288,7 +288,7 @@ test('scan keeps zero liquidity, missing leg null, sample and stale-pair warning
 test('curve uses supplied exact-date columns and preserves null historical values',()=>{
  const charts=[];const Chart=props=>{charts.push(props);return null;};
  const html=renderToStaticMarkup(React.createElement(CurvePanel,{onPair(){},Chart,data:{meta,curve:{nodes:[{symbol:'IM2609',price:100,volume:0,position:20}],adjacent:[],comparisons:[{lag:1,as_of:'2026-09-04',nodes:[{symbol:'IM2609',price:null,change:null}]},{lag:5,as_of:null,nodes:[{symbol:'IM2609',price:null,change:null}]}]}}}));
- assert.equal(charts[0].rows[0].lag1,null);assert.equal(charts[0].lines.length,2);assert.equal(charts.length,1);assert.match(charts[0].tooltip([{dataIndex:0,marker:'',seriesName:'前1个观测日',value:null}]),/前1个观测日：—.*成交 0 手 · 持仓 20 手/);assert.doesNotMatch(html,/选取近月|选取远月|分析所选两腿|成交持仓与合约明细/);assert.match(html,/窗口内观测不足/);assert.doesNotMatch(html,/历史分位/);
+ assert.equal(charts[0].rows[0].lag1,null);assert.equal(charts[0].lines.length,2);assert.equal(charts.length,1);assert.equal(charts[0].tooltip([{dataIndex:0,seriesName:'前1个观测日',value:null}]),'');const tip=charts[0].tooltip([{dataIndex:0,seriesName:'当日',value:100},{dataIndex:0,seriesName:'前1个观测日',value:null}]);assert.doesNotMatch(tip,/前1个观测日|—/);assert.match(tip,/成交 0 手\n持仓 20 手/);assert.doesNotMatch(html,/选取近月|选取远月|分析所选两腿|成交持仓与合约明细/);assert.match(html,/窗口内观测不足/);assert.doesNotMatch(html,/历史分位/);
 });
 
 test('curve keeps the shared selection and drills adjacent pairs into history',()=>{
@@ -439,30 +439,67 @@ test('contract legend highlights every segment without hiding any contract',asyn
  assert.equal(options[1].series[0].lineStyle.width,3);
  select({name:'IM2611',selected:{IM2611:false}});
  assert.equal(options[2].series[0].lineStyle.width,1.3);
+ for(const value of ['Y+0 01-02','Y-1 12-31','Y+1 01-01'])assert.equal(options[0].xAxis.axisLabel.formatter(value),value.split(' ')[1]);
+ assert.equal(options[0].xAxis.axisLabel.formatter('2026-10-01'),'2026-10-01');
+ assert.equal(options[0].dataZoom[1].labelFormatter(1,'Y+0 01-02'),'01-02');
 });
 
 
 test('basis overlays current contracts on one date axis and retains missing prices',async()=>{
  const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- const module={exports:{}},charts=[],point=(trade_date,basis,price)=>({trade_date,reference_spread:basis,annualized_basis_ratio:basis/100,reference_price:100,futures_price:price});
+ const module={exports:{}},charts=[],draws=[],point=(trade_date,basis,price)=>({trade_date,reference_spread:basis,basis_ratio:basis/100,annualized_basis_ratio:basis/100,reference_price:100,futures_price:price});
  const a={series:[point('2026-09-01',1,99),point('2026-09-02',2,98)],matched:2,latest:point('2026-09-02',2,98)};
  const b={series:[point('2026-09-02',4,96)],matched:1,latest:point('2026-09-02',4,96)};
  const data={...a,contracts:['IM2611','IM2612','IM2703'],contract_positions:{IM2611:10,IM2612:100,IM2703:80},symbol:'IM2612',status:'index_close_basis',meta:{as_of:'2026-09-02'},reference:{name:'中证1000'},comparisons:{IM2611:b,IM2612:a,IM2703:b}};
- new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),usePreference:(_k,v)=>[v,()=>{}],useResource:url=>{assert.match(url,/all_contracts=true/);return {data};}}:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
+ new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),usePreference:(_k,v)=>[v,()=>{}],useResource:url=>url.includes('history=true')?{data:null}:{data},useChart:(_ref,draw)=>draws.push(draw)}:id.startsWith('react')?sharedRequire(id):createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
  const html=renderToStaticMarkup(React.createElement(module.exports.BasisPanel,{product:'IM',Chart:props=>{charts.push(props);return null;}}));
- assert.match(html,/<h2>股指基差<\/h2>/);assert.match(html,/<h2>期现价格<\/h2>/);
- assert.deepEqual(charts[0].lines,[['IM2612','IM2612'],['IM2703','IM2703'],['IM2611','IM2611']]);
+ assert.match(html,/<h2>基差率季节性<\/h2>/);assert.match(html,/<h2>期现价格与基差率<\/h2>/);
+ assert.ok(html.indexOf('基差率季节性')<html.indexOf('期现价格与基差率')&&html.indexOf('期现价格与基差率')<html.indexOf('在市合约对照'));
+ assert.deepEqual(charts[0].lines,[['IM2612_ratio','IM2612'],['IM2703_ratio','IM2703'],['IM2611_ratio','IM2611']]);
  assert.equal(charts[0].rows[0].IM2703,undefined);
  assert.equal(charts[0].rows[1].IM2703,4);
  assert.equal(charts[0].focus,'IM2612');
- assert.equal(charts[0].rows,charts[1].rows);
- assert.equal(charts[1].percent,true);
- assert.equal(charts[1].rows[0].IM2612_annual,.01);
- assert.equal(charts[1].rows[0].IM2703_annual,undefined);
- assert.deepEqual(charts[1].lines,[['IM2612_annual','IM2612'],['IM2703_annual','IM2703'],['IM2611_annual','IM2611']]);
- assert.deepEqual(charts[2].lines,[['reference_price','中证1000'],['IM2612_price','IM2612'],['IM2703_price','IM2703'],['IM2611_price','IM2611']]);
- assert.equal(charts[0].colors,charts[1].colors);assert.equal(charts[0].colors,charts[2].colors);
- assert.equal(charts[2].colors.IM2612,'#4e7fb9');assert.equal(charts[2].colors.IM2703,'#a48b59');assert.equal(charts[2].colors['中证1000'],'#505c6b');
+ assert.equal(charts[0].percent,true);
+ assert.equal(charts[0].colors.IM2612,'#4e7fb9');assert.equal(charts[0].colors.IM2703,'#a48b59');
+ let option;draws[0]({setOption:o=>option=o});
+ assert.deepEqual(option.series.map(s=>s.name),['中证1000','IM2612','基差率']);
+ assert.deepEqual(option.series.map(s=>s.data),[[100,100],[99,98],[1,2]]);
+ assert.equal(option.series[2].yAxisIndex,1);assert.equal(option.series[2].type,'bar');
+ assert.equal(option.series[1].itemStyle.color,charts[0].colors.IM2612);
+});
+
+test('basis comparisons preserve gaps, relative years and real expiry distances; distribution excludes current year and distant tenors',()=>{
+ const p=(trade_date,days_to_expiry,value)=>({trade_date,days_to_expiry,basis_ratio:value,reference_spread:value==null?null:value*100,annualized_basis_ratio:value==null?null:value*5});
+ const data={lines:[{year:2025,label:'IM2512',points:[p('2024-12-01',380,.03),p('2025-10-01',78,null),p('2025-10-02',77,0),p('2025-10-03',76,.02)]},{year:2026,label:'IM2612',points:[p('2026-10-02',77,.01)]}]};
+ const calendar=basisHistory(data,'basis_ratio','calendar'),expiry=basisHistory(data,'basis_ratio','expiry');
+ assert.equal(calendar.lines[0].points[0].x,'Y-1 12-01');assert.equal(calendar.lines[0].points[1].value,null);
+ assert.equal(calendar.lines[0].points[2].value,0);assert.equal(calendar.lines[0].points[3].value,2);
+ assert.deepEqual(expiry.axis,['-380','-78','-77','-76']);
+ const summary=basisDistribution(data,'basis_ratio',data.lines[1].points[0],'IM2612');
+ assert.equal(summary.n,2);assert.equal(summary.percentile,50);assert.equal(summary.value,1);
+ assert.equal(summary.bins.reduce((n,b)=>n+b.n,0),2);
+ assert.equal(basisDistribution(data,'basis_ratio',null,'IM2612').percentile,null);
+ const equal=basisDistribution({lines:[data.lines[0],{...data.lines[1],points:[p('2026-10-02',77,0)]}]},'basis_ratio',p('2026-10-02',77,0),'IM2612');
+ assert.equal(equal.percentile,25);
+});
+
+test('dominant basis uses a full calendar, current-year marker and comparable past seasons only',()=>{
+ const point=(trade_date,value,days=45)=>({trade_date,basis_ratio:value,reference_spread:value*100,days_to_expiry:days,symbol:'IM'+trade_date.slice(2,4)+'12'});
+ const current=point('2026-11-05',.01),data={continuous:true,latest:current,meta:{as_of:'2026-11-05'},lines:[{label:'2025',year:2025,points:[point('2025-03-05',10),point('2025-11-05',0),point('2025-11-06',.02),point('2025-11-07',10,100)]},{label:'2026',year:2026,points:[current]}]};
+ const result=basisHistory(data,'basis_ratio','calendar');
+ assert.equal(result.axis.length,366);assert.equal(result.axis[0],'01-01');assert.equal(result.axis.at(-1),'12-31');
+ assert.equal(result.current.label,'2026');assert.equal(result.current.point.value,1);assert.equal(result.current.point.x,'11-05');
+ assert.equal(result.colors['2026'],'#4e7fb9');
+ const distribution=basisDistribution(data,'basis_ratio',current,'IM2612');
+ assert.equal(distribution.n,2);assert.equal(distribution.percentile,50);
+});
+
+test('shared axis tooltips omit missing values and retain valid zero across scalar and coordinate series',()=>{
+ const params=[null,undefined,'',NaN,Infinity,'-'].map(value=>({seriesName:'缺失',value,axisValue:'11-05'}));
+ params.push({seriesName:'有效零',value:0},{seriesName:'坐标零',value:[6500,0]},{seriesName:'隐波',value:[6500,30]});
+ const text=axisTooltip(params,v=>v+'%');
+ assert.doesNotMatch(text,/缺失|—|NaN/);assert.match(text,/有效零：0%/);assert.match(text,/坐标零：0%/);assert.match(text,/隐波：30%/);
+ assert.equal(axisTooltip(params.slice(0,6)), '');
 });
 
 
@@ -532,7 +569,7 @@ test('ETF funds share one page and chart height, preserving monthly gaps and sep
     let option;draws[2]({setOption:o=>option=o});
     assert.deepEqual(option.series.map(s=>s.type),['bar','bar']);assert.deepEqual(option.series.map(s=>s.data),[[42],[-63]]);
     assert.deepEqual(option.xAxis.data,['2026-10']);assert.equal(option.xAxis.boundaryGap,true);
-    assert.match(option.tooltip.formatter([{dataIndex:0,axisValue:'2026-10'}]),/2026-10 · 截至 2026-10-21\n个人为主：42亿元\n机构为主：-63亿元/);
+    assert.match(option.tooltip.formatter([{dataIndex:0,axisValue:'2026-10',seriesName:'个人为主',value:42},{dataIndex:0,axisValue:'2026-10',seriesName:'机构为主',value:-63}]),/2026-10 · 截至 2026-10-21\n个人为主：42亿元\n机构为主：-63亿元/);
   }
   const allocationRows=allocation.series;allocation.series=[];draws.length=0;
   const partial=renderToStaticMarkup(React.createElement(module.exports.default));
@@ -584,7 +621,7 @@ test('stock-bond states mark both tails and expose daily percentile ranks withou
   let option;draws[0]({setOption:o=>option=o});
   assert.deepEqual(option.legend.data,['股指主力收盘','国债偏强','国债偏弱']);
   assert.deepEqual(option.series.slice(1).map(s=>s.data),[[6000,null,null,null],[null,6001,null,null]]);
-  assert.match(option.tooltip.formatter([{dataIndex:1}]),/国债偏弱\n历史分位：5%/);
+  assert.match(option.tooltip.formatter([{dataIndex:1}]),/历史分位：5%\n国债偏弱/);
   draws[1]({setOption:o=>option=o});assert.deepEqual(option.series[0].data,[.02,-.02,0,null]);
   assert.deepEqual(option.legend.data,['20日涨跌幅','90%分位','10%分位']);
  }finally{globalThis.location=originalLocation;}

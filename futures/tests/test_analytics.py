@@ -558,3 +558,38 @@ def test_etf_flow_demo_compares_holder_shares_and_preserves_missing_intervals():
     missing=dict(code='x.SH',name='x',points=[dict(trade_date=days[0],total_shares=100,unit_nav=1),dict(trade_date=days[2],total_shares=110,unit_nav=1)])
     assert etf_flows([missing],[],days[2],days[:3])['series'][-1]['unclassified_daily'] is None
     assert etf_flows([missing],[],days[2],[days[0],days[2]])['series'][-1]['unclassified_daily']==10/1e8  # A known exchange holiday does not break adjacency.
+def test_basis_history_uses_listed_cffex_identity_and_retains_missing_closes():
+    from backend.analytics import basis_history
+    points=[{'observation_date':d,'raw_value':100} for d in ['2025-09-01','2025-09-02','2025-09-03']]
+    rows=[{'exchange':'CFFEX','symbol':'IM2512','trade_date':'2025-09-01','close':100},
+          {'exchange':'CFFEX','symbol':'IM2512','trade_date':'2025-09-03','close':101},
+          {'exchange':'SHFE','symbol':'IM2412','trade_date':'2025-09-01','close':99},
+          {'exchange':'CFFEX','symbol':'IM2312','trade_date':'2025-09-01','close':99}]
+    terms={'contracts':[{'symbol':s,'status':'rds_recorded','listed_date':'2025-01-01',
+                         'last_trade_date':'2025-12-19','last_delivery_date':'2025-12-19'} for s in ['IM2512','IM2412']]}
+    result=basis_history(rows,points,['IM2312','IM2412','IM2512'],terms)
+    assert result['missing']==['IM2312','IM2412']
+    assert len(result['lines'])==1
+    series=result['lines'][0]['points']
+    assert [p['reference_spread'] for p in series]==[0,None,-1]
+    assert series[0]['days_to_expiry']==109
+    assert series[-1]['annualized_basis_ratio']==-.01*365/107
+
+
+def test_dominant_basis_follows_published_intervals_without_carry_forward_or_oi_selection():
+    import pytest
+    from backend.analytics import basis_history
+    from datetime import timedelta,date
+    days=[(date(2026,9,1)+timedelta(days=i)).isoformat() for i in range(4)]
+    points=[dict(observation_date=d,raw_value=100) for d in days]
+    rows=[dict(exchange='CFFEX',symbol=s,trade_date=d,close=price,position=oi)
+          for s,price,oi in [('IM2611',99,9999),('IM2612',98,1)] for d in days]
+    terms={'contracts':[dict(symbol=s,status='rds_recorded',listed_date='2026-01-01',last_trade_date='2026-12-18',last_delivery_date='2026-12-18') for s in ['IM2611','IM2612']]}
+    mapping=[dict(symbol='IM2611',start_date=days[0],end_date=days[0]),dict(symbol='IM2612',start_date=days[2],end_date=days[3])]
+    result=basis_history(rows,points,['IM2611','IM2612'],terms,mapping)
+    series=result['lines'][0]['points']
+    assert result['continuous'] and [p['symbol'] for p in series]==['IM2611',None,'IM2612','IM2612']
+    assert [p['reference_spread'] for p in series]==[1,None,2,2]
+    assert result['latest']['trade_date']==days[-1] and result['latest']['basis_ratio']==.02
+    with pytest.raises(ValueError,match='重叠'):
+        basis_history(rows,points,['IM2611','IM2612'],terms,[mapping[0],dict(mapping[1],start_date=days[0])])

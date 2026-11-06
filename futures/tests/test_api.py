@@ -298,6 +298,75 @@ def test_rds_index_basis_revision_deletion_cache_and_scope(setup):
         assert client.get(url).status_code==422  # Existing basis algorithm rejects ambiguous dates.
 
 
+def test_basis_same_batch_full_index_history_and_cache(tmp_path,monkeypatch):
+    import json
+    from backend.data import INDEX_SERIES
+    batch='fixture-batch'
+    source=tmp_path/'inputs'/batch
+    market=source/'market';daily=market/'futureshistoryprices1d'
+    context=tmp_path/'releases'/('data-'+batch)/'observation/observation-context.json'
+    context.parent.mkdir(parents=True);daily.mkdir(parents=True)
+    (source/'manifest.json').write_text(json.dumps({'batch':batch}))
+    wrong=tmp_path/'wrong';wrong.mkdir()
+    (wrong/context.name).write_text(json.dumps({'indices':{},'meta':{'input_batch':'wrong'}}))
+    monkeypatch.setenv('DASHBOARD_OBSERVATION_ROOT',str(wrong))
+    monkeypatch.setenv('DASHBOARD_PUBLIC_READONLY','1')
+    indices={code:[{'trade_date':d,'close':'8001.25'} for d in ['2020-09-01','2026-09-01','2026-09-02']]
+             for code,_ in INDEX_SERIES.values()}
+    payload={'meta':{'input_batch':batch},'indices':indices}
+    context.write_text(json.dumps(payload))
+    terms=market/'cfuturesdescription/part.parquet';terms.parent.mkdir()
+    with duckdb.connect() as con:
+        con.execute('CREATE TABLE daily(exchange VARCHAR,symbol VARCHAR,trade_datetime TIMESTAMP,trade_date DATE,open DOUBLE,high DOUBLE,low DOUBLE,close DOUBLE,volume DOUBLE,amount DOUBLE,position DOUBLE,settle_price DOUBLE,pre_settle_price DOUBLE)')
+        for product in INDEX_SERIES:
+            for day in ['2020-09-01','2026-09-01','2026-09-02']:
+                con.execute("INSERT INTO daily VALUES ('CFFEX',?,?::TIMESTAMP,?::DATE,8000,8000,8000,8000,100,100,100,8000,8000)",[product+day[2:4]+'12',day,day])
+        for month in ['2020-09','2026-09']:
+            part=daily/('year_month='+month)/'part.parquet';part.parent.mkdir()
+            con.execute('CREATE OR REPLACE TABLE monthly AS SELECT * FROM daily WHERE strftime(trade_date,\'%Y-%m\')=?',[month])
+            con.execute('COPY monthly TO ? (FORMAT PARQUET)',[str(part)])
+        con.execute("CREATE TABLE terms(product VARCHAR,symbol VARCHAR,listed_date DATE,last_trade_date DATE,last_delivery_date DATE,source_code VARCHAR,date_status VARCHAR)")
+        for product in INDEX_SERIES:
+            for y in [2020,2026]:
+                con.execute("INSERT INTO terms VALUES (?,?,?::DATE,?::DATE,?::DATE,'fixture','rds_recorded')",[product,product+str(y)[2:]+'12',f'{y}-01-01',f'{y}-12-18',f'{y}-12-18'])
+        con.execute('COPY terms TO ? (FORMAT PARQUET)',[str(terms)])
+    # Production market symlink resolves into inputs/<batch>, not releases/data-<batch>.
+    logical=tmp_path/'current-data/market/futureshistoryprices1d';resolve=Path.resolve
+    monkeypatch.setattr(Path,'resolve',lambda p,*a,**kw:daily if p==logical else resolve(p,*a,**kw))
+    store=DailyStore(logical,tmp_path/'runtime');client=TestClient(create_app(store))
+    for product in INDEX_SERIES:
+        old=client.get('/api/basis-reference',params={'product':product,'symbol':product+'2012','start':'2020-09-01','end':'2020-09-01'})
+        assert old.status_code==200,old.text
+        assert old.json()['latest']['reference_spread']==1.25
+        assert old.json()['reference']['source']=='RDS observation-context'
+    url='/api/basis-reference?product=IF&symbol=IF2612&end=2026-09-02&history=true&years=10'
+    response=client.get(url);result=response.json()
+    assert response.status_code==200 and result['input_batch']==batch
+    assert [l['label'] for l in result['lines']]==['IF2012','IF2612']
+    assert result['lines'][-1]['points'][-1]['reference_spread']==1.25
+    assert client.get(url,headers={'If-None-Match':response.headers['etag']}).status_code==304
+    continuous='/api/basis-reference?product=IF&end=2026-09-02&history=true&continuous=true&years=10'
+    assert client.get(continuous).json()['lines']==[]  # No implicit OI replacement for a missing published mapping.
+    mapping=market/'cfuturescontractmapping/part.parquet';mapping.parent.mkdir()
+    with duckdb.connect() as con:
+        con.execute("CREATE TABLE mapping AS SELECT 'IF' product,'IF2612' symbol,DATE '2026-09-01' start_date,DATE '2026-09-01' end_date")
+        con.execute('COPY mapping TO ? (FORMAT PARQUET)',[str(mapping)])
+        mapped=client.get(continuous)
+        assert mapped.json()['latest']['trade_date']=='2026-09-01'
+        assert mapped.json()['lines'][0]['points'][-1]['basis_ratio'] is None
+        con.execute("UPDATE mapping SET end_date=DATE '2026-09-02'")
+        con.execute('COPY mapping TO ? (FORMAT PARQUET)',[str(mapping)])
+        advanced=client.get(continuous,headers={'If-None-Match':mapped.headers['etag']})
+        assert advanced.status_code==200 and advanced.json()['latest']['trade_date']=='2026-09-02'
+    indices['000300.SH'][-1]['close']='8010.25';context.write_text(json.dumps(payload))
+    revised=client.get(url,headers={'If-None-Match':response.headers['etag']})
+    assert revised.status_code==200 and revised.json()['lines'][-1]['points'][-1]['reference_spread']==10.25
+    indices['000300.SH'].append(indices['000300.SH'][-1]);context.write_text(json.dumps(payload))
+    assert client.get(url).status_code==503
+    indices['000300.SH'].pop();payload['meta']['input_batch']='wrong';context.write_text(json.dumps(payload))
+    assert client.get(url).status_code==503
+
+
 def test_basis_reference_only_uses_pinned_cu_and_reports_unavailable(setup,monkeypatch):
     import hashlib,json
     from backend import data

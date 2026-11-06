@@ -1,5 +1,5 @@
 import { useMemo, useRef } from 'react';
-import { useChart, ChartFrame, Metric, usePreference, observedRows, useResource } from './charts.js';
+import { useChart, ChartFrame, Metric, usePreference, observedRows, useResource, axisTooltip } from './charts.js';
 import { surfaceMetrics } from './surfaceMetrics.js';
 
 const colors = ['#4e7fb9', '#8c7b9f', '#568f84', '#a48b59', '#505c6b', '#a17589'];
@@ -15,7 +15,7 @@ export function IvHistory({rows,spot,snapshot,monthId}) {
   const points=useMemo(()=>observedRows(result?.points||[],['iv','hv20']),[result]);
   useChart(ref,chart=>chart.setOption({animation:false,color:['#4e7fb9','#8d9a93'],
     grid:{left:48,right:16,top:32,bottom:28},legend:{top:0,textStyle:{color:'#505c6b',fontSize:11}},
-    tooltip:{trigger:'axis',valueFormatter:v=>v==null?'—':`${Number(v).toFixed(2)}%`},
+    tooltip:{trigger:'axis',renderMode:'richText',formatter:p=>axisTooltip(p,v=>`${Number(v).toFixed(2)}%`)},
     xAxis:{type:'category',boundaryGap:false,data:points.map(p=>p.date),axisLabel:{formatter:v=>v.slice(5)}},
     yAxis:{type:'value',scale:true,axisLabel:{formatter:'{value}%'},splitLine:{lineStyle:{color:'#eef0f3'}}},
     series:[['iv','合约收盘 IV'],['hv20','指数 HV20']].map(([key,name])=>({name,type:'line',showSymbol:false,connectNulls:false,data:points.map(p=>p[key]==null?null:p[key]*100)}))}, true),[points]);
@@ -45,7 +45,7 @@ export default function SurfaceComparison({ rows, months, metric }) {
     })) : [{name: metric === 'term' ? 'ATM IV' : '25Δ偏度', type: metric === 'term' ? 'line' : 'bar', connectNulls: false,
       data: visible.map(m => metric === 'term' ? (m.atm_iv === null ? null : m.atm_iv * 100) : ({value:m.skew25_pp, itemStyle:{color:m.skew25_pp >= 0 ? '#b64d49' : '#2b8167'}})), color:'#4e7fb9'}];
     chart.setOption({ animation:false, grid:{left:55,right:25,top:40,bottom:45}, legend:metric === 'smiles' ? {top:0} : undefined,
-      tooltip:{trigger:'axis',valueFormatter:x => x == null ? '—' : `${Number(x).toFixed(2)}${metric === 'skew' ? ' pp' : '%'}`},
+      tooltip:{trigger:'axis',renderMode:'richText',formatter:p=>axisTooltip(p,v=>`${Number(v).toFixed(2)}${metric === 'skew' ? ' pp' : '%'}`)},
       xAxis:metric === 'smiles' ? {type:'value',scale:true,min:'dataMin',max:'dataMax',name:'K / F',nameLocation:'middle',nameGap:28,axisLabel:{formatter:x=>Number(x).toFixed(2)}} : {type:'category',data:visible.map(m=>m.code)},
       yAxis:{type:'value',scale:true,name:metric === 'skew' ? 'Put IV − Call IV (pp)' : 'IV (%)',splitLine:{lineStyle:{color:'#eef0f3'}}}, series }, true);
   }, [data, hidden, metric]);

@@ -1,6 +1,6 @@
 import { conditionalFetch as fetch } from './transport.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useChart, Metric, usePreference, RefreshButton } from './charts.js';
+import { useChart, Metric, usePreference, RefreshButton, axisTooltip } from './charts.js';
 import './options.css';
 import SurfaceComparison, { IvHistory } from './SurfaceComparison.jsx';
 import { holdingRows, putCallRatio } from './holdings.js';
@@ -242,11 +242,11 @@ function VolatilityTab({ rows, month, months, spot, snapshot }) {
       grid: { left: 48, right: 22, top: 44, bottom: 42 },
       legend: { top: 6, right: 8, itemWidth: 14, itemHeight: 8, textStyle: { color: '#505c6b', fontSize: 12 } },
       tooltip: {
-        trigger: 'axis',
+        trigger: 'axis',renderMode:'richText',
         formatter: (params) => {
           const items = Array.isArray(params) ? params : [params];
           const strike = items[0]?.value?.[0];
-          return [`执行价 ${formatNumber(strike)}`, ...items.map((item) => `${item.seriesName} ${formatNumber(item.value?.[1], 1)}%`)].join('<br/>');
+          return axisTooltip(items,v=>formatNumber(v,1)+'%',`执行价 ${formatNumber(strike)}`);
         },
       },
       xAxis: {

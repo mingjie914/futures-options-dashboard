@@ -12,7 +12,7 @@ function InventoryTrend({rows:sourceRows, unit, name}) {
   const ref = useRef();
   useChart(ref, chart => chart.setOption({animation:false,
     legend:{type:'scroll',top:0,left:0,right:0,itemWidth:18,itemHeight:9,itemGap:16,textStyle:{fontSize:12},data:[{name,icon:'path://M0,3 L18,3 L18,5 L0,5 Z',itemStyle:{color:'#4e7fb9'}},{name:'增加',icon:'rect',itemStyle:{color:'#b64d49'}},{name:'减少',icon:'rect',itemStyle:{color:'#2b8167'}}]},grid:{left:85,right:85,top:45,bottom:60},
-    tooltip:{trigger:'axis',confine:true,renderMode:'richText',formatter:params=>{const p=rows[params[0]?.dataIndex];return p ? `${p.date}\n${name}：${quantity(p.value)} ${unit}\n较前次公布${p.previous_date?'（'+p.previous_date+'）':''}：${quantity(p.change)} ${unit}` : '';}},
+    tooltip:{trigger:'axis',confine:true,renderMode:'richText',formatter:params=>{const p=rows[params[0]?.dataIndex];return p ? [p.date,...[[name,p.value],['日增减',p.change]].filter(([,v])=>Number.isFinite(v)).map(([label,v])=>`${label}：${quantity(v)} ${unit}`)].join('\n') : '';}},
     xAxis:{type:'category',data:rows.map(p=>p.date),boundaryGap:false},
     yAxis:[{type:'value',scale:true,splitLine:{lineStyle:{color:'#eef0f3'}}},{type:'value',scale:true,splitLine:{show:false}}],
     dataZoom:[{type:'inside'},{type:'slider',height:20,bottom:10}],
@@ -47,15 +47,16 @@ export function HistoryChart({result, heatmap=false, showAllYears=false, height=
     const integer = !share && result.metric !== 'price' && result.mode !== 'spread';
     const unit = share || result.unit === '原始报价单位' ? '' : result.unit || (integer ? '手' : '');
     const display = value => value == null ? '—' : Number(value * (share ? 100 : 1)).toLocaleString('zh-CN', {maximumFractionDigits: integer ? 0 : 2}) + (share ? '%' : '');
+    const axisLabel = value => String(value).replace(/^Y[+-]\d+\s+/, '');
     const byLine = heatmap ? [] : result.lines.map(line => new Map(line.points.map(point => [point.x, point])));
     const segments = heatmap ? [] : lineSegments(result.axis, result.lines);
     let selected = result.mode === 'seasonal' ? seasonalSelection(result.lines, showAllYears) : {};
     const palette = ['#4e7fb9', '#a48b59', '#568f84', '#8c7b9f', '#b36c73', '#505c6b', '#4e7fb9', '#65a30d', '#c026d3', '#b45309'];
     const overview=result.mode==='overview',focus=overview?[...new Set([activeContract,secondaryContract,focusContract].filter(s=>result.lines.some(l=>l.label===s)))]:[];
     let emphasized=focusContract;
-    const color=(name,i)=>overview?name===activeContract?'#4e7fb9':name===secondaryContract?'#a48b59':name===focusContract?'#8c7b9f':'#9ba7b6':palette[i%palette.length];
-    const currentIndex = result.mode === 'spread' ? result.lines.findIndex(line => line.year === result.meta?.anchor_year) : -1;
-    const currentPoint = result.lines[currentIndex]?.points.filter(p => Number.isFinite(p.value)).at(-1);
+    const color=(name,i)=>result.colors?.[name]||(overview?name===activeContract?'#4e7fb9':name===secondaryContract?'#a48b59':name===focusContract?'#8c7b9f':'#9ba7b6':palette[i%palette.length]);
+    const currentIndex = result.current ? result.lines.findIndex(line => line.label === result.current.label) : result.mode === 'spread' ? result.lines.findIndex(line => line.year === result.meta?.anchor_year) : -1;
+    const currentPoint = result.current?.point || result.lines[currentIndex]?.points.filter(p => Number.isFinite(p.value)).at(-1);
     const axisIndex = new Map(result.axis.map((x, i) => [x, i]));
     const cells = [];
     if (heatmap) result.lines.forEach((line, y) => line.points.forEach(p => {
@@ -64,8 +65,8 @@ export function HistoryChart({result, heatmap=false, showAllYears=false, height=
     const common = {
       animation: false,
       grid: {left: 90, right: 30, top: 45, bottom: heatmap ? 115 : 60},
-      xAxis: {type: 'category', data: result.axis, boundaryGap: heatmap, axisLabel: {hideOverlap: true}},
-      dataZoom: [{type: 'inside', xAxisIndex: 0}, {type: 'slider', xAxisIndex: 0, bottom: heatmap ? 65 : 10, height: 20}],
+      xAxis: {type: 'category', data: result.axis, boundaryGap: heatmap, axisLabel: {hideOverlap: true,formatter:axisLabel}},
+      dataZoom: [{type: 'inside', xAxisIndex: 0}, {type: 'slider', xAxisIndex: 0, bottom: heatmap ? 65 : 10, height: 20,labelFormatter:(value,text)=>axisLabel(text??value)}],
     };
     const option = heatmap ? {
       ...common,
@@ -82,19 +83,17 @@ export function HistoryChart({result, heatmap=false, showAllYears=false, height=
         const list = Array.isArray(params) ? params : [params];
         const rows = tooltipRows(params, result.axis, segments, byLine);
         const heading = list[0]?.axisValue ?? result.axis[list[0]?.dataIndex] ?? '';
-        const present = new Set(rows.map(r => r.lineIndex));
-        const absent = result.mode === 'overview' ? [] : result.lines.filter((line, i) => !present.has(i) && selected[line.label] !== false);
-        return [heading, ...rows.map(({name, marker, point}) =>
-          `${marker} ${point.trade_date===heading?name:name===point.trade_date?.slice(0,4)?point.trade_date:name+' · '+point.trade_date}：${display(point.value)}${unit ? ' '+unit : ''}` +
+        if(!rows.length)return '';
+        return [axisLabel(heading), ...rows.map(({name, marker, point}) =>
+          `${marker} ${point.trade_date===heading?name:name===point.trade_date?.slice(0,4)?point.trade_date:name+' · '+point.trade_date}${point.symbol?' · '+point.symbol:''}：${display(point.value)}${unit ? ' '+unit : ''}` +
           (result.mode === 'spread' ? `（近 ${display(point.near_price)} / 远 ${display(point.far_price)}）` : '')),
-          ...absent.map(line => `${line.label}: —`),
-          ...(rows.length ? [] : ['暂无数据'])].join('\n');
+          ].join('\n');
       }},
-      yAxis: {type: 'value', scale: true, axisLabel: {formatter: display}, splitLine: {lineStyle: {color: '#eef0f3'}}},
+      yAxis: {type: 'value', scale: true, axisLabel: {formatter: value=>display(value)+(unit==='%'&&!share?'%':'')}, splitLine: {lineStyle: {color: '#eef0f3'}}},
       series: segments.map(({name, lineIndex, count, data}) => ({name, type: 'line', showSymbol: result.mode !== 'overview' || count === 1, showAllSymbol: count === 1, symbolSize: count === 1 ? 6 : 3, connectNulls: true, emphasis: {focus: 'series',lineStyle:{width:3,opacity:1,...(overview?{color:focus.includes(name)?color(name,lineIndex):'#8c7b9f'}:{})}},
         z:overview&&focus.includes(name)?3:2,itemStyle: {color: color(name,lineIndex)},
-        lineStyle: {color: color(name,lineIndex), width: overview?focus.includes(name)?2.6:1:lineIndex === (result.mode === 'spread' ? currentIndex : result.lines.length-1) ? 2.8 : 1.3,opacity:overview&&!focus.includes(name)?.7:1},
-        ...(lineIndex === currentIndex && currentPoint && data[axisIndex.get(currentPoint.x)] != null ? {markPoint:{symbol:'circle',symbolSize:7,label:{position:'top',formatter:'当前 '+display(currentPoint.value)},data:[{coord:[axisIndex.get(currentPoint.x),currentPoint.value]}]},markLine:{silent:true,symbol:'none',label:{show:false},lineStyle:{color:'#7c8590',width:1},data:[{xAxis:axisIndex.get(currentPoint.x)}]}} : {}), data})),
+        lineStyle: {color: color(name,lineIndex), width: overview?focus.includes(name)?2.6:1:lineIndex === (result.current || result.mode === 'spread' ? currentIndex : result.lines.length-1) ? 2.8 : 1.3,opacity:overview&&!focus.includes(name)?.7:1},
+        ...(lineIndex === currentIndex && currentPoint && data[axisIndex.get(currentPoint.x)] != null ? {markPoint:{symbol:'circle',symbolSize:7,label:{position:'top',formatter:'当前 '+display(currentPoint.value)+(unit==='%'&&!share?'%':'')},data:[{coord:[axisIndex.get(currentPoint.x),currentPoint.value]}]},markLine:{silent:true,symbol:'none',label:{show:false},lineStyle:{color:'#7c8590',width:1},data:[{xAxis:axisIndex.get(currentPoint.x)}]}} : {}), data})),
     };
     chart.setOption(option, true);
     chart.off('legendselectchanged');

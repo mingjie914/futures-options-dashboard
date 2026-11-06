@@ -3,6 +3,12 @@ import { conditionalFetch } from './transport.js';
 
 export { usePreference } from './preferences.js';
 
+export function axisTooltip(params,format=String,heading) {
+  const items=Array.isArray(params)?params:[params];
+  const lines=items.flatMap(p=>{const value=Array.isArray(p.value)?p.value.at(-1):p.value;return value==null||value===''||!Number.isFinite(Number(value))?[]:[`${p.marker||''} ${p.seriesName}：${format(value,p)}`];});
+  return lines.length?[heading??items[0]?.axisValueLabel??items[0]?.axisValue??items[0]?.name??'',...lines].join('\n'):'';
+}
+
 export function observedRows(rows, keys) {
   const valid = row => keys.some(key => Number.isFinite(row[key]));
   const first = rows.findIndex(valid);

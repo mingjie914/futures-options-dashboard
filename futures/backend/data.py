@@ -115,8 +115,25 @@ REVIEW_METADATA = 'terminal_metadata_combined_20260909.json'
 TERMINAL_METADATA_FILE = 'terminal_metadata_screenshots_20260914.json'
 
 
-def index_daily(folder, product=None, start=None, end=None, published=None):
+def index_daily(folder, product=None, start=None, end=None, published=None, context=None):
     """Read published RDS closes, or the explicit local review; never fetch on request."""
+    if context is not None and context.is_file():
+        source = json.loads(context.read_bytes())
+        batch = context.parent.parent.name
+        if batch.startswith('data-') and source.get('meta', {}).get('input_batch') != batch[5:]:
+            raise ValueError('指数与期货发布批次不一致')
+        code, name = INDEX_SERIES[product]
+        points = source['indices'][code]
+        if len({p['trade_date'] for p in points}) != len(points):
+            raise ValueError('指数观测日期重复')
+        rows = [{'observation_date':p['trade_date'], 'raw_value':float(p['close']) if p['close'] is not None else None}
+                for p in points if (not start or p['trade_date'] >= start) and (not end or p['trade_date'] <= end)]
+        rows.sort(key=lambda p:p['observation_date'])
+        return {'sha256':fingerprint([context]), 'input_batch':source.get('meta', {}).get('input_batch'),
+                'indicators':[{'product':product, 'code':code, 'name':name, 'frequency':'D', 'unit':'指数点',
+                               'source':'RDS observation-context', 'first':rows[0]['observation_date'] if rows else None,
+                               'last':rows[-1]['observation_date'] if rows else None}],
+                'points':[dict(p, code=code) for p in rows]}
     if published is not None and published.is_dir():
         code, name = INDEX_SERIES[product]
         files = sorted(p for p in published.glob('year_month=*/*.parquet')

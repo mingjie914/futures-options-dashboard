@@ -156,6 +156,49 @@ def index_basis(rows, points, symbol, delivery_date=None):
     return result
 
 
+def basis_history(rows, points, symbols, terms, mappings=None):
+    """Real-contract basis, optionally selected by published dominant intervals."""
+    grouped = {s:[] for s in symbols}
+    dates = {r['symbol']:r for r in (terms or {}).get('contracts',[]) if r.get('status')=='rds_recorded'}
+    for row in rows:
+        s = row['symbol']
+        term = dates.get(s)
+        if s in grouped and term and row['exchange']=='CFFEX' and term['listed_date']<=row['trade_date']<=term['last_trade_date']:
+            grouped[s].append(row)
+    lines, histories = [], {}
+    for s, contract in grouped.items():
+        if not contract:
+            continue
+        term = dates[s]
+        delivery = term['last_delivery_date'] if term['last_delivery_date']==term['last_trade_date'] else None
+        result = index_basis(contract,points,s,delivery)
+        histories[s] = [dict(
+            trade_date=p['trade_date'], days_to_expiry=(date.fromisoformat(term['last_trade_date'])-date.fromisoformat(p['trade_date'])).days,
+            **{k:p[k] for k in ('reference_spread','basis_ratio','annualized_basis_ratio')}) for p in result['series']]
+        lines.append(dict(label=s,year=2000+int(s[-4:-2]),points=histories[s]))
+    if mappings is not None:
+        segments = sorted(mappings,key=lambda r:r['start_date'])
+        if any(a['end_date']>=b['start_date'] for a,b in zip(segments,segments[1:])):
+            raise ValueError('主力映射区间重叠')
+        indexed = {s:{p['trade_date']:p for p in series} for s,series in histories.items()}
+        days = sorted({p['observation_date'] for p in points}|{r['trade_date'] for r in rows})
+        years, cursor, latest = {}, 0, None
+        for day in days:
+            while cursor<len(segments) and segments[cursor]['end_date']<day:
+                cursor += 1
+            symbol = segments[cursor]['symbol'] if cursor<len(segments) and segments[cursor]['start_date']<=day else None
+            point = dict(indexed.get(symbol,{}).get(day) or dict(trade_date=day,days_to_expiry=None,
+                reference_spread=None,basis_ratio=None,annualized_basis_ratio=None),symbol=symbol)
+            year = int(day[:4])
+            years.setdefault(year,dict(label=str(year),year=year,points=[]))['points'].append(point)
+            if point['reference_spread'] is not None:
+                latest = point
+        return dict(continuous=True,latest=latest,lines=[l for l in years.values() if any(p['reference_spread'] is not None for p in l['points'])],
+                    missing=[y for y,l in years.items() if all(p['reference_spread'] is None for p in l['points'])],
+                    mapping_start=segments[0]['start_date'] if segments else None)
+    return dict(lines=lines,missing=[s for s in symbols if not grouped[s]])
+
+
 def position_peak_ranking(rows, peaks, as_of, years=5, min_volume=0, min_position=0):
     """Current OI leaders against the previous five delivery years of the same month."""
     current = {}
