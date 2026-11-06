@@ -3,6 +3,14 @@ import { conditionalFetch } from './transport.js';
 
 export { usePreference } from './preferences.js';
 
+const priceFormats=new Map();
+export function formatPrice(value,digits=2,minimumFractionDigits=0) {
+  if(value==null||value===''||!Number.isFinite(Number(value)))return '—';
+  const key=digits+':'+minimumFractionDigits;
+  if(!priceFormats.has(key))priceFormats.set(key,new Intl.NumberFormat('zh-CN',{useGrouping:false,maximumFractionDigits:digits,minimumFractionDigits}));
+  return priceFormats.get(key).format(Number(value));
+}
+
 export function axisTooltip(params,format=String,heading) {
   const items=Array.isArray(params)?params:[params];
   const lines=items.flatMap(p=>{const value=Array.isArray(p.value)?p.value.at(-1):p.value;return value==null||value===''||!Number.isFinite(Number(value))?[]:[`${p.marker||''} ${p.seriesName}：${format(value,p)}`];});

@@ -2,14 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
-import {linkZoom,axisTooltip} from '../../../frontend/src/charts.js';
+import {linkZoom,axisTooltip,formatPrice} from '../../../frontend/src/charts.js';
 const sharedRequire=createRequire(new URL('../../../frontend/package.json',import.meta.url));
 const React=sharedRequire('react'), {renderToStaticMarkup}=sharedRequire('react-dom/server');
 
 const source=await readFile(new URL('../src/MarketPanels.jsx',import.meta.url),'utf8');
 const ts=sharedRequire('typescript');
 const matrixModule={exports:{}};
-new Function('module','exports','require',ts.transpileModule(await readFile(new URL('../../../frontend/src/SpreadMatrix.jsx',import.meta.url),'utf8'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(matrixModule,matrixModule.exports,id=>id.endsWith('.css')?{}:sharedRequire(id));
+new Function('module','exports','require',ts.transpileModule(await readFile(new URL('../../../frontend/src/SpreadMatrix.jsx',import.meta.url),'utf8'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(matrixModule,matrixModule.exports,id=>id.endsWith('.css')?{}:id==='./charts.js'?sharedRequire('./src/charts.js'):sharedRequire(id));
 const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const module={exports:{}},chartDraws=[];
 new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.startsWith('react')?sharedRequire(id):id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),useChart:(_ref,draw)=>chartDraws.push(draw)}:createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
@@ -17,11 +17,13 @@ const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel,Bas
 
 test('option formats preserve rounding and smile/spot render in one update',async()=>{
  const source=await readFile(new URL('../../../frontend/src/Options.jsx',import.meta.url),'utf8'),draws=[],module={exports:{}};
- const code=ts.transpileModule(source+'\nexport {formatNumber,VolatilityTab};',{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const code=ts.transpileModule(source+'\nexport {formatNumber,formatPrice,VolatilityTab};',{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('.css')?{}:id==='./charts.js'?{...sharedRequire('./src/charts.js'),useChart:(_ref,draw)=>draws.push(draw),usePreference:()=>['single',()=>{}]}:id==='./SurfaceComparison.jsx'?{IvHistory:()=>null}:sharedRequire(id.startsWith('./')?'./src/'+id.slice(2):id));
  for(const digits of [0,1,2,3])for(const value of [null,undefined,'',NaN,Infinity,0,-1234.5678,'1234.5678']){
   const n=value===null||value===undefined||value===''?NaN:Number(value);
   assert.equal(module.exports.formatNumber(value,digits),Number.isFinite(n)?n.toLocaleString('en-US',{minimumFractionDigits:digits,maximumFractionDigits:digits}):'—');
+  assert.equal(module.exports.formatPrice(value,digits),Number.isFinite(n)?n.toLocaleString('zh-CN',{useGrouping:false,minimumFractionDigits:digits,maximumFractionDigits:digits}):'—');
+  assert.equal(module.exports.formatNumber(value,digits,false),module.exports.formatPrice(value,digits));
  }
  const rows=['C','P'].map(cp=>({month:'202612',cp,strike:6000,iv:.3,code:'MO2612-'+cp+'-6000'})),month={id:'202612'};
  renderToStaticMarkup(React.createElement(module.exports.VolatilityTab,{rows,month,months:[month],spot:6010,snapshot:{}}));
@@ -33,7 +35,7 @@ test('option formats preserve rounding and smile/spot render in one update',asyn
 test('intraday chart keeps the trading session, real gaps and independent price/IV scales',async()=>{
  const draws=[],module={exports:{}};
  const code=ts.transpileModule(await readFile(new URL('../../../frontend/src/IntradayOptions.jsx',import.meta.url),'utf8'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- new Function('module','exports','require',code)(module,module.exports,id=>id==='./charts.js'?{axisTooltip,ChartFrame:({children})=>children,useChart:(_ref,draw)=>draws.push(draw)}:id==='./intraday-live.js'?sharedRequire('./src/intraday-live.js'):sharedRequire(id));
+ new Function('module','exports','require',code)(module,module.exports,id=>id==='./charts.js'?{axisTooltip,formatPrice,ChartFrame:({children})=>children,useChart:(_ref,draw)=>draws.push(draw)}:id==='./intraday-live.js'?sharedRequire('./src/intraday-live.js'):sharedRequire(id));
  const data={series:'MO2611',trade_date:'2026-11-03',future_code:'IM2611.CFE',points:[{time:'09:31',future_last:6300,atm_iv:.30,strike:6300},{time:'09:33',future_last:6301,atm_iv:null}]};
  const draw=intraday=>{
   draws.length=0;
@@ -52,6 +54,8 @@ test('intraday chart keeps the trading session, real gaps and independent price/
  assert.deepEqual(chart.series[0].markPoint.data[0].coord,['09:33',6301]);
  assert.equal(chart.series[1].data[1][1],30);assert.equal(chart.series[1].data[3][1],null);
  assert.equal(chart.legend,undefined);assert.equal(chart.yAxis[0].position,'right');assert.equal(chart.yAxis[1].show,false);
+ assert.equal(chart.yAxis[0].axisLabel.formatter(12345.67),'12345.67');
+ assert.equal(chart.yAxis[0].axisPointer.label.formatter({value:12345.67}),'12345.67');
  assert.deepEqual(chart.visualMap[0].pieces.map((piece,i)=>i?piece.min:piece.max),[6320,6320]);
  assert.deepEqual(chart.series.map(series=>series.yAxisIndex),[0,1]);
  assert.equal(chart.series[1].itemStyle.color,'#3d70ad');
@@ -102,6 +106,11 @@ test('intraday cold start and source-selected commodity codes keep candidate met
  feed.catalog.commodity_selection.CU=[];assert.doesNotMatch(render(feed),/CU\/铜/);
  delete feed.catalog.commodity_selection;assert.match(render(feed),/CU2712/);
  feed.catalog.codes=selected;assert.doesNotMatch(render(feed),/CU2712/);
+ const future='IM2611.CFE',spot='000852.SH';
+ feed.catalog={codes:[spot,future],metadata:{[spot]:{kind:'index',name:'中证1000'},[future]:{kind:'future',underlying:spot,multiplier:200,last_trade_date:'2026-11-20'}}};
+ feed.quotes=new Map([[spot,{last:12345.67,acquired_at:'2026-11-06T15:00:00+08:00'}],[future,{last:12340.6,oi:1234567,acquired_at:'2026-11-06T15:00:00+08:00'}]]);
+ const index=render(feed);assert.match(index,/>12345.67</);assert.match(index,/>12340.6</);assert.match(index,/>1,234,567</);assert.doesNotMatch(index,/12,345|12,340/);
+
 });
 
 test('spread matrix uses recorded last trading days, preserves missing values and marks valid extrema',()=>{
@@ -460,6 +469,7 @@ test('single published inventory observation is visible in both charts without i
  renderToStaticMarkup(React.createElement(module.exports.InventoryPanel,{product:'SI',end:'',controls:()=>null}));
  const options=draws.map(draw=>{let option;draw({setOption:value=>option=value,on(){},off(){}});return option;});
  assert.equal(options.length,2);
+ assert.equal(options[0].yAxis.axisLabel.formatter(12345.6),'12,345.6');
  for(const option of options){assert.equal(option.series[0].showSymbol,true);assert.equal(option.series[0].symbolSize,6);assert.deepEqual(option.series[0].data.filter(Number.isFinite),[31327]);}
  assert.equal(options[0].series[0].showAllSymbol,true);
  assert.deepEqual(options[1].series.slice(1).map(s=>s.data),[[null],[null]]);
@@ -476,6 +486,7 @@ test('contract legend highlights every segment without hiding any contract',asyn
  const options=[];let select;
  draws.pop()({setOption:o=>options.push(o),off(){},on:(_event,handler)=>{select=handler;}});
  select({name:'IM2611',selected:{IM2611:false}});
+ assert.equal(options[0].yAxis.axisLabel.formatter(12345.67),'12345.67');
  assert.ok(Object.values(options[1].legend.selected).every(Boolean));
  assert.equal(options[1].series[0].lineStyle.width,3);
  select({name:'IM2611',selected:{IM2611:false}});
@@ -609,7 +620,7 @@ test('one basis selector keeps quotes, history, prices, distribution and contrac
 test('spread latest marker skips missing tails and retains a real zero without building a point list',async()=>{
  const text=await readFile(new URL('../src/SpreadPanel.jsx',import.meta.url),'utf8'),module={exports:{}},draws=[];
  let series;
- new Function('module','exports','require',ts.transpileModule(text,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(module,module.exports,id=>id.endsWith('/charts.js')?{usePreference:(_key,value)=>[value,()=>{}],useResource:()=>({data:{series,paired_count:series.filter(r=>r.spread!=null).length}}),useChart:(_ref,draw)=>draws.push(draw)}:sharedRequire(id));
+ new Function('module','exports','require',ts.transpileModule(text,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(module,module.exports,id=>id.endsWith('/charts.js')?{formatPrice,usePreference:(_key,value)=>[value,()=>{}],useResource:()=>({data:{series,paired_count:series.filter(r=>r.spread!=null).length}}),useChart:(_ref,draw)=>draws.push(draw)}:sharedRequire(id));
  for(const values of [[null,0,null],[1,-2,null],[null,null]]){
   series=values.map((spread,i)=>({trade_date:'2026-11-0'+(i+1),spread}));
   const html=renderToStaticMarkup(React.createElement(module.exports.default,{data:{product:'IM',near:'IM2612',far:'IM2703',meta:{as_of:'2026-11-05'}},revision:0,controls:()=>null}));
@@ -788,7 +799,7 @@ test('stock-bond overlay keeps two raw index levels, shared dates and missing ob
   assert.equal(anchored.axisRatio,2);assert.equal(anchored.axisOffset,-500);
   assert.equal(comparisonView({assets:data.assets,series:points.slice(0,2)}).axisRatio,4);
   assert.equal(option.yAxis[1].axisLabel.color,'#a48b59');assert.equal(option.yAxis[1].splitLine.show,false);
-  assert.match(option.tooltip.formatter([{value:5100,seriesName:'沪深300全收益',axisValue:'2026-09-02'}]),/5,100/);
+  assert.match(option.tooltip.formatter([{value:5100,seriesName:'沪深300全收益',axisValue:'2026-09-02'}]),/5100/);
   renderToStaticMarkup(React.createElement(module.exports.ContextChart,{data:anchored,lines:anchored.lines,dualAxis:true}));
   draws.pop()({setOption:o=>{option=o;}});
   for(const p of anchored.anchors)assert.ok(Math.abs(position(p.stock,option.yAxis[0])-position(p.fund,option.yAxis[1]))<1e-12);
@@ -810,7 +821,7 @@ test('cycle valuation reuses line chart, preserves gaps and shows valuation with
  assert.deepEqual(option.series[2].markPoint.data[0].coord,[0,72]);
  assert.equal(option.yAxis.min({min:100,max:200}),94);assert.equal(option.yAxis.max({min:100,max:200}),206);
  assert.equal(option.series[0].lineStyle.width,2.6);assert.equal(option.dataZoom[0].start,0);
- assert.equal(option.dataZoom[0].end,100);assert.equal(option.yAxis.axisLabel.formatter(1234.56),'1,235');
+ assert.equal(option.dataZoom[0].end,100);assert.equal(option.yAxis.axisLabel.formatter(1234.56),'1235');
  assert.match(source,/key:'deep'.*color:'#b64d49'/);
  assert.match(option.tooltip.formatter([{seriesName:'指数点位',value:100,dataIndex:0,axisValue:'2020-01-01'}]),/PE\(TTM\)：10/);
  assert.doesNotMatch(option.tooltip.formatter([{seriesName:'指数点位',value:110,dataIndex:1,axisValue:'2020-01-02'},{seriesName:'低估参考',value:null,dataIndex:1}]),/低估参考|PE|—/);
@@ -820,4 +831,18 @@ test('cycle valuation reuses line chart, preserves gaps and shows valuation with
  assert.deepEqual(view.series[1],{trade_date:'2020-01-02',close:110,value:null,lower:null,deep:null,upper:null});
  assert.equal(module.exports.valuationView({}),null);
  assert.match(source,/ContextChart data=\{valuation\}.*zoomGroup=\{zoomGroup\}/);
+});
+
+
+test('price formatting is ungrouped without changing quantity grouping or decimal precision',()=>{
+ for(const value of [0,-12345.678,1234567.89,'12345.60'])assert.equal(formatPrice(value),Number(value).toLocaleString('zh-CN',{useGrouping:false,maximumFractionDigits:2}));
+ for(const value of [null,undefined,'',NaN,Infinity])assert.equal(formatPrice(value),'—');
+ assert.equal(formatPrice(12345.6,1,1),'12345.6');assert.equal(formatPrice(12345,1,1),'12345.0');
+ assert.equal(sharedRequire('./src/intraday-live.js').formatNumber(1234567,0),'1,234,567');
+ const drawsBefore=chartDraws.length;
+ renderToStaticMarkup(React.createElement(BasisPrices,{rows:[{trade_date:'2026-11-06',reference_price:12345.67,futures_price:12300.6,basis_ratio:.00365}],symbol:'IM2612',indexName:'中证1000',metric:'basis_ratio'}));
+ let option;chartDraws[drawsBefore]({setOption:o=>option=o});
+ assert.equal(option.yAxis[0].axisLabel.formatter(12345.67),'12345.67');
+ const text=option.tooltip.formatter([{seriesName:'中证1000',value:12345.67,dataIndex:0,axisValue:'2026-11-06'},{seriesName:'基差率',value:.365,dataIndex:0}]);
+ assert.match(text,/12345.67/);assert.match(text,/0.37%/);assert.doesNotMatch(text,/12,345/);
 });

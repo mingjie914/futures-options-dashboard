@@ -1,6 +1,6 @@
-import { useChart, usePreference, useResource } from '../../../frontend/src/charts.js';
+import { useChart, usePreference, useResource, formatPrice } from '../../../frontend/src/charts.js';
 import {useRef} from 'react';
-const fmt=v=>v==null?'—':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:2});
+const fmt=v=>formatPrice(v);
 
 export default function SpreadPanel({data,revision,controls,beforeChart}) {
  const [span,setSpan]=usePreference('futures.spread.span.default','3m'),[ma,setMa]=usePreference('futures.spread.ma',false),[legs,setLegs]=usePreference('futures.spread.legs',false),[rank,setRank]=usePreference('futures.spread.rank',false);

@@ -1,7 +1,7 @@
 import './SpreadMatrix.css';
 import {useMemo} from 'react';
-const decimal=new Intl.NumberFormat('zh-CN',{maximumFractionDigits:2});
-const fmt=v=>v==null?'—':decimal.format(Number(v));
+import {formatPrice} from './charts.js';
+const fmt=v=>formatPrice(v);
 
 export function spreadMatrix(contracts, asOf, terms) {
  const nodes=contracts.filter(c=>c.trade_date===asOf&&/^[A-Z]+\d{4}$/.test(c.symbol)&&Number(c.symbol.slice(-2))>=1&&Number(c.symbol.slice(-2))<=12).sort((a,b)=>a.symbol.localeCompare(b.symbol));

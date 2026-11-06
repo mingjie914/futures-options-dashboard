@@ -10,7 +10,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import styles from "./dashboard.module.css";
-import { RefreshButton } from "../charts.js";
+import { RefreshButton, formatPrice as priceFormat } from "../charts.js";
 import { defaultAdapter as adapter, marketGroups } from "./adapter";
 import { usePreference, selectedProduct, rememberProduct } from "../preferences.js";
 import type {
@@ -909,7 +909,7 @@ function TermChart({ contracts, productLabel }: { contracts: TermContractRow[]; 
   const positions = contracts.flatMap(c => c.netPosition == null ? [] : [c.netPosition]);
   const total = sumSignedValues(positions);
   const prices = contracts.flatMap((contract) => contract.closePrice == null ? [] : [contract.closePrice]);
-  const formatPrice = (price: number) => price.toLocaleString("zh-CN", { maximumFractionDigits: 3 });
+  const formatPrice = (price: number) => priceFormat(price,3);
   const priceMin = prices.length ? Math.min(...prices) : 0;
   const priceMax = prices.length ? Math.max(...prices) : 0;
   const pricePadding = Math.max((priceMax - priceMin) * 0.1, priceMax * 0.001, 0.01);

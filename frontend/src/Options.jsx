@@ -1,6 +1,6 @@
 import { conditionalFetch as fetch } from './transport.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useChart, Metric, usePreference, RefreshButton, axisTooltip } from './charts.js';
+import { useChart, Metric, usePreference, RefreshButton, axisTooltip, formatPrice as price } from './charts.js';
 import './options.css';
 import SurfaceComparison, { IvHistory } from './SurfaceComparison.jsx';
 import { holdingRows, putCallRatio } from './holdings.js';
@@ -33,11 +33,12 @@ function toNumber(value) {
 }
 
 const numberFormats=new Map();
-function formatNumber(value,digits=0) {
+function formatNumber(value,digits=0,useGrouping=true) {
   const number=toNumber(value);
   if(number===null)return MISSING;
-  if(!numberFormats.has(digits))numberFormats.set(digits,new Intl.NumberFormat('en-US',{minimumFractionDigits:digits,maximumFractionDigits:digits}));
-  return numberFormats.get(digits).format(number);
+  const key=digits+':'+useGrouping;
+  if(!numberFormats.has(key))numberFormats.set(key,new Intl.NumberFormat('en-US',{minimumFractionDigits:digits,maximumFractionDigits:digits,useGrouping}));
+  return numberFormats.get(key).format(number);
 }
 
 function formatSigned(value, digits = 0) {
@@ -47,16 +48,16 @@ function formatSigned(value, digits = 0) {
 }
 
 function formatPrice(value, digits = 1) {
-  return formatNumber(value, digits);
+  return price(value, digits, digits);
 }
 
 function formatIv(value) {
   const number = toNumber(value);
-  return number === null ? MISSING : `${formatNumber(number * 100, 1)}%`;
+  return number === null ? MISSING : `${formatNumber(number * 100, 1, false)}%`;
 }
 
 function formatDelta(value) {
-  return formatNumber(value, 2);
+  return formatNumber(value, 2, false);
 }
 
 function formatDate(value) {
@@ -205,7 +206,7 @@ function MonthStrip({ months, selectedMonthId, onSelect }) {
             type="button"
           >
             <strong><ColoredCode code={month.code || `MO${String(month.id).slice(-4)}`} color={color} /></strong>
-            <em>截面剩余 {formatNumber(month.calendar_days)} 自然日</em>
+            <em>截面剩余 {formatNumber(month.calendar_days,0,false)} 自然日</em>
 
           </button>
         );
@@ -246,7 +247,7 @@ function VolatilityTab({ rows, month, months, spot, snapshot }) {
         formatter: (params) => {
           const items = Array.isArray(params) ? params : [params];
           const strike = items[0]?.value?.[0];
-          return axisTooltip(items,v=>formatNumber(v,1)+'%',`执行价 ${formatNumber(strike)}`);
+          return axisTooltip(items,v=>formatNumber(v,1,false)+'%',`执行价 ${formatPrice(strike,0)}`);
         },
       },
       xAxis: {
@@ -257,7 +258,7 @@ function VolatilityTab({ rows, month, months, spot, snapshot }) {
         name: '执行价',
         nameLocation: 'middle',
         nameGap: 28,
-        axisLabel: { color: '#505c6b', fontSize: 11 },
+        axisLabel: { color: '#505c6b', fontSize: 11, formatter: value=>formatPrice(value,0) },
         axisLine: { lineStyle: { color: '#eef0f3' } },
         splitLine: { lineStyle: { color: '#eef0f3' } },
       },
@@ -308,7 +309,7 @@ function VolatilityTab({ rows, month, months, spot, snapshot }) {
               <tbody>{nearestRows.map((row) => (
                 <tr className={nearestSet.has(toNumber(row.strike)) ? 'options-near-row' : ''} key={`${row.code}-${row.cp}`}>
                   <td><ColoredCode code={row.code} color={monthColor(months, row.month)} /></td>
-                  <td>{formatNumber(row.strike)}</td>
+                  <td>{formatPrice(row.strike,0)}</td>
                   <td>{row.cp === 'C' ? 'Call' : 'Put'}</td>
                   <td>{formatIv(row.iv)}</td>
                   <td>{formatIv(row.iv_bid)}</td>
@@ -415,7 +416,7 @@ function HoldingTab({ snapshot, rows, month, months, spot, metric, onMetric, onO
           <button className="options-plain-button" onClick={onOpenChain} type="button">打开期权链</button>
         </div>
       </div>
-      <div className="options-pcr" aria-label="所选月份 PCR">{pcr.map((value,index)=><Metric key={index} label={(index?'成交':'持仓')+' PCR'+(snapshot.test_only?' · 样本':'')} value={formatNumber(value.ratio,2)} hint={'所选月份 Put合计 ÷ Call合计；覆盖 '+value.covered+'/'+value.total+' 合约'+(value.reason?'；'+value.reason:'')}/>)}</div>
+      <div className="options-pcr" aria-label="所选月份 PCR">{pcr.map((value,index)=><Metric key={index} label={(index?'成交':'持仓')+' PCR'+(snapshot.test_only?' · 样本':'')} value={formatNumber(value.ratio,2,false)} hint={'所选月份 Put合计 ÷ Call合计；覆盖 '+value.covered+'/'+value.total+' 合约'+(value.reason?'；'+value.reason:'')}/>)}</div>
       <div className="options-analysis-tools"><label>变化基准<select value={basis} onChange={e => setBasis(e.target.value)}><option value="daily">前一交易日</option><option value="snapshot" disabled={!comparable}>同日上一截面</option></select></label><span className="options-muted">{basis === 'snapshot' ? (previousMessage || basisLabel) : ''}</span></div>
 
       <div className="options-holding-layout">
@@ -433,7 +434,7 @@ function HoldingTab({ snapshot, rows, month, months, spot, metric, onMetric, onO
             return (
               <div className={`options-bar-row ${nearSet.has(strike) ? 'options-near-row' : ''}`} key={strike}>
                 <div className="options-bar-cell options-bar-cell-left"><HoldingBar row={group.C} side="call" metric={metric} scale={scale} /></div>
-                <div className="options-strike-label">{formatNumber(strike)}</div>
+                <div className="options-strike-label">{formatPrice(strike,0)}</div>
                 <div className="options-bar-cell"><HoldingBar row={group.P} side="put" metric={metric} scale={scale} /></div>
               </div>
             );
@@ -511,7 +512,7 @@ function ChainTab({ rows, month, months, spot }) {
                   <ChainCell formatter={formatDelta} value={group.C?.delta} />
                   <ChainCell formatter={formatPrice} title={group.C?.code} value={group.C?.ask} />
                   <ChainCell formatter={formatPrice} title={group.C?.code} value={group.C?.bid} />
-                  <td className="options-strike-cell">{formatNumber(strike)}</td>
+                  <td className="options-strike-cell">{formatPrice(strike,0)}</td>
                   <ChainCell formatter={formatPrice} title={group.P?.code} value={group.P?.bid} />
                   <ChainCell formatter={formatPrice} title={group.P?.code} value={group.P?.ask} />
                   <ChainCell formatter={formatDelta} value={group.P?.delta} />

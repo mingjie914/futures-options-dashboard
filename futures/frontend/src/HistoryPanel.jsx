@@ -1,4 +1,4 @@
-import { useChart, ChartFrame, usePreference, observedRows, useResource } from '../../../frontend/src/charts.js';
+import { useChart, ChartFrame, usePreference, observedRows, useResource, formatPrice } from '../../../frontend/src/charts.js';
 import {useMemo, useRef} from 'react';
 import {lineSegments, tooltipRows, seasonalSelection, inventoryHistory, holdingLeaders} from './lineSegments.mjs';
 
@@ -31,7 +31,7 @@ export function InventoryPanel({product,end,revision,controls}) {
   return <><div className="filters page-filters">{controls(selection,last?.date||data?.as_of,busy)}</div>
     {error?<p className="error" role="alert">{error}</p>:!data?<p className="empty" role="status">读取库存仓单…</p>:!history.rows.length?<p className="empty">{product} 暂无所选日期前的库存仓单数据</p>:<>
       <section className="panel history-panel" aria-busy={busy}><div className="filters history-toolbar"><h2 className="section-label">{inventoryLabel(series)}季节性 / {series.unit}</h2></div>
-        <HistoryChart result={{...history,mode:'seasonal',metric:'price',unit:series.unit,accessible_label:series.name+'历年季节性'}} showAllYears height={inventoryHeight}/>
+        <HistoryChart result={{...history,mode:'seasonal',metric:'price',quantity:true,unit:series.unit,accessible_label:series.name+'历年季节性'}} showAllYears height={inventoryHeight}/>
       </section>
       <section className="panel" aria-busy={busy}><h2>走势与增减 / {series.unit}</h2><InventoryTrend rows={history.rows} unit={series.unit} name={inventoryLabel(series)}/></section>
       {data.preview&&<p className="sub">预览样本</p>}
@@ -46,7 +46,7 @@ export function HistoryChart({result, heatmap=false, showAllYears=false, height=
     const share = result.metric === 'position_share' && result.mode !== 'spread';
     const integer = !share && result.metric !== 'price' && result.mode !== 'spread';
     const unit = share || result.unit === '原始报价单位' ? '' : result.unit || (integer ? '手' : '');
-    const display = value => value == null ? '—' : Number(value * (share ? 100 : 1)).toLocaleString('zh-CN', {maximumFractionDigits: integer ? 0 : 2}) + (share ? '%' : '');
+    const display = value => value == null ? '—' : Number(value * (share ? 100 : 1)).toLocaleString('zh-CN', {maximumFractionDigits: integer ? 0 : 2,useGrouping:integer||!!result.quantity}) + (share ? '%' : '');
     const axisLabel = value => String(value).replace(/^Y[+-]\d+\s+/, '');
     const byLine = heatmap ? [] : result.lines.map(line => new Map(line.points.map(point => [point.x, point])));
     const segments = heatmap ? [] : lineSegments(result.axis, result.lines);
@@ -86,7 +86,7 @@ export function HistoryChart({result, heatmap=false, showAllYears=false, height=
         if(!rows.length)return '';
         return [axisLabel(heading), ...rows.map(({name, marker, point}) =>
           `${marker} ${point.trade_date===heading?name:name===point.trade_date?.slice(0,4)?point.trade_date:name+' · '+point.trade_date}${point.symbol?' · '+point.symbol:''}：${display(point.value)}${unit ? ' '+unit : ''}` +
-          (result.mode === 'spread' ? `（近 ${display(point.near_price)} / 远 ${display(point.far_price)}）` : '')),
+          (result.mode === 'spread' ? `（近 ${formatPrice(point.near_price)} / 远 ${formatPrice(point.far_price)}）` : '')),
           ].join('\n');
       }},
       yAxis: {type: 'value', scale: true, axisLabel: {formatter: value=>display(value)+(unit==='%'&&!share?'%':'')}, splitLine: {lineStyle: {color: '#eef0f3'}}},

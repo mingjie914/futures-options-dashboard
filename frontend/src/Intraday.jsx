@@ -2,11 +2,12 @@ import './intraday.css';
 import {memo,useEffect,useMemo,useRef,useState} from 'react';
 import {basisRows,formatNumber as number,liveMatrix,liveOnline,openLive,optionSeries} from './intraday-live.js';
 import {usePreference} from './preferences.js';
+import {formatPrice as price} from './charts.js';
 import {SpreadMatrix} from './SpreadMatrix.jsx';
 
 const BASE=import.meta.env.VITE_INTRADAY_BASE?.replace(/\/$/,'');
 import OptionCurves from './IntradayOptions.jsx';
-const percent=value=>number(value)+(Number.isFinite(value)?'%':'');
+const percent=value=>price(value)+(Number.isFinite(value)?'%':'');
 const products={IO:'沪深300',HO:'上证50',MO:'中证1000'};
 const units={'CNY/g':'元/克','CNY/kg':'元/千克','CNY/t':'元/吨','CNY/bbl':'元/桶'};
 const sameGroup=(a,b)=>a.group===b.group&&a.group.codes.every(code=>a.quotes.get(code)===b.quotes.get(code));
@@ -19,8 +20,8 @@ const CommodityMatrix=memo(function CommodityMatrix({group:{code,metadata,codes}
 const IndexBasis=memo(function IndexBasis({group:{code,metadata},quotes}) {
   const meta=metadata[code],spot=quotes.get(code),rows=basisRows(code,metadata,quotes),rates=rows.map(r=>r.annual).filter(Number.isFinite),lo=Math.min(0,...rates),hi=Math.max(0,...rates),range=hi-lo||1;
   const matrix=liveMatrix(metadata,quotes,code);
-  return <section className="intraday-product"><div className="intraday-product-heading"><h2>{meta.name||code}</h2><strong>{number(spot?.last)}</strong></div><div className="intraday-pair"><SpreadMatrix data={matrix} title={null}/><div>
-    {rows.length?<div style={{overflowX:'auto'}}><table className="intraday-basis"><colgroup>{[60,12,18,12,14,15,17,12].map((width,i)=><col key={i} className={i===0?'intraday-contract':undefined} style={{width:i===0?width:width+'%'}}/>)}</colgroup><thead><tr>{['合约','最新价','年化基差','基差','绝对收益','日均','持仓量','到期天数'].map((label,i)=><th key={label} title={i===4?'万元/手':i===5?'元/手/日':undefined} className={i===0?'intraday-contract':undefined}>{label}</th>)}</tr></thead><tbody>{rows.map(r=><tr key={r.contract}><th scope="row" className="intraday-contract">{r.contract.split('.')[0]}</th><td>{number(r.last)}</td><td style={{position:'relative'}}>{Number.isFinite(r.annual)&&<span aria-hidden="true" style={{position:'absolute',insetBlock:7,left:(Math.min(0,r.annual)-lo)/range*100+'%',width:Math.abs(r.annual)/range*100+'%',background:'#4e7fb947',borderRadius:2}}/>}<span style={{position:'relative'}}>{percent(r.annual)}</span></td><td>{number(r.basis)}</td><td>{number(r.absolute,1)}</td><td>{number(r.daily,1)}</td><td>{number(r.oi,0)}</td><td>{number(r.days,0)}</td></tr>)}</tbody></table></div>:<p className="sub">股指期货待接入</p>}
+  return <section className="intraday-product"><div className="intraday-product-heading"><h2>{meta.name||code}</h2><strong>{price(spot?.last)}</strong></div><div className="intraday-pair"><SpreadMatrix data={matrix} title={null}/><div>
+    {rows.length?<div style={{overflowX:'auto'}}><table className="intraday-basis"><colgroup>{[60,12,18,12,14,15,17,12].map((width,i)=><col key={i} className={i===0?'intraday-contract':undefined} style={{width:i===0?width:width+'%'}}/>)}</colgroup><thead><tr>{['合约','最新价','年化基差','基差','绝对收益','日均','持仓量','到期天数'].map((label,i)=><th key={label} title={i===4?'万元/手':i===5?'元/手/日':undefined} className={i===0?'intraday-contract':undefined}>{label}</th>)}</tr></thead><tbody>{rows.map(r=><tr key={r.contract}><th scope="row" className="intraday-contract">{r.contract.split('.')[0]}</th><td>{price(r.last)}</td><td style={{position:'relative'}}>{Number.isFinite(r.annual)&&<span aria-hidden="true" style={{position:'absolute',insetBlock:7,left:(Math.min(0,r.annual)-lo)/range*100+'%',width:Math.abs(r.annual)/range*100+'%',background:'#4e7fb947',borderRadius:2}}/>}<span style={{position:'relative'}}>{percent(r.annual)}</span></td><td>{price(r.basis)}</td><td>{price(r.absolute,1,1)}</td><td>{price(r.daily,1,1)}</td><td>{number(r.oi,0)}</td><td>{price(r.days,0)}</td></tr>)}</tbody></table></div>:<p className="sub">股指期货待接入</p>}
   </div></div></section>;
 },sameGroup);
 

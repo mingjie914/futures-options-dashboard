@@ -1,5 +1,5 @@
 import {memo,useMemo,useRef} from 'react';
-import {ChartFrame,useChart,axisTooltip} from './charts.js';
+import {ChartFrame,useChart,axisTooltip,formatPrice} from './charts.js';
 import {formatNumber as number,intradayRows,optionRows,optionSmile} from './intraday-live.js';
 
 const tooltip={trigger:'axis',confine:true,renderMode:'richText',borderWidth:0,shadowBlur:0};
@@ -16,13 +16,13 @@ const IntradayTime=memo(function IntradayTime({data,previousClose}) {
     const prices=rows.map(row=>row.future_last).filter(Number.isFinite);
     const morning=rows.findLast(p=>p.time>='11:29'&&p.time<='11:30'&&Number.isFinite(p.future_last)),afternoon=rows.find(p=>p.time>='13:00'&&p.time<='13:01'&&Number.isFinite(p.future_last));
     chart.setOption({animation:false,grid:[{left:12,right:65,top:18,bottom:volume?'24%':28},...(volume?[{left:12,right:65,top:'80%',bottom:28}]:[])],axisPointer:{link:[{xAxisIndex:'all'}]},
-      tooltip:{...tooltip,axisPointer:{type:'cross',snap:true},formatter:params=>{const text=axisTooltip(params,(v,p)=>number(v)+(p.seriesName==='平值IV'?'%':p.seriesName==='成交量'?' 手':baseline?' ('+number((v/previousClose-1)*100)+'%)':''),data.trade_date+' '+params[0]?.axisValue);return text+(text&&Number.isFinite(rows[params[0]?.dataIndex]?.strike)?'\n平值 '+number(rows[params[0].dataIndex].strike):'');}},
+      tooltip:{...tooltip,axisPointer:{type:'cross',snap:true},formatter:params=>{const text=axisTooltip(params,(v,p)=>(p.seriesName==='成交量'?number(v):formatPrice(v))+(p.seriesName==='平值IV'?'%':p.seriesName==='成交量'?' 手':baseline?' ('+formatPrice((v/previousClose-1)*100)+'%)':''),data.trade_date+' '+params[0]?.axisValue);return text+(text&&Number.isFinite(rows[params[0]?.dataIndex]?.strike)?'\n平值 '+formatPrice(rows[params[0].dataIndex].strike):'');}},
       xAxis:(volume?[0,1]:[0]).map(gridIndex=>({type:'category',gridIndex,boundaryGap:false,data:rows.map(p=>p.time),axisTick:{show:false},axisLine:{show:!volume||gridIndex===1},axisPointer:{label:{show:!volume||gridIndex===1}},axisLabel:{show:!volume||gridIndex===1,interval:(_i,time)=>['09:30','10:30','11:30','14:00','15:00'].includes(time),formatter:time=>time==='11:30'?'11:30/13:00':time,fontSize:12,color:'#455161'}})),
-      yAxis:[{type:'value',scale:true,position:'right',show:price,splitNumber:5,axisLabel:{color:'#455161',formatter:v=>number(v)},axisPointer:{label:{formatter:p=>number(p.value)}}},{type:'value',scale:true,position:'right',show:!price&&iv,min:v=>(v.min+v.max)/2-Math.max(1,v.max-v.min)*.6,max:v=>(v.min+v.max)/2+Math.max(1,v.max-v.min)*.6,axisLabel:{color:'#455161',formatter:v=>number(v)+'%'},axisPointer:{show:false},splitLine:{show:false}},...(volume?[{type:'value',gridIndex:1,show:false,min:0,max:v=>Math.max(1,v.max)*1.15,axisPointer:{show:false},splitLine:{show:false}}]:[])],
+      yAxis:[{type:'value',scale:true,position:'right',show:price,splitNumber:5,axisLabel:{color:'#455161',formatter:v=>formatPrice(v)},axisPointer:{label:{formatter:p=>formatPrice(p.value)}}},{type:'value',scale:true,position:'right',show:!price&&iv,min:v=>(v.min+v.max)/2-Math.max(1,v.max-v.min)*.6,max:v=>(v.min+v.max)/2+Math.max(1,v.max-v.min)*.6,axisLabel:{color:'#455161',formatter:v=>formatPrice(v)+'%'},axisPointer:{show:false},splitLine:{show:false}},...(volume?[{type:'value',gridIndex:1,show:false,min:0,max:v=>Math.max(1,v.max)*1.15,axisPointer:{show:false},splitLine:{show:false}}]:[])],
       visualMap:baseline?[{type:'piecewise',show:false,dimension:1,seriesIndex:0,pieces:[{min:Math.min(previousClose,...prices)-1,max:previousClose,color:'#278570'},{min:previousClose,max:Math.max(previousClose,...prices)+1,color:'#bd514d'}]}]:[],
       dataZoom:[{type:'inside',xAxisIndex:volume?[0,1]:[0],filterMode:'none',...(reset?{start:0,end:100}:{})}],
       series:[...fields.map(([key,name,color])=>{
-        const iv=key==='atm_iv',points=rows.map(row=>[row.time,value(row,key)]),last=points.findLast(([,v])=>Number.isFinite(v)),latest=last?.[1],label=number(latest)+(iv?'%':''),ink=iv?color:baseline?(latest>=previousClose?'#bd514d':'#278570'):color;
+        const iv=key==='atm_iv',points=rows.map(row=>[row.time,value(row,key)]),last=points.findLast(([,v])=>Number.isFinite(v)),latest=last?.[1],label=formatPrice(latest)+(iv?'%':''),ink=iv?color:baseline?(latest>=previousClose?'#bd514d':'#278570'):color;
         return {id:key,name,type:'line',showSymbol:false,connectNulls:false,yAxisIndex:iv?1:0,lineStyle:{width:2},itemStyle:{color},...(!iv?{areaStyle:{opacity:.045,origin:baseline?previousClose:'start'}}:{}),data:points,
           markPoint:{silent:true,symbol:'circle',symbolSize:5,itemStyle:{color:ink},label:{show:false},data:last?[{coord:last}]:[]},
           markLine:{silent:true,symbol:'none',lineStyle:{color:iv?'transparent':ink+'55',type:'dotted'},label:{show:true,position:'end',formatter:label,color:'#fff',backgroundColor:ink,padding:[2,4],fontSize:11},data:[...(last?[{yAxis:latest}]:[]),...(!iv&&baseline?[{yAxis:previousClose,label:{show:false},lineStyle:{color:'#aeb5bf',type:'dashed'}}]:[]),...(!iv&&morning&&afternoon?[[{coord:[morning.time,morning.future_last],label:{show:false},lineStyle:{color:'#7b8592',type:'dashed',width:1.3}},{coord:[afternoon.time,afternoon.future_last]}]]:[])]}};
@@ -38,11 +38,11 @@ export default memo(function IntradayOptions({catalog,quotes,series,intraday}) {
   const spot=quotes.get(meta?.underlying)?.last;
   useChart(ref,chart=>chart.setOption({animation:false,
     legend:{top:0,left:'center',type:'scroll',textStyle:{color:'#455161'}},grid:{left:58,right:62,top:48,bottom:48},
-    tooltip:{...tooltip,formatter:params=>axisTooltip(params,(v,p)=>number(v)+(p.seriesName==='隐波'?'%':''),'行权价 '+number(params[0]?.axisValue))},
-    xAxis:{type:'value',scale:true,axisLabel:{hideOverlap:true,color:'#455161'}},
+    tooltip:{...tooltip,formatter:params=>axisTooltip(params,(v,p)=>(p.seriesName==='隐波'?formatPrice(v):number(v))+(p.seriesName==='隐波'?'%':''),'行权价 '+formatPrice(params[0]?.axisValue))},
+    xAxis:{type:'value',scale:true,axisLabel:{hideOverlap:true,color:'#455161',formatter:v=>formatPrice(v)}},
     yAxis:[{type:'value',scale:true,axisLabel:{color:'#455161',formatter:v=>v+'%'},splitLine:{lineStyle:{color:'#eef0f3'}}},{type:'value',min:0,axisLabel:{color:'#455161'},splitLine:{show:false}}],
     dataZoom:[{type:'inside'},{type:'slider',height:18,bottom:4,showDataShadow:false,borderColor:'transparent',backgroundColor:'transparent',fillerColor:'#4e7fb918'}],
-    series:[{id:'iv',name:'隐波',type:'line',showSymbol:true,symbolSize:4,connectNulls:false,itemStyle:{color:'#3d70ad'},lineStyle:{width:2},z:4,data:optionSmile(rows,spot).map(([k,iv])=>[k,iv===null?null:iv*100]),markLine:{silent:true,symbol:'none',label:{formatter:'现货 '+number(spot)},lineStyle:{color:'#505c6b',type:'dashed'},data:Number.isFinite(spot)?[{xAxis:spot}]:[]}},
+    series:[{id:'iv',name:'隐波',type:'line',showSymbol:true,symbolSize:4,connectNulls:false,itemStyle:{color:'#3d70ad'},lineStyle:{width:2},z:4,data:optionSmile(rows,spot).map(([k,iv])=>[k,iv===null?null:iv*100]),markLine:{silent:true,symbol:'none',label:{formatter:'现货 '+formatPrice(spot)},lineStyle:{color:'#505c6b',type:'dashed'},data:Number.isFinite(spot)?[{xAxis:spot}]:[]}},
       ...['C','P'].map((cp,i)=>({id:cp+'oi',name:(i?'认沽':'认购')+'持仓',type:'bar',yAxisIndex:1,barMaxWidth:8,itemStyle:{color:i?'#2b816780':'#b64d4980'},data:rows.map(r=>[r.strike,Number.isFinite(r[cp]?.oi)?r[cp].oi:null])}))]
   },{replaceMerge:['series'],lazyUpdate:true}),[catalog,series,spot,...rows.flatMap(r=>[r.strike,r.C?.iv,r.C?.oi,r.P?.iv,r.P?.oi])]);
   const ready=rows.some(r=>['C','P'].some(cp=>Number.isFinite(r[cp]?.iv)||Number.isFinite(r[cp]?.oi)));
