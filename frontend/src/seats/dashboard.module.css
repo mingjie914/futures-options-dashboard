@@ -243,6 +243,10 @@
   gap: 32px;
 }
 
+.viewPanel[aria-labelledby="dashboard-tab-market"] .pageStack{ gap: 12px; }
+
+.viewPanel[aria-labelledby="dashboard-tab-market"] .panelHeader{ min-height: 0; padding-block: 6px; }
+
 .productSection{ display: grid; gap: 12px; min-width: 0; }
 
 .productSection .twoColumnGrid .panelHeader{ min-height: 0; padding-block: 6px; }
@@ -481,8 +485,8 @@
 .panelFootnote{
   display: flex;
   align-items: center;
-  min-height: 38px;
-  padding: 8px var(--panel-inset);
+  min-height: 28px;
+  padding: 4px var(--panel-inset);
   color: var(--text-muted);
   font-size: 13px;
   gap: 7px;
@@ -595,7 +599,7 @@
   display: grid;
   align-items: center;
   grid-template-columns: max-content repeat(var(--signal-count), minmax(0, 1fr));
-  min-height: 74px;
+  min-height: 48px;
   padding: 0 var(--panel-inset);
 
   gap: 14px;
@@ -1433,7 +1437,7 @@ to{ opacity: 0.9; }
 .marketGroups{
   display: grid;
   padding: 0 var(--panel-inset) 12px;
-  gap: 16px;
+  gap: 12px;
 }
 
 .marketGroupTitle{
