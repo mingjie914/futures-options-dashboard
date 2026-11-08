@@ -53,7 +53,7 @@ export default function Shell() {
   const closeMenu = () => { menu.current.open=false; pinned.current=false; };
   const lastView = useRef({});
   useEffect(() => {
-    const back = () => setActive(currentModule());
+    const back = () => { const next=currentModule();setActive(next);if(next==='observe')setEntry(value=>value+1); };
     const outside = event => { if (!menu.current.contains(event.target)) closeMenu(); };
     window.addEventListener('popstate', back);
     document.addEventListener('pointerdown', outside);

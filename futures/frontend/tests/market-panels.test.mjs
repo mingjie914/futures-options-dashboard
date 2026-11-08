@@ -881,7 +881,7 @@ test('main observation link resets a restored or currently active child view wit
  const previous=Object.fromEntries(['location','history','window','document'].map(k=>[k,globalThis[k]]));t.after(()=>Object.assign(globalThis,previous));
  globalThis.location={pathname:'/observe/',search:'?view=stock',origin:'http://localhost'};
  globalThis.history={pushState:(_a,_b,url)=>{location.pathname=url.pathname;location.search=url.search;}};
- globalThis.window={addEventListener(){},removeEventListener(){},scrollTo(){}};
+ const listeners={};globalThis.window={addEventListener:(name,fn)=>listeners[name]=fn,removeEventListener(){},scrollTo(){}};
  globalThis.document={addEventListener(){},removeEventListener(){},getElementById:()=>null};
  const observe=()=>null,h=await sharedHooks({'./transport.js':{warmNavigation:()=>()=>{}},'./version-check.js':{watchVersion:()=>()=>{}},'./preferences.js':{selectedProduct:()=>null},'./Observe.jsx':{default:observe},'./Intraday.jsx':{default:()=>null}},'Shell.jsx',true);
  const nodes=n=>!n||typeof n!=='object'?[]:[n,...React.Children.toArray(n.props?.children).flatMap(nodes)];
@@ -890,5 +890,6 @@ test('main observation link resets a restored or currently active child view wit
  const before=nodes(h.render('default')).find(n=>n.type===observe).key;
  click('observe');assert.equal(location.search,'');assert.notEqual(nodes(h.render('default')).find(n=>n.type===observe).key,before);
  location.search='?view=funds';click('intraday');await settleHooks();h.render('default');click('observe');await settleHooks();
- assert.equal(location.pathname,'/observe/');assert.equal(location.search,'');h.unmount();
+ assert.equal(location.pathname,'/observe/');assert.equal(location.search,'');
+ const key=nodes(h.render('default')).find(n=>n.type===observe).key;location.search='?view=stock';listeners.popstate();assert.notEqual(nodes(h.render('default')).find(n=>n.type===observe).key,key);h.unmount();
 });
