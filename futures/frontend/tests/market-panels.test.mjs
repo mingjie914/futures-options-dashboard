@@ -891,5 +891,6 @@ test('main observation link resets a restored or currently active child view wit
  click('observe');assert.equal(location.search,'');assert.notEqual(nodes(h.render('default')).find(n=>n.type===observe).key,before);
  location.search='?view=funds';click('intraday');await settleHooks();h.render('default');click('observe');await settleHooks();
  assert.equal(location.pathname,'/observe/');assert.equal(location.search,'');
+ h.render('default');await settleHooks();
  const key=nodes(h.render('default')).find(n=>n.type===observe).key;location.search='?view=stock';listeners.popstate();assert.notEqual(nodes(h.render('default')).find(n=>n.type===observe).key,key);h.unmount();
 });
