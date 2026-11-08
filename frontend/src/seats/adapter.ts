@@ -453,10 +453,10 @@ function metricCards(metrics: ApiMetric[]): MetricCardData[] {
   return [
     { key: "f2", label: "净持仓比率", value: f2 ? (f2.f2_value! * 100).toFixed(1) : "不可用", unit: f2 ? "%" : undefined, note: "净持仓 ÷（多头 + 空头）", tone: f2 && f2.f2_value! >= 0 ? "positive" : "negative", status: f2 ? "ready" : "unavailable" },
     { key: "ratio", label: "多空比", value: metric.long_short_ratio?.toFixed(2) ?? "—", unit: metric.long_short_ratio == null ? undefined : "x", note: "多头持仓 ÷ 空头持仓", tone: "accent" },
-    { key: "long-cr5", label: "多头前五占比", value: metric.long_cr5 == null ? "—" : (metric.long_cr5 * 100).toFixed(1), unit: metric.long_cr5 == null ? undefined : "%", note: "前五席位多头持仓之和 ÷ 全部披露席位多头持仓", tone: "positive" },
-    { key: "short-cr5", label: "空头前五占比", value: metric.short_cr5 == null ? "—" : (metric.short_cr5 * 100).toFixed(1), unit: metric.short_cr5 == null ? undefined : "%", note: "前五席位空头持仓之和 ÷ 全部披露席位空头持仓", tone: "negative" },
+    { key: "long-cr5", label: "多头前五占比", value: metric.long_cr5 == null ? "—" : (metric.long_cr5 * 100).toFixed(1), unit: metric.long_cr5 == null ? undefined : "%", note: "多头前五 ÷ 多头披露合计", tone: "positive" },
+    { key: "short-cr5", label: "空头前五占比", value: metric.short_cr5 == null ? "—" : (metric.short_cr5 * 100).toFixed(1), unit: metric.short_cr5 == null ? undefined : "%", note: "空头前五 ÷ 空头披露合计", tone: "negative" },
     { key: "net", label: "净持仓", value: numberFormatter.format(metric.net_position), unit: "手", note: `当日净变化 ${metric.net_change >= 0 ? "+" : ""}${numberFormatter.format(metric.net_change)} 手`, tone: metric.net_position >= 0 ? "positive" : "negative" },
-    { key: "net-cr5", label: "净持仓前五占比", value: metric.net_cr5 == null ? "—" : (metric.net_cr5 * 100).toFixed(1), unit: metric.net_cr5 == null ? undefined : "%", note: "前五席位净持仓绝对值之和 ÷ 全部席位净持仓绝对值之和", tone: "gold" },
+    { key: "net-cr5", label: "净持仓前五占比", value: metric.net_cr5 == null ? "—" : (metric.net_cr5 * 100).toFixed(1), unit: metric.net_cr5 == null ? undefined : "%", note: "前五净持仓绝对值 ÷ 全部净持仓绝对值", tone: "gold" },
   ];
 }
 

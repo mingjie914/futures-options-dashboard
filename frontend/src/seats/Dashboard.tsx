@@ -308,7 +308,6 @@ export function Dashboard() {
             )}
           </div>
         )}
-        {loadState === "partial" && snapshot?.meta.notice && <p className={styles.dataNotice} role="status">{snapshot.meta.notice}</p>}
       </main>
 
       {selectedTag && <TagInspector tag={selectedTag} onClose={() => setSelectedTag(null)} />}
@@ -594,7 +593,7 @@ function MetricGrid({ metrics }: { metrics: MetricCardData[] }) {
     <section className={styles.metricGrid} aria-label="核心指标">
       {metrics.map((metric) => (
         <div className={`${styles.metricCard} ${toneClasses[metric.tone]}`} key={metric.key}>
-          <MetricLabel label={metric.label} note={metric.key === "net" ? "多头持仓 − 空头持仓；净变化为相邻交易日之差。" : metric.note} />
+          <MetricLabel label={metric.label} note={metric.key === "net" ? "多头 − 空头；日变动为较前日之差。" : metric.note} />
           <div className={styles.metricValue}>
             {metric.value}
             {metric.unit && <small>{metric.unit}</small>}
@@ -750,7 +749,7 @@ function SeatRankingPanel({
       <PanelHeader title={title} />
       <div className={styles.rankingScroll} tabIndex={0} aria-label={`${title}可滚动列表`}>
         <table className={styles.rankingTable}>
-          <thead><tr><th>#</th><th>席位</th><th data-tooltip="披露持仓，单位：手">持仓</th><th data-tooltip="较上一交易日增减，单位：手">日变动</th><th data-tooltip="该席位持仓 ÷ 同方向披露总持仓">占比</th><th>特点</th></tr></thead>
+          <thead><tr><th>#</th><th>席位</th><th data-tooltip="披露持仓（手）">持仓</th><th data-tooltip="较前日增减（手）">日变动</th><th data-tooltip="持仓 ÷ 同侧披露合计">占比</th><th>特点</th></tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.seatId}>
@@ -871,7 +870,7 @@ function MarketTreemap({ items, onProduct }: { items: DashboardSnapshot["treemap
           </section>
         ))}
       </div>
-      <div className={styles.treeLegend}><span><i className={styles.legendLong} />{interestMode ? "总持仓增加" : "净持仓增加"}</span><span><i className={styles.legendShort} />{interestMode ? "总持仓减少" : "净持仓减少"}</span><span><i className={styles.legendFlat} />不变或不可比</span><span data-tooltip="按全市场变化绝对值着色，幅度越大越深。">色深：全市场排名</span>{interestMode && items.some(item => item.interestContractsChanged) && <span>* 合约范围变动</span>}</div>
+      <div className={styles.treeLegend}><span><i className={styles.legendLong} />{interestMode ? "总持仓增加" : "净持仓增加"}</span><span><i className={styles.legendShort} />{interestMode ? "总持仓减少" : "净持仓减少"}</span><span><i className={styles.legendFlat} />不变或不可比</span></div>
     </section>
   );
 }
@@ -962,7 +961,7 @@ function OppositeSeatPanel({ rows, threshold, onSeat, onTag }: { rows: Dashboard
               <span>{row.productCode}</span>
             </div>
             <div className={styles.oppositeDirection} data-tooltip="近、远按到期顺序；多、空指净持仓方向。不据此认定套利或套保。"><span className={row.nearDirection === "多" ? styles.changePositive : styles.changeNegative}>{row.nearDirection}近 <small>{row.nearContractCode?.split(".")[0]}</small></span><span className={row.farDirection === "多" ? styles.changePositive : styles.changeNegative}>{row.farDirection}远 <small>{row.farContractCode?.split(".")[0]}</small></span></div>
-            <div className={styles.oppositeLegs}>{(row.legs ?? []).map((leg) => <span key={leg.contractCode}><b>{leg.label}</b><em className={leg.netPosition > 0 ? styles.changePositive : leg.netPosition < 0 ? styles.changeNegative : undefined}>{leg.netPosition > 0 ? "+" : ""}{formatNumber(leg.netPosition)}</em></span>)}<span className={styles.oppositeTotal}>展示腿净额合计 <b className={net != null && net > 0 ? styles.changePositive : net != null && net < 0 ? styles.changeNegative : undefined}>{net == null ? "—" : `${net > 0 ? "+" : ""}${formatNumber(net)}`}</b> 手</span></div>
+            <div className={styles.oppositeLegs}>{(row.legs ?? []).map((leg) => <span key={leg.contractCode}><b>{leg.label}</b><em className={leg.netPosition > 0 ? styles.changePositive : leg.netPosition < 0 ? styles.changeNegative : undefined}>{leg.netPosition > 0 ? "+" : ""}{formatNumber(leg.netPosition)}</em></span>)}<span className={styles.oppositeTotal}>合计 <b className={net != null && net > 0 ? styles.changePositive : net != null && net < 0 ? styles.changeNegative : undefined}>{net == null ? "—" : `${net > 0 ? "+" : ""}${formatNumber(net)}`}</b> 手</span></div>
             <div className={styles.rowTags}>{row.tags.map((tagItem) => <TagChip key={tagItem.name} tag={tagItem} compact onClick={onTag} />)}</div>
           </div>
         ); })}
@@ -989,12 +988,12 @@ function TermChangePanel({ rows, onSeat, onTag }: { rows: TermChangeRow[]; onSea
             <button className={styles.seatButton} type="button" onClick={() => onSeat(row.seatId)}>{row.seatName}</button>
             <div className={styles.termChangeBarTrack}><span className={row.netChange >= 0 ? styles.termChangeBarPositive : styles.termChangeBarNegative} style={{ width: `${Math.abs(row.netChange) / maxChange * 50}%` }} /></div>
             <strong className={row.netChange >= 0 ? styles.changePositive : styles.changeNegative}>{formatSigned(row.netChange)}</strong>
-            {row.entryState === "new" || row.entryState === "exit" ? <span className={styles.reversalLabel} data-tooltip="缺席日按 0 估算，不等于实际开平仓。">{row.entryState === "new" ? "新入榜" : "退出榜"}</span> : row.isReversal ? <span className={styles.reversalLabel}>反转</span> : <span className={styles.reversalPlaceholder}>—</span>}
+            {row.entryState === "new" || row.entryState === "exit" ? <span className={styles.reversalLabel} data-tooltip="缺席按0估算，非实际开平仓。">{row.entryState === "new" ? "新入榜" : "退出榜"}</span> : row.isReversal ? <span className={styles.reversalLabel}>反转</span> : <span className={styles.reversalPlaceholder}>—</span>}
             <div className={styles.rowTags}>{row.tags.slice(0, 1).map((tagItem) => <TagChip key={tagItem.name} tag={tagItem} compact onClick={onTag} />)}</div>
           </div>
         ))}
       </div>
-      <div className={styles.termTotals} aria-label="展示席位净变化合计"><strong data-tooltip={`本榜 ${rows.length} 个席位；缺席日按 0 估算。跨品种手数不代表资金规模。`}>合计</strong><span>净增 {formatNumber(total.positive)}</span><span>净减 {formatNumber(total.negative)}</span><span>变化净额 <b>{formatNumber(total.net)}</b> 手</span></div>
+      <div className={styles.termTotals} aria-label="展示席位净变化合计"><strong data-tooltip={`本榜${rows.length}席位；缺席按0估算，手数非资金。`}>合计</strong><span>净增 {formatNumber(total.positive)}</span><span>净减 {formatNumber(total.negative)}</span><span>变化净额 <b>{formatNumber(total.net)}</b> 手</span></div>
     </section>
   );
 }
@@ -1009,9 +1008,9 @@ function orderHistoryRows(rows: ValidationRuleRow[]): ValidationRuleRow[] {
 }
 
 function missingHistoryReason(row: ValidationRuleRow): string {
-  if (row.band === "middle" && row.sampleSize === 0) return "仅对照高、低档，中档不分组。";
-  if (row.percentile == null) return "历史分位缺失。";
-  return row.sampleSize ? "该项历史结果缺失。" : "无同档且后续价格完整的样本。";
+  if (row.band === "middle" && row.sampleSize === 0) return "仅对照高、低档";
+  if (row.percentile == null) return "历史分位缺失";
+  return row.sampleSize ? "历史结果缺失" : "无完整同档样本";
 }
 
 function ValidationSummary({ snapshot }: { snapshot: DashboardSnapshot }) {
@@ -1022,14 +1021,13 @@ function ValidationSummary({ snapshot }: { snapshot: DashboardSnapshot }) {
         { key: "f2", label: "净持仓比率分位", value: snapshot.researchSummary.f2Percentile },
         { key: "net-cr5", label: "前五占比分位", value: snapshot.researchSummary.netCr5Percentile },
       ].map(({ key, label, value }) => {
-        const metric = snapshot.overview.metrics.find((item) => item.key === key);
         return <div key={key}>
-          <MetricLabel label={label} note={`${metric?.label ?? label}：当前 ${metric?.value ?? "—"}${metric?.unit ?? ""}。近 504 个有效观测中的位置：≥70% 高档，≤30% 低档；非上涨概率。`} />
+          <MetricLabel label={label} note="近504个观测分位：≥70%高档，≤30%低档；非上涨概率。" />
           <strong>{value?.toFixed(1) ?? "—"}<small>%</small></strong>
         </div>;
       })}
-      <div><MetricLabel label="对照覆盖" note="结果完整的行数 ÷ 全部对照行数。" /><strong>{withResults.length}<small> / {snapshot.validation.length}</small></strong></div>
-      <div className={styles.validationMethod}><MetricLabel label="样本截止" note="与观察日隔离 25 个有效观测；后续价格不晚于截止日。" /><strong>{snapshot.researchSummary.libraryCutoff ?? "—"}</strong></div>
+      <div><MetricLabel label="对照覆盖" note="完整行 ÷ 全部行" /><strong>{withResults.length}<small> / {snapshot.validation.length}</small></strong></div>
+      <div className={styles.validationMethod}><MetricLabel label="样本截止" note="隔离25个观测；后续价格截至此日。" /><strong>{snapshot.researchSummary.libraryCutoff ?? "—"}</strong></div>
     </section>
   );
 }
@@ -1041,21 +1039,20 @@ function ValidationTable({ rows }: { rows: ValidationRuleRow[] }) {
     <section className={styles.panel}>
       <div className={styles.validationTableWrap} tabIndex={0} aria-label="历史对照表，可滚动">
         <table className={styles.validationTable}>
-          <thead><tr><th>因子</th><th data-tooltip="样本日后第 N 个有效行情观测的累计涨跌；缺数可能拉长窗口。">后续窗口</th><th data-tooltip="同档样本累计收益的均值：窗口末收盘价 ÷ 样本日收盘价 − 1。">平均涨跌</th><th data-tooltip="同档样本累计涨跌幅的中位数。">中位涨跌</th><th data-tooltip="同档样本累计涨幅 > 0 的比例，非策略胜率。">上涨比例</th><th data-tooltip="后续价格完整的观测数；窗口可能重叠，非独立交易数。">样本</th></tr></thead>
+          <thead><tr><th>因子</th><th data-tooltip="后N个行情观测；缺数会延长日历跨度。">后续窗口</th><th data-tooltip="同档均值：期末收盘 ÷ 样本日收盘 − 1">平均涨跌</th><th data-tooltip="同档涨跌幅中位数">中位涨跌</th><th data-tooltip="涨幅>0的样本占比，非策略胜率">上涨比例</th><th data-tooltip="完整观测数；窗口可重叠">样本</th></tr></thead>
           <tbody>
             {rows.length === 0 ? <tr><td colSpan={6}><InlineEmpty label="暂无历史对照数据" /></td></tr> : orderedRows.map((row) => (
               <tr key={row.id}>
-                <td><strong>{row.factor}</strong>{multipleProducts && <div className={styles.tableSecondary}>{row.productCode ?? "—"}</div>}<div className={styles.tableSecondary} data-tooltip="当前因子的历史分位，不是上涨概率">{row.percentile == null ? "分位缺失" : `分位 ${row.percentile.toFixed(1)}%`}{row.band === "high" ? " · 高档" : row.band === "low" ? " · 低档" : row.band === "middle" ? " · 中档" : ""}</div></td>
+                <td><strong>{row.factor}</strong>{multipleProducts && <div className={styles.tableSecondary}>{row.productCode ?? "—"}</div>}<div className={styles.tableSecondary} data-tooltip="历史分位，非上涨概率">{row.percentile == null ? "分位缺失" : `分位 ${row.percentile.toFixed(1)}%`}{row.band === "high" ? " · 高档" : row.band === "low" ? " · 低档" : row.band === "middle" ? " · 中档" : ""}</div></td>
                 <td>{row.horizon === "次日" ? "后1日" : `后${row.horizon}`}</td>
                 {[row.returnValue, row.medianReturn].map((value, index) => <td key={index} data-tooltip={value == null ? missingHistoryReason(row) : undefined} className={value == null || value === 0 ? undefined : value > 0 ? styles.changePositive : styles.changeNegative}>{value == null ? "—" : `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(2)}%`}</td>)}
                 <td data-tooltip={row.winRate == null ? missingHistoryReason(row) : undefined}>{row.winRate == null ? "—" : formatPercent(row.winRate)}</td>
-                <td data-tooltip={!row.sampleSize ? missingHistoryReason(row) : row.sampleSize < 60 ? "有效样本不足 60 个。" : undefined}>{row.sampleSize ? formatNumber(row.sampleSize) : "—"}</td>
+                <td data-tooltip={!row.sampleSize ? missingHistoryReason(row) : row.sampleSize < 60 ? "样本<60" : undefined}>{row.sampleSize ? formatNumber(row.sampleSize) : "—"}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <div className={styles.historyMethod}><MetricLabel label="统计口径" note="同档最多 1,260 个样本，中档不对照。按主力收盘价计算，未计交易成本及换月影响；未作基准比较或样本外验证。" /></div>
     </section>
   );
 }

@@ -238,14 +238,14 @@
   margin-top: 24px;
 }
 
-.dashboard .dataNotice{margin:28px 0 0;color:var(--text-muted);font-size:13px;line-height:1.6;}
-
 .pageStack{
   display: grid;
   gap: 32px;
 }
 
-.productSection{ display: grid; gap: 16px; min-width: 0; }
+.productSection{ display: grid; gap: 12px; min-width: 0; }
+
+.productSection .twoColumnGrid .panelHeader{ min-height: 0; padding-block: 6px; }
 
 .productOverview .panelHeader{ min-height: 0; padding-top: 0; padding-bottom: 4px; }
 
@@ -1424,9 +1424,9 @@ to{ opacity: 0.9; }
 }
 
 
-.researchSummary .panelHeader{ min-height: 0; padding-top: 0; padding-bottom: 12px; }
+.researchSummary .panelHeader{ min-height: 0; padding-top: 0; padding-bottom: 8px; }
 
-.researchSummary .validationSummary{ margin-bottom: clamp(16px, 2vw, 24px); }
+.researchSummary .validationSummary{ margin-bottom: 12px; }
 
 .researchSummary .validationSummary > div{ min-height: 0; padding: 8px 10px; }
 
@@ -1737,9 +1737,6 @@ to{ opacity: 0.9; }
 
 .validationTable th:last-child, .validationTable td:last-child{ padding-right: 10px; }
 
-.historyMethod{ margin: 12px 10px; line-height: 1.7; }
-
-.historyMethod .metricHint{ font-size: 13px; }
 
 .validationSummary .metricHint{ position: static; font-size: 14px; }
 
@@ -1755,7 +1752,6 @@ to{ opacity: 0.9; }
 
 .productSection .validationSummary{ padding-inline: calc(var(--panel-inset) - 10px); }
 
-.productSection .historyMethod{ margin-inline: var(--panel-inset); }
 @media (max-width: 640px) {.dashboard{ --panel-inset: 12px; } }
 
 .netRow{min-height:38px}
