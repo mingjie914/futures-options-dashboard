@@ -193,7 +193,7 @@ function FundsObserve() {
 
 export default function Observe() {
   const views={cycle:'市场周期',stock:'国债强弱',compare:'股债位置',funds:'ETF资金'},query=new URLSearchParams(location.search);
-  const [saved,save]=usePreference('observe.view','stock'),[view,setView]=useState(()=>{const value=query.get('view')||saved;return ['allocation','flow'].includes(value)?'funds':views[value]?value:'stock';});
-  useEffect(()=>{save(view);const q=new URLSearchParams(location.search);q.set('view',view);history.replaceState({},'',location.pathname+'?'+q);},[view]);
+  const [view,setView]=useState(()=>{const value=query.get('view');return ['allocation','flow'].includes(value)?'funds':views[value]?value:Object.keys(views)[0];});
+  useEffect(()=>{const q=new URLSearchParams(location.search);q.set('view',view);history.replaceState({},'',location.pathname+'?'+q);},[view]);
   return <><div className="board-content" style={{paddingBottom:0}}><nav className="board-tabs" aria-label="观察页签">{Object.entries(views).map(([key,label])=><button key={key} aria-pressed={view===key} onClick={()=>setView(key)}>{label}</button>)}</nav></div>{view==='stock'?<StockBondObserve/>:view==='compare'?<ComparisonObserve/>:view==='cycle'?<CycleObserve/>:<FundsObserve/>}</>;
 }

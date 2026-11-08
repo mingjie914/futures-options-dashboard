@@ -28,7 +28,7 @@ class ModuleErrorBoundary extends Component {
 }
 
 export default function Shell() {
-  const [active, setActive] = useState(currentModule);
+  const [active, setActive] = useState(currentModule), [entry,setEntry]=useState(0);
   const [page,setPage]=useState({});
   useEffect(()=>{
     if(page.id!==active||page.error)return;
@@ -62,9 +62,9 @@ export default function Shell() {
   function select(event, next) {
     if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    if (next !== active) {
+    if (next !== active || next === 'observe') {
       lastView.current[active] = location.pathname + location.search + location.hash;
-      const target = new URL(lastView.current[next] || `${BASE}${next}/`, location.origin), product = selectedProduct();
+      const target = new URL(next === 'observe' ? `${BASE}${next}/` : lastView.current[next] || `${BASE}${next}/`, location.origin), product = selectedProduct();
       if (['seats','futures'].includes(next) && product && target.searchParams.get('product')?.split('.')[0] !== product) {
         target.searchParams.set('product', product);
         for (const key of ['near', 'far', 'focus_symbol']) target.searchParams.delete(key);
@@ -72,6 +72,7 @@ export default function Shell() {
       target.hash = '';
       history.pushState({}, '', target);
       setActive(next);
+      if(next==='observe')setEntry(value=>value+1);
     }
     if (modules.some(([id]) => id === next)) menu.current.querySelector('summary').focus();
     closeMenu();
@@ -95,7 +96,7 @@ export default function Shell() {
     </nav></header>
     <div className={`module-frame ${active === 'futures' ? 'futures-module' : ''}`}>
       <ModuleErrorBoundary key={active} error={page.id===active?page.error:null}>
-        {ActiveModule?<ActiveModule/>:<p className="module-loading" role="status">加载看板…</p>}
+        {ActiveModule?<ActiveModule key={entry}/>:<p className="module-loading" role="status">加载看板…</p>}
       </ModuleErrorBoundary>
     </div>
     {(versionState.updated || versionState.failed) && <div className="board-update" role="status">

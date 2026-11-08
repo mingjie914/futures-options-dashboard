@@ -373,8 +373,8 @@ test('rollover overlay uses separate relative-day axes and real dates without jo
 });
 
 
-async function sharedHooks(overrides={},file='charts.js') {
- const source=(await readFile(new URL('../../../frontend/src/'+file,import.meta.url),'utf8')).replaceAll('import.meta.env.OBSERVE_PREVIEW','false').replaceAll('import.meta.env.INTRADAY_PREVIEW','false').replaceAll('import.meta.env.VITE_HOME_URL','undefined').replaceAll('import.meta.env.BASE_URL',"'/'");
+async function sharedHooks(overrides={},file='charts.js',previews=false) {
+ const source=(await readFile(new URL('../../../frontend/src/'+file,import.meta.url),'utf8')).replaceAll('import.meta.env.OBSERVE_PREVIEW',String(previews)).replaceAll('import.meta.env.INTRADAY_PREVIEW',String(previews)).replaceAll('import.meta.env.VITE_HOME_URL','undefined').replaceAll('import.meta.env.BASE_URL',"'/'");
  const code=ts.transpileModule(source,{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const slots=[],effects=[],module={exports:{}};let index=0;
  const hooks={...React,useState:initial=>{const i=index++;slots[i]||={value:typeof initial==='function'?initial():initial};return [slots[i].value,next=>{slots[i].value=typeof next==='function'?next(slots[i].value):next;}];},
@@ -864,4 +864,31 @@ test('price formatting is ungrouped without changing quantity grouping or decima
  assert.equal(option.yAxis[0].axisLabel.formatter(12345.67),'12345.67');
  const text=option.tooltip.formatter([{seriesName:'中证1000',value:12345.67,dataIndex:0,axisValue:'2026-11-06'},{seriesName:'基差率',value:.365,dataIndex:0}]);
  assert.match(text,/12345.67/);assert.match(text,/0.37%/);assert.doesNotMatch(text,/12,345/);
+});
+
+
+test('observation defaults to its first tab and preserves explicit deep links without saved-tab redirection',async t=>{
+ const previous={location:globalThis.location,history:globalThis.history};t.after(()=>Object.assign(globalThis,previous));
+ for(const [query,expected] of [['','市场周期'],['?view=unknown','市场周期'],['?view=stock','国债强弱'],['?view=flow','ETF资金']]){
+  globalThis.location={pathname:'/observe/',search:query};globalThis.history={replaceState(){}};
+  const h=await sharedHooks({'./charts.js':{usePreference:()=>{throw Error('tab should not read saved preferences');}}},'Observe.jsx');
+  const tree=h.render('default'),nodes=n=>!n||typeof n!=='object'?[]:[n,...React.Children.toArray(n.props?.children).flatMap(nodes)];
+  assert.equal(nodes(tree).find(n=>n.type==='button'&&n.props['aria-pressed']).props.children,expected);h.unmount();
+ }
+});
+
+test('main observation link resets a restored or currently active child view without reloading the shell',async t=>{
+ const previous=Object.fromEntries(['location','history','window','document'].map(k=>[k,globalThis[k]]));t.after(()=>Object.assign(globalThis,previous));
+ globalThis.location={pathname:'/observe/',search:'?view=stock',origin:'http://localhost'};
+ globalThis.history={pushState:(_a,_b,url)=>{location.pathname=url.pathname;location.search=url.search;}};
+ globalThis.window={addEventListener(){},removeEventListener(){},scrollTo(){}};
+ globalThis.document={addEventListener(){},removeEventListener(){},getElementById:()=>null};
+ const observe=()=>null,h=await sharedHooks({'./transport.js':{warmNavigation:()=>()=>{}},'./version-check.js':{watchVersion:()=>()=>{}},'./preferences.js':{selectedProduct:()=>null},'./Observe.jsx':{default:observe},'./Intraday.jsx':{default:()=>null}},'Shell.jsx',true);
+ const nodes=n=>!n||typeof n!=='object'?[]:[n,...React.Children.toArray(n.props?.children).flatMap(nodes)];
+ h.render('default');await settleHooks();
+ const click=id=>{const all=nodes(h.render('default'));all.find(n=>n.type==='details').props.ref.current={open:false};all.find(n=>n.type==='a'&&n.props.href==='/'+id+'/').props.onClick({preventDefault(){}});};
+ const before=nodes(h.render('default')).find(n=>n.type===observe).key;
+ click('observe');assert.equal(location.search,'');assert.notEqual(nodes(h.render('default')).find(n=>n.type===observe).key,before);
+ location.search='?view=funds';click('intraday');await settleHooks();h.render('default');click('observe');await settleHooks();
+ assert.equal(location.pathname,'/observe/');assert.equal(location.search,'');h.unmount();
 });
