@@ -106,6 +106,13 @@ test('intraday cold start and source-selected commodity codes keep candidate met
  feed.catalog.commodity_selection.CU=[];assert.doesNotMatch(render(feed),/CU\/铜/);
  delete feed.catalog.commodity_selection;assert.match(render(feed),/CU2712/);
  feed.catalog.codes=selected;assert.doesNotMatch(render(feed),/CU2712/);
+ feed.catalog={codes:[],metadata:{},commodity_selection:{}};feed.quotes=new Map();
+ for(const [product,name] of [['P','棕榈油'],['M','豆粕'],['CF','棉花'],['SH','烧碱']]){
+  const codes=(['SH','CF'].includes(product)?['701','705','707','709']:['2701','2705','2707','2709']).map(month=>product+month);feed.catalog.commodity_selection[product]=codes.slice(0,3);
+  for(const code of codes){feed.catalog.codes.push(code);feed.catalog.metadata[code]={kind:'future',product,product_name:name,unit:'CNY/t',last_trade_date:'2027-'+code.slice(-2)+'-15'};feed.quotes.set(code,{last:3000,oi:code.endsWith('09')?999999:1});}
+ }
+ const commodities=render(feed),order=['SH/烧碱','M/豆粕','CF/棉花','P/棕榈油'].map(name=>commodities.indexOf(name));
+ assert.ok(order.every((position,i)=>position>=0&&(!i||position>order[i-1])));assert.doesNotMatch(commodities,/SH2709|CF2709|P2709|M2709/);assert.equal((commodities.match(/<td /g)||[]).length,36);assert.match(commodities,/SH2701/);assert.match(commodities,/CF2705/);
  const future='IM2611.CFE',spot='000852.SH';
  feed.catalog={codes:[spot,future],metadata:{[spot]:{kind:'index',name:'中证1000'},[future]:{kind:'future',underlying:spot,multiplier:200,last_trade_date:'2026-11-20'}}};
  feed.quotes=new Map([[spot,{last:12345.67,acquired_at:'2026-11-06T15:00:00+08:00'}],[future,{last:12340.6,oi:1234567,acquired_at:'2026-11-06T15:00:00+08:00'}]]);

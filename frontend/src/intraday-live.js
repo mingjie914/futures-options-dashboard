@@ -150,7 +150,7 @@ export function basisComparison(groups,quotes) {
 
 export function liveMatrix(metadata,quotes,index) {
   const asOf=index?quotes.get(index)?.acquired_at?.slice(0,10):Object.keys(metadata).reduce((day,code)=>{const date=quotes.get(code)?.acquired_at?.slice(0,10)||'';return date>day?date:day;},'');
-  const contracts=Object.entries(metadata).filter(([,m])=>m.kind==='future').map(([code,m])=>{const q=quotes.get(code);return {symbol:code.split('.')[0],close:q?.acquired_at?.slice(0,10)===asOf?q?.last:null,trade_date:asOf,last_trade_date:m.last_trade_date,status:'wind_recorded'};});
+  const contracts=Object.entries(metadata).filter(([,m])=>m.kind==='future').map(([code,m])=>{const q=quotes.get(code);let symbol=code.split('.')[0];if(/^[A-Z]+\d{3}$/.test(symbol)&&/^\d{4}-\d{2}-\d{2}$/.test(m.last_trade_date)&&m.last_trade_date[3]===symbol.at(-3)&&m.last_trade_date.slice(5,7)===symbol.slice(-2))symbol=symbol.replace(/\d{3}$/,m.last_trade_date.slice(2,4)+symbol.slice(-2));return {symbol,close:q?.acquired_at?.slice(0,10)===asOf?q?.last:null,trade_date:asOf,last_trade_date:m.last_trade_date,status:'wind_recorded'};});
   return {meta:{as_of:asOf},contracts,contract_terms:{as_of:asOf,contracts}};
 }
 

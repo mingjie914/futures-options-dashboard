@@ -38,7 +38,7 @@ const IndexMarket=memo(function IndexMarket({groups,quotes}) {
   const data=basisComparison(groups,quotes),difference=bounds(data.months.flatMap(m=>m.rows.map(r=>r.difference)),true);
   return <div className="intraday-indexes"><div>{groups.map((group,i)=><IndexBasis key={group.code} group={group} quotes={quotes} rows={data.books[i].rows} strength={data.strength[i]}/>)}</div><section className="intraday-compare" aria-label="同月基差对照">
     {data.months.map(({month,rows})=><section key={month} className="intraday-comparison-month" aria-label={month+'同月基差'}><div className="intraday-product-heading"><h2>{month}</h2></div>
-      <table className="intraday-basis"><colgroup><col/><col/></colgroup><thead><tr><th>品种</th><th>年化差 / 基差差 / 价差</th></tr></thead><tbody>{rows.map(r=><tr key={r.product}><th scope="row">{r.product}</th><td><span className="intraday-comparison-values"><Rate value={r.difference} limits={difference} signed/> / {signedPrice(r.basisDifference)} / {signedPrice(r.priceDifference)}</span></td></tr>)}</tbody></table>
+      <table className="intraday-basis"><colgroup><col/><col/><col/></colgroup><thead><tr><th>品种</th><th>年化差</th><th>基差差 / 价差</th></tr></thead><tbody>{rows.map(r=><tr key={r.product}><th scope="row">{r.product}</th><td><Rate value={r.difference} limits={difference} signed/></td><td>{signedPrice(r.basisDifference)} / {signedPrice(r.priceDifference)}</td></tr>)}</tbody></table>
     </section>)}
   </section></div>;
 },(a,b)=>a.groups===b.groups&&a.groups.every(group=>sameQuotes(a.quotes,b.quotes,group.codes)));
@@ -58,7 +58,7 @@ export default function Intraday() {
   useEffect(()=>{if(months.length&&selection!==series)select(series);if(/^(IO|HO|MO)\d{4}$/.test(series))live.current?.select(series);save(selection);const query=new URLSearchParams(location.search);query.delete('view');query.set('series',selection);history.replaceState({},'',location.pathname+'?'+query);},[series,selection]);
   const groups=useMemo(()=>{
     const entries=(feed.catalog?.codes||[]).map(code=>[code,feed.catalog.metadata[code]]);
-    return ['000016.SH','000300.SH','000905.SH','000852.SH','AU','AG','CU','SC','JM','RB','M'].map(code=>{
+    return ['000016.SH','000300.SH','000905.SH','000852.SH','AU','AG','CU','SC','JM','RB','SH','M','CF','P'].map(code=>{
       const index=feed.catalog?.metadata[code]?.kind==='index',selected=feed.catalog?.commodity_selection?.[code],metadata=Object.fromEntries(entries.filter(([c,m])=>index?c===code||m.kind==='future'&&m.underlying===code:m.kind==='future'&&m.product===code&&(!selected||selected.includes(c))));
       return {code,index,metadata,codes:Object.keys(metadata)};
     }).filter(group=>group.codes.length);

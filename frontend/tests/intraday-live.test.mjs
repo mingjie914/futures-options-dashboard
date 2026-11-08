@@ -338,3 +338,12 @@ test('same-month cross-index comparison reuses normalized basis rates and preser
  quotes.set('INDEX0',{last:100,prev_close:100,acquired_at:'2026-11-05T15:00:00+08:00'});
  assert.equal(basisComparison(groups,quotes).strength[0].change,null);
 });
+
+
+test('Wind three-digit display symbols use the recorded delivery year across decade boundaries',()=>{
+ const items=[['CF001.CZC','2030-01-15','CF3001'],['SH912.CZC','2029-12-15','SH2912'],['SH912.CZC','2099-12-15','SH9912'],['CF001.CZC',null,'CF001'],['CF001.CZC','2031-01-15','CF001'],['CF001.CZC','2030-02-15','CF001']];
+ for(const [code,last_trade_date,symbol] of items){
+  const quote={last:100,acquired_at:'2029-11-06T15:00:00+08:00'},quotes=new Map([[code,quote]]),matrix=liveMatrix({[code]:{kind:'future',last_trade_date}},quotes);
+  assert.equal(matrix.contracts[0].symbol,symbol);assert.equal(matrix.contract_terms.contracts[0].symbol,symbol);assert.equal(matrix.contracts[0].close,100);assert.equal(quotes.get(code),quote);
+ }
+});
