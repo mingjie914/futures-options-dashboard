@@ -138,10 +138,13 @@ export function basisComparison(groups,quotes) {
   return {books,strength:strength.map(r=>({...r,difference:Number.isFinite(r.change)&&Number.isFinite(base?.change)?r.change-base.change:null})),months:months.map(month=>{
     const rows=books.map(({group,rows,spot})=>{
       const r=rows.find(r=>delivery(r)===month),meta=group.metadata[r.contract],q=quotes.get(r.contract),valid=spot?.acquired_at?.slice(0,10)===day&&q?.acquired_at?.slice(0,10)===day;
-      return {...r,product:r.contract.slice(0,2),name:group.metadata[group.code].name,expiry:meta.last_trade_date,annual:valid?r.annual:null,nominal:valid&&Number.isFinite(r.last)&&Number.isFinite(meta.multiplier)?r.last*meta.multiplier:null};
+      return {...r,product:r.contract.slice(0,2),name:group.metadata[group.code].name,expiry:meta.last_trade_date,last:valid?r.last:null,basis:valid?r.basis:null,annual:valid?r.annual:null,nominal:valid&&Number.isFinite(r.last)&&Number.isFinite(meta.multiplier)?r.last*meta.multiplier:null};
     });
     const base=rows.find(r=>r.product==='IM');
-    return {month,rows:rows.map(r=>({...r,difference:Number.isFinite(r.annual)&&Number.isFinite(base?.annual)&&r.expiry===base.expiry?r.annual-base.annual:null}))};
+    return {month,rows:rows.map(r=>{
+      const delta=key=>r.expiry===base.expiry&&Number.isFinite(r[key])&&Number.isFinite(base[key])?r[key]-base[key]:null;
+      return {...r,difference:delta('annual'),basisDifference:delta('basis'),priceDifference:delta('last')};
+    })};
   })};
 }
 

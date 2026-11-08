@@ -38,7 +38,7 @@ const IndexMarket=memo(function IndexMarket({groups,quotes}) {
   const data=basisComparison(groups,quotes),difference=bounds(data.months.flatMap(m=>m.rows.map(r=>r.difference)),true);
   return <div className="intraday-indexes"><div>{groups.map((group,i)=><IndexBasis key={group.code} group={group} quotes={quotes} rows={data.books[i].rows} strength={data.strength[i]}/>)}</div><section className="intraday-compare" aria-label="同月基差对照">
     {data.months.map(({month,rows})=><section key={month} className="intraday-comparison-month" aria-label={month+'同月基差'}><div className="intraday-product-heading"><h2>{month}</h2></div>
-      <table className="intraday-basis"><colgroup><col/><col/></colgroup><thead><tr><th>品种</th><th title="年化基差 − IM年化基差（百分点）">较IM</th></tr></thead><tbody>{rows.map(r=><tr key={r.product}><th scope="row" title={r.name+' · '+r.contract.split('.')[0]+(Number.isFinite(r.nominal)?' · 每手'+price(r.nominal/10000)+'万元':'')}>{r.product}</th><td><Rate value={r.difference} limits={difference} signed/></td></tr>)}</tbody></table>
+      <table className="intraday-basis"><colgroup><col/><col/></colgroup><thead><tr><th>品种</th><th><span className="intraday-comparison-values"><span>年化差</span><span>/</span><span>基差差</span><span>/</span><span>价差</span></span></th></tr></thead><tbody>{rows.map(r=><tr key={r.product}><th scope="row">{r.product}</th><td><span className="intraday-comparison-values"><Rate value={r.difference} limits={difference} signed/><span>/</span><span>{signedPrice(r.basisDifference)}</span><span>/</span><span>{signedPrice(r.priceDifference)}</span></span></td></tr>)}</tbody></table>
     </section>)}
   </section></div>;
 },(a,b)=>a.groups===b.groups&&a.groups.every(group=>sameQuotes(a.quotes,b.quotes,group.codes)));

@@ -310,6 +310,8 @@ test('same-month cross-index comparison reuses normalized basis rates and preser
   assert.ok(Math.abs(result.strength[i].change-i)<1e-10);
   assert.ok(Math.abs(result.strength[i].difference-(i-3))<1e-10);
  }
+ assert.deepEqual(rows.map(r=>r.basisDifference),[-31,-28,-20,0]);
+ assert.deepEqual(rows.map(r=>r.priceDifference),[-669,-572,-380,0]);
  assert.equal(rows[0].nominal,29700);assert.equal(rows[3].nominal,153600);
  assert.equal(result.months[1].rows[3].difference,0);
  for(const r of rows)for(const t of rows)assert.ok(Math.abs((r.difference-t.difference)-(r.annual-t.annual))<1e-10);
@@ -317,10 +319,13 @@ test('same-month cross-index comparison reuses normalized basis rates and preser
  assert.equal(basisComparison(groups,quotes).months[0].rows[1].annual,0);
  groups[0].metadata['IH2612.CFE'].last_trade_date='2026-12-07';
  assert.equal(basisComparison(groups,quotes).months[0].rows[0].difference,null);
+ assert.equal(basisComparison(groups,quotes).months[0].rows[0].basisDifference,null);
+ assert.equal(basisComparison(groups,quotes).months[0].rows[0].priceDifference,null);
  quotes.set('IC2612.CFE',{last:null,acquired_at:time});
  assert.equal(basisComparison(groups,quotes).months[0].rows[2].annual,null);
  quotes.set('IM2612.CFE',{last:768,acquired_at:'2026-11-05T15:00:00+08:00'});
  assert.equal(basisComparison(groups,quotes).months[0].rows[3].annual,null);
+ assert.ok(basisComparison(groups,quotes).months[0].rows.every(r=>r.basisDifference===null&&r.priceDifference===null));
  delete groups[0].metadata['IH2703.CFE'];assert.deepEqual(basisComparison(groups,quotes).months.map(m=>m.month),['2612']);
  const partial=basisComparison(groups.slice(1),quotes);assert.deepEqual([partial.months,partial.strength],[[],[]]);assert.equal(partial.books.length,3);assert.equal(partial.books[0].rows.length,2);
  for(const prev_close of [null,0,NaN,Infinity]){
