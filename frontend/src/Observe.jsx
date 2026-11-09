@@ -4,7 +4,7 @@ import {rememberProduct,selectedProduct} from './preferences.js';
 
 const products={IF:'沪深300',IH:'上证50',IC:'中证500',IM:'中证1000'},bonds={TS:'2年国债',TF:'5年国债',T:'10年国债',TL:'30年国债'};
 const format=(v,percent=false,useGrouping=!percent)=>v==null?'—':(v*(percent?100:1)).toLocaleString('zh-CN',{maximumFractionDigits:2,useGrouping})+(percent?'%':'');
-const indices={'000001.SH':'上证指数','000016.SH':'上证50','399330.SZ':'深证100','000300.SH':'沪深300','000905.SH':'中证500','000852.SH':'中证1000','000985.CSI':'中证全指','399006.SZ':'创业板指','000688.SH':'科创50'};
+const indices={'000001.SH':'上证指数','000016.SH':'上证50','000300.SH':'沪深300','000905.SH':'中证500','000852.SH':'中证1000','000985.CSI':'中证全指','399006.SZ':'创业板指','000688.SH':'科创50','399330.SZ':'深证100'};
 const flowGroups={individual:'个人为主',institution:'机构为主'};
 const valuationLines=[{key:'close',name:'指数点位',color:'#4e7fb9'},{key:'lower',name:'低估参考',color:'#568f84',dashed:true},{key:'deep',name:'深估参考',color:'#b64d49',dashed:true},{key:'upper',name:'高估参考',color:'#a48b59',dashed:true}];
 const cycleScale=value=>value>0?Math.log10(1+value):value;
