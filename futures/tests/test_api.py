@@ -1588,10 +1588,10 @@ def test_observation_context_is_preview_only_and_never_sums_incomplete_funds(set
     assert abs(current['drawdown']-(110/120-1))<1e-12
     prefix=client.get('/api/observation/context?view=cycle&end=2026-09-02').json()['current']
     assert prefix['drawdown']==0 and prefix['as_of']=='2026-09-02'
-    for code in ('399006.SZ','000688.SH'):
+    for code in ('399006.SZ','000688.SH','399330.SZ'):
         source['indices'][code]=source['indices']['000300.SH']
     (store.runtime.parent/'observation-context.json').write_text(json.dumps(source))
-    for code in ('399006.SZ','000688.SH'):
+    for code in ('399006.SZ','000688.SH','399330.SZ'):
         response=client.get('/api/observation/context',params={'view':'cycle','index':code,'end':'2026-09-02'})
         assert response.status_code==200 and response.json()['index']==code
         assert response.json()['current']['drawdown']==0 and len(response.json()['series'])==2
@@ -1658,19 +1658,22 @@ def test_cycle_valuation_is_index_specific_cutoff_and_cache_versioned(setup,monk
     monkeypatch.setenv('DASHBOARD_OBSERVE_PREVIEW','1')
     root=store.runtime.parent
     points=[dict(trade_date=f'2020-01-{i:02d}',close=p) for i,p in enumerate([100,125,80,100,140,110,70,90,84],1)]
-    (root/'observation-context.json').write_text(json.dumps({'meta':{'input_batch':'price-fixture'},'indices':{code:points for code in ['000300.SH','399006.SZ']}}))
+    (root/'observation-context.json').write_text(json.dumps({'meta':{'input_batch':'price-fixture'},'indices':{code:points for code in ['000300.SH','399006.SZ','399330.SZ']}}))
     client=TestClient(create_app(store));url='/api/observation/context?view=cycle'
     empty=client.get(url)
     assert empty.json()['valuation'] is None
     path=root/'index-valuation.parquet'
     with duckdb.connect() as con:
         con.execute('CREATE TABLE v(S_INFO_WINDCODE VARCHAR,TRADE_DT DATE,PE_TTM DECIMAL(20,8),PB DECIMAL(20,8))')
-        con.executemany('INSERT INTO v VALUES (?,?,?,?)',[(code,p['trade_date'],pe,pb) for code,pe,pb in [('000300.SH',10,1),('399006.SZ',20,2)] for p in points])
+        con.executemany('INSERT INTO v VALUES (?,?,?,?)',[(code,p['trade_date'],pe,pb) for code,pe,pb in [('000300.SH',10,1),('399006.SZ',20,2),('399330.SZ',15,3)] for p in points])
         con.execute('COPY v TO ? (FORMAT PARQUET)',[str(path)])
     full=client.get(url,headers={'If-None-Match':empty.headers['etag']})
     assert full.status_code==200
     assert full.json()['valuation']['upper']==10 and full.json()['valuation']['metric']=='pe_ttm'
     assert client.get(url,headers={'If-None-Match':full.headers['etag']}).status_code==304
+    sz100=client.get(url+'&index=399330.SZ&end=2020-01-06').json()['valuation']
+    assert sz100['metric']=='pe_ttm' and sz100['upper']==15 and sz100['quantile']==.85
+    assert len(sz100['series'])==6 and sz100['reference_as_of']=='2020-01-06'
     prefix=client.get(url+'&index=399006.SZ&end=2020-01-06').json()['valuation']
     assert prefix['metric']=='pb' and prefix['upper']==2 and prefix['quantile']==.75
     assert len(prefix['series'])==6 and len(prefix['samples'])==1 and prefix['samples'][0]['confirmed_on']=='2020-01-05'

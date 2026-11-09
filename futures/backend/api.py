@@ -468,7 +468,7 @@ def create_app(store=None):
 
         @app.get('/api/observation/context')
         def observation_context(view: str = Query('allocation',pattern='^(allocation|cycle|flow|compare)$'),
-                                index: str = Query('000300.SH',pattern=r'^(000001\.SH|000016\.SH|000300\.SH|000905\.SH|000852\.SH|000985\.CSI|399006\.SZ|000688\.SH)$'), end: Optional[date] = None,
+                                index: str = Query('000300.SH',pattern=r'^(000001\.SH|000016\.SH|000300\.SH|000905\.SH|000852\.SH|000985\.CSI|399006\.SZ|000688\.SH|399330\.SZ)$'), end: Optional[date] = None,
                                 valuation_years: int = Query(10,ge=0,le=30)):
             cutoff=(end or date.today()).isoformat()
             if view=='compare':
