@@ -36,6 +36,7 @@ def test_same_subscription_shares_upstream_and_rebases_new_visitors(monkeypatch)
                 two.send_json(dict(sub,fields=['iv','last']))
                 cached=two.receive_json()
                 assert len(calls)==1 and cached['quotes']=={'I':{'last':11}} and cached['version']==2
+                assert cached['catalog']==CATALOG and 'metadata' not in cached
                 revision=dict(type='intraday',epoch='a',version=3,intraday=dict(series='MO2611',trade_date='2026-11-05',revision=2,points=[dict(time='09:30',future_last=None)]))
                 client.portal.call(queues[0].put,json.dumps(revision))
                 assert one.receive_json()==two.receive_json()==revision

@@ -144,7 +144,7 @@ class ResearchHTTP:
                     reusable = False
             if reusable:
                 entry = (body, response_headers)
-                self.cache[('http', request_key, tag)] = entry
+                await run_in_threadpool(self.cache.__setitem__, ('http', request_key, tag), entry)
                 return await self.respond(scope, receive, send, headers, request_key, tag, entry)
             await self.emit(scope, receive, send, headers, body, status, response_headers)
 
@@ -158,7 +158,7 @@ class ResearchHTTP:
         if request_headers.get('a-im') == DELTA and previous:
             old = self.cache.get(('http', key, previous))
             if old is not None:
-                delta = encoded({'base': previous, 'version': tag, 'ops': changes(json.loads(old[0]), json.loads(body))})
+                delta = await run_in_threadpool(lambda: encoded({'base': previous, 'version': tag, 'ops': changes(json.loads(old[0]), json.loads(body))}))
                 if len(delta) < len(body) * .8:
                     body, status = delta, 226
                     headers.update({'im': DELTA, 'delta-base': previous, 'content-type': 'application/vnd.mingjiec.delta+json', 'cache-control': 'no-store'})
@@ -175,6 +175,6 @@ class ResearchHTTP:
             headers.pop('content-type', None)
         # Caddy's default MIME matcher excludes our custom delta media type.
         elif (self.compress or headers.get('im') == DELTA) and len(body) >= 1024 and not headers.get('content-encoding') and accepts_gzip(request_headers.get('accept-encoding', '')):
-            body = gzip.compress(body, compresslevel=4, mtime=0)
+            body = await run_in_threadpool(gzip.compress, body, compresslevel=4, mtime=0)
             headers['content-encoding'] = 'gzip'
         await Response(body, status_code=status, headers=headers)(scope, receive, send)

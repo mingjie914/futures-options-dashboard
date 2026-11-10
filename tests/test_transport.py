@@ -100,6 +100,32 @@ def test_actual_delta_corrections_deletions_and_evicted_base():
     assert changes({'a': 1}, {'a': None}) == [['set', ['a'], None]]
 
 
+def test_response_cpu_work_runs_outside_event_loop(monkeypatch):
+    from threading import get_ident
+    from futures.backend import transport
+
+    calls = set()
+    for name, owner in [('memory_size', transport), ('changes', transport), ('compress', transport.gzip)]:
+        original = getattr(owner, name)
+        def checked(*args, _original=original, _name=name, **kwargs):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                calls.add(_name)
+            else:
+                raise AssertionError(f'{_name} blocked the event loop on thread {get_ident()}')
+            return _original(*args, **kwargs)
+        monkeypatch.setattr(owner, name, checked)
+    client, state, _ = example()
+    with client:
+        first = client.get('/api/data')
+        state['revision'] = 'v2'
+        state['data']['rows'][0]['value'] = 100
+        response = client.get('/api/data', headers={'If-None-Match': first.headers['etag'], 'A-IM': DELTA})
+        assert response.status_code == 226
+    assert calls == {'memory_size', 'changes', 'compress'}
+
+
 def test_byte_budget_and_atomic_same_day_revision(tmp_path):
     cache = ByteCache(4096)
     for i in range(20):

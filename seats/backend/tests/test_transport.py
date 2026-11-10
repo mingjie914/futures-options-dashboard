@@ -28,11 +28,15 @@ def test_namespace_gzip_conditional_and_cache_isolation(demo_reader, monkeypatch
     path = "/api/seats/v1/views/combination?product_code=RB.SHFE"
     plain = client.get(path, headers={"Accept-Encoding": "identity"})
     assert plain.status_code == 200 and len(plain.content) >= 1024
+    cache = client.app.state.response_cache
+    assert all(entry[1] is None for entry in cache.entries.values())
     etag = plain.headers["etag"]
     count = len(calls)
     with client.stream("GET", path, headers={"Accept-Encoding": "gzip"}) as compressed:
         assert compressed.headers["content-encoding"] == "gzip"
         assert gzip.decompress(b"".join(compressed.iter_raw())) == plain.content
+    assert any(entry[1] is not None for entry in cache.entries.values())
+    assert cache.bytes <= cache.max_bytes
     assert len(calls) == count
     assert client.get(path.replace("/api/seats/v1", "/api/v1")).headers["etag"] == etag
     unchanged = client.get(path, headers={"If-None-Match": '"unrelated", ' + etag.removeprefix("W/")})

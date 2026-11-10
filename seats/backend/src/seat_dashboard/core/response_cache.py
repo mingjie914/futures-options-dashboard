@@ -48,6 +48,7 @@ class ResponseCache:
         query = (route, tuple(sorted(request.query_params.multi_items())))
         key = (API_VERSION, version, query)
         previous = request.headers.get("if-none-match", "")
+        wants_gzip = _accepts_gzip(request.headers.get("accept-encoding", ""))
         baseline = None
         with self.lock:
             current = self.entries.get(key)
@@ -70,7 +71,7 @@ class ResponseCache:
             try:
                 with self.slots:
                     body = build()
-                    compressed = gzip.compress(body, compresslevel=5, mtime=0) if len(body) >= 1024 else None
+                    compressed = gzip.compress(body, compresslevel=5, mtime=0) if wants_gzip and len(body) >= 1024 else None
                     etag = 'W/"' + hashlib.sha256(repr(key).encode() + body).hexdigest() + '"'
                     size = len(body) + len(compressed or b"") + len(repr(key).encode()) + len(etag) + 256
                     entry = (body, compressed, etag, size)
@@ -97,9 +98,22 @@ class ResponseCache:
                                    ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode()
                 if len(delta) < len(body) * .8:
                     body, status = delta, 226
-                    compressed = gzip.compress(body, compresslevel=5, mtime=0) if len(body) >= 1024 else None
+                    compressed = gzip.compress(body, compresslevel=5, mtime=0) if wants_gzip and len(body) >= 1024 else None
                     headers.update({"IM": DELTA, "Delta-Base": previous, "Cache-Control": "no-store"})
-        if compressed is not None and _accepts_gzip(request.headers.get("accept-encoding", "")):
+        if wants_gzip and compressed is None and len(body) >= 1024:
+            compressed = gzip.compress(body, compresslevel=5, mtime=0)
+            with self.lock:
+                current = self.entries.get(key)
+                if status == 200 and current is not None and current[1] is None and current[2] == etag:
+                    size = current[3] + len(compressed)
+                    if size <= self.max_bytes:
+                        self.entries.move_to_end(key)
+                        while self.bytes + len(compressed) > self.max_bytes:
+                            _, removed = self.entries.popitem(last=False)
+                            self.bytes -= removed[3]
+                        self.entries[key] = (body, compressed, etag, size)
+                        self.bytes += len(compressed)
+        if compressed is not None and wants_gzip:
             body = compressed
             headers["Content-Encoding"] = "gzip"
         return Response(body, status_code=status, media_type="application/vnd.mingjiec.delta+json" if status == 226 else "application/json", headers=headers)

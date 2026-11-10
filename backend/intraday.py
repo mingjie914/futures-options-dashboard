@@ -40,7 +40,7 @@ def enable(app, base, origin='http://127.0.0.1:8799'):
         if health.get('receiver_age_seconds') is not None:
             health['receiver_age_seconds']+=max(0,time.monotonic()-current['received'])
         return json.dumps(dict(type='snapshot',epoch=current['epoch'],version=current['version'],catalog=current['catalog'],
-            quotes=current['quotes'],metadata={c:current['catalog']['metadata'].get(c,{}) for c in current['quotes']},
+            quotes=current['quotes'],
             intraday=current['intraday'].get(series),health=health),separators=(',',':'))
 
     async def relay(hub, subscription):
