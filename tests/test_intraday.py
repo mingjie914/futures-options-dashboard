@@ -11,6 +11,36 @@ from backend import intraday
 CATALOG={'codes':['I','F','O'],'revision':'one','metadata':{'I':{'kind':'index'},'F':{'kind':'future'},'O':{'kind':'option','series':'MO2611'}}}
 
 
+def test_reconnect_does_not_join_an_upstream_that_is_closing(monkeypatch):
+    app=FastAPI();intraday.enable(app,'http://receiver');controls={};calls=[]
+    @asynccontextmanager
+    async def connect(*args,**kwargs):
+        number=len(calls)+1;calls.append(number)
+        if number==1:controls.update(closing=asyncio.Event(),release=asyncio.Event())
+        class Source:
+            async def send(self,raw):pass
+            async def __aiter__(self):
+                yield json.dumps(dict(type='snapshot',catalog=CATALOG,epoch='a',version=number,quotes={}))
+                await asyncio.Future()
+        try:yield Source()
+        finally:
+            if number==1:
+                controls['closing'].set();await controls['release'].wait()
+    monkeypatch.setattr(intraday,'connect',connect)
+    async def closing():await asyncio.wait_for(controls['closing'].wait(),1)
+    with TestClient(app) as client:
+        first=client.websocket_connect('/api/realtime/v1/stream');one=first.__enter__()
+        try:
+            one.send_json({'type':'subscribe'});assert one.receive_json()['version']==1
+            one.close();client.portal.call(closing)
+            with client.websocket_connect('/api/realtime/v1/stream') as two:
+                two.send_json({'type':'subscribe'})
+                assert two.receive_json()['version']==2
+        finally:
+            client.portal.call(controls['release'].set);first.__exit__(None,None,None)
+    assert calls==[1,2] and not app.state.intraday_hubs
+
+
 def test_same_subscription_shares_upstream_and_rebases_new_visitors(monkeypatch):
     app=FastAPI();intraday.enable(app,'http://receiver','https://mingjiec.com');calls=[];queues=[];closed=[]
     initial=dict(type='snapshot',catalog=CATALOG,epoch='a',version=1,health={'receiver_age_seconds':0},

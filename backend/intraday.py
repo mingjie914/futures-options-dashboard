@@ -99,9 +99,9 @@ def enable(app, base, origin='http://127.0.0.1:8799'):
                     with suppress(asyncio.CancelledError,WebSocketDisconnect,RuntimeError,TimeoutError):await sender
                     hub['queues'].discard(queue)
                     if not hub['queues']:
+                        if hubs.get(key) is hub:hubs.pop(key)
                         hub['task'].cancel()
                         with suppress(asyncio.CancelledError):await hub['task']
-                        if hubs.get(key) is hub:hubs.pop(key)
         except (WebSocketDisconnect,ValueError,TypeError,TimeoutError):pass
 
     @app.get('/api/intraday/v1/bootstrap')
