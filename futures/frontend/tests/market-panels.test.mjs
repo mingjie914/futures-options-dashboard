@@ -346,8 +346,8 @@ test('curve uses supplied exact-date columns and preserves null historical value
 test('curve keeps the shared selection and drills adjacent pairs into history',()=>{
  const charts=[];let selected;
  const data={meta,near:'IM2609',far:'IM2612',curve:{nodes:[{symbol:'IM2609',price:100,volume:0,position:null},{symbol:'IM2612',price:90,volume:8,position:10}],comparisons:[],adjacent:[{near:'IM2609',far:'IM2612',spread:10}]}};
- const element=CurvePanel({data,onPair:(...pair)=>{selected=pair;},Chart:props=>{charts.push(props);return null;},controls:React.createElement('span',null,'共享筛选')});
- const html=renderToStaticMarkup(element);
+ let element;
+ const html=renderToStaticMarkup(React.createElement(()=>{element=CurvePanel({data,onPair:(...pair)=>{selected=pair;},Chart:props=>{charts.push(props);return null;},controls:React.createElement('span',null,'共享筛选')});return element;}));
  assert.deepEqual(charts[0].selected,['IM2609','IM2612']);assert.match(html,/共享筛选/);assert.match(html,/查看价差季节性/);
  const adjacent=element.props.children.at(-1);adjacent.props.children[1][0].props.onClick();
  assert.deepEqual(selected,['IM2609','IM2612']);

@@ -103,9 +103,7 @@ def static_response(file, request, policy):
     if any(value.strip().removeprefix('W/') in ('*', tag.removeprefix('W/'))
            for value in request.headers.get('if-none-match', '').split(',')):
         return Response(status_code=304, headers=headers)
-    response = FileResponse(file, stat_result=stat, headers=headers)
-    del response.headers['last-modified']  # Reproducible archives set every mtime to zero.
-    return response
+    return FileResponse(file, stat_result=stat, headers=headers)
 
 
 @app.get('/assets/{path:path}')
