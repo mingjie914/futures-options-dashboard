@@ -1,6 +1,7 @@
 """Optional preview: one upstream subscription, bounded latest state, local bootstrap."""
 import asyncio
 import json
+import logging
 import time
 from contextlib import suppress
 from urllib.parse import urlsplit
@@ -56,8 +57,10 @@ def enable(app, base, origin='http://127.0.0.1:8799'):
                             while not queue.empty():queue.get_nowait()
                             queue.put_nowait(snapshot(hub['state'],subscription.get('series')))
                         else:queue.put_nowait(raw)
-        except ConnectionClosed as exc:code=1008 if exc.rcvd and exc.rcvd.code==1008 else 1013
-        except (OSError,ValueError,KeyError,InvalidHandshake):pass
+        except ConnectionClosed as exc:
+            code=1008 if exc.rcvd and exc.rcvd.code==1008 else 1013
+            logging.warning('Intraday relay closed (%s): %s',type(exc).__name__,exc)
+        except (OSError,ValueError,KeyError,InvalidHandshake) as exc:logging.warning('Intraday relay failed (%s): %s',type(exc).__name__,exc)
         finally:
             hub['closed']=True
             for queue in hub['queues']:
@@ -126,7 +129,7 @@ def enable(app, base, origin='http://127.0.0.1:8799'):
                         packet=json.loads(raw)
                         merge_packet(state,packet)
                         delay=1
-            except (OSError,ValueError,KeyError,ConnectionClosed,InvalidHandshake):pass
+            except (OSError,ValueError,KeyError,ConnectionClosed,InvalidHandshake) as exc:logging.warning('Intraday mirror failed (%s): %s',type(exc).__name__,exc)
             state['connected']=False
             await asyncio.sleep(delay);delay=min(delay*2,15)
     return collect

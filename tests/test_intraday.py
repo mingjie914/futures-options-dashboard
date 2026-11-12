@@ -87,7 +87,7 @@ def test_cross_origin_websocket_is_rejected_before_opening_upstream(monkeypatch)
     assert failure.value.code==1008
 
 
-def test_slow_visitor_rebases_without_blocking_upstream_and_disconnect_cleans_hub(monkeypatch):
+def test_slow_visitor_rebases_without_blocking_upstream_and_disconnect_cleans_hub(monkeypatch,caplog):
     app=FastAPI();intraday.enable(app,'http://receiver');controls={}
     from starlette.websockets import WebSocket,WebSocketDisconnect
     send_text=WebSocket.send_text
@@ -125,6 +125,7 @@ def test_slow_visitor_rebases_without_blocking_upstream_and_disconnect_cleans_hu
             with pytest.raises(WebSocketDisconnect) as failure:ws.receive_json()
             assert failure.value.code==1013
     assert not app.state.intraday_hubs
+    assert 'Intraday relay failed (OSError): upstream offline' in caplog.text
 
 
 def test_bootstrap_uses_one_catalog_preserves_source_time_and_ages_health():
@@ -150,7 +151,7 @@ def test_bootstrap_uses_one_catalog_preserves_source_time_and_ages_health():
         assert stale['health']['source_status']=='waiting_for_receiver'
 
 
-def test_single_readonly_mirror_merges_deltas_and_retains_values_on_disconnect(monkeypatch):
+def test_single_readonly_mirror_merges_deltas_and_retains_values_on_disconnect(monkeypatch,caplog):
     app=FastAPI();collect=intraday.enable(app,'http://127.0.0.1:18808','https://mingjiec.com');sent=[]
     class Socket:
         async def send(self,raw):sent.append(json.loads(raw))
@@ -171,6 +172,7 @@ def test_single_readonly_mirror_merges_deltas_and_retains_values_on_disconnect(m
     assert sent==[{'type':'subscribe','mirror':True,'kinds':['index','future','option'],'fields':['last','prev_close','iv','oi']}]
     state=app.state.intraday
     assert state['quotes']=={'I':{'last':2,'acquired_at':'original'}} and not state['connected']
+    assert 'Intraday mirror failed (OSError): test disconnect' in caplog.text
 
 
 def test_real_websocket_disconnect_retains_ram_bootstrap():
