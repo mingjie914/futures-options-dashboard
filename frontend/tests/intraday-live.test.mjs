@@ -115,14 +115,15 @@ test('intraday snapshots/upserts preserve source observations, minute gaps, zero
   assert.equal(state.intraday,next);assert.equal(state.quotes.size,0);
 });
 
-function setup(t,bootstrap=null) {
-  const originals={fetch:globalThis.fetch,WebSocket:globalThis.WebSocket,setTimeout:globalThis.setTimeout,clearTimeout:globalThis.clearTimeout};
+function setup(t,bootstrap=null,framed=false) {
+  const originals={fetch:globalThis.fetch,WebSocket:globalThis.WebSocket,setTimeout:globalThis.setTimeout,clearTimeout:globalThis.clearTimeout,requestAnimationFrame:globalThis.requestAnimationFrame,cancelAnimationFrame:globalThis.cancelAnimationFrame};
   t.after(()=>Object.assign(globalThis,originals));
-  const sockets=[],requests=[],timers=new Map(),states=[];
+  const sockets=[],requests=[],timers=new Map(),states=[],frames=new Map();let frameId=0;
+  globalThis.requestAnimationFrame=fn=>{if(!framed){fn();return null;}const id=frameId++;frames.set(id,fn);return id;};globalThis.cancelAnimationFrame=id=>frames.delete(id);
   globalThis.fetch=async url=>{requests.push(url);return{ok:!!bootstrap,json:async()=>bootstrap};};
   globalThis.setTimeout=(fn,delay)=>{timers.set(fn,delay);return fn;};globalThis.clearTimeout=id=>timers.delete(id);
   globalThis.WebSocket=class {constructor(url){this.url=url;this.readyState=0;this.sent=[];sockets.push(this);}send(raw){this.sent.push(JSON.parse(raw));}close(){this.closed=true;}};
-  return {sockets,requests,timers,states};
+  return {sockets,requests,timers,states,frames};
 }
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const catalog={codes:['I','F','O'],revision:'one',metadata:{I:{kind:'index'},F:{kind:'future',underlying:'I'},O:{kind:'option',underlying:'I'}}};
@@ -346,4 +347,33 @@ test('Wind three-digit display symbols use the recorded delivery year across dec
   const quote={last:100,acquired_at:'2029-11-06T15:00:00+08:00'},quotes=new Map([[code,quote]]),matrix=liveMatrix({[code]:{kind:'future',last_trade_date}},quotes);
   assert.equal(matrix.contracts[0].symbol,symbol);assert.equal(matrix.contract_terms.contracts[0].symbol,symbol);assert.equal(matrix.contracts[0].close,100);assert.equal(quotes.get(code),quote);
  }
+});
+
+
+test('one frame publishes the fully applied burst without dropping independent quote updates',t=>{
+  const {sockets,states,frames}=setup(t,null,true),live=openLive('https://live.example',s=>states.push(s));
+  const ws=sockets[0];deliver(ws,packet());
+  for(let version=2;version<=101;version++)deliver(ws,packet('delta',version,{quotes:{[version%2?'A':'B']:{last:version}}}));
+  deliver(ws,packet('delta',100,{quotes:{A:{last:999}}}));
+  assert.equal(states.length,0);assert.equal(frames.size,1);assert.equal(frames.has(0),true);
+  const paint=frames.get(0);frames.clear();paint();
+  assert.equal(states.length,1);assert.equal(states[0].version,101);
+  assert.equal(states[0].quotes.get('A').last,101);assert.equal(states[0].quotes.get('B').last,100);
+  live.close();
+});
+
+test('hidden single-route feed keeps state and receive time; resume publishes latest and close cancels paint',t=>{
+  const original=globalThis.document,listeners=new Map();let now=1000;
+  globalThis.document={visibilityState:'visible',addEventListener:(n,f)=>listeners.set(n,f),removeEventListener:n=>listeners.delete(n)};
+  t.after(()=>{if(original===undefined)delete globalThis.document;else globalThis.document=original;});
+  t.mock.method(performance,'now',()=>now);
+  const {sockets,states,frames,timers}=setup(t,null,true),live=openLive('https://live.example',s=>states.push(s));
+  deliver(sockets[0],packet());document.visibilityState='hidden';listeners.get('visibilitychange')();
+  assert.equal(frames.size,0);now=2000;
+  deliver(sockets[0],packet('delta',2,{quotes:{I:{last:20}},health:{source_mode:'wind',source_status:'ok',receiver_age_seconds:0}}));
+  assert.equal(states.length,0);assert.equal(frames.size,0);assert.equal(sockets.length,1);
+  now=50000;document.visibilityState='visible';listeners.get('visibilitychange')();
+  const paint=[...frames.values()][0];frames.clear();paint();
+  assert.equal(states[0].quotes.get('I').last,20);assert.equal(states[0].received,2000);assert.equal(liveOnline(states[0],now),false);
+  live.select('IO2612');assert.equal(frames.size,1);live.close();assert.equal(frames.size,0);assert.equal(listeners.size,0);assert.equal(timers.size,0);
 });
