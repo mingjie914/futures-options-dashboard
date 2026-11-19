@@ -22,7 +22,7 @@
   color: var(--text);
   background: var(--bg);
   font-family: inherit;
-  font-size: 15px;
+  font-size: var(--fs-body);
   line-height: 1.55;
 }
 
@@ -95,7 +95,7 @@
 .noticeButton{
   padding: 7px 10px;
   border-radius: 6px;
-  font-size: 14px;
+  font-size: var(--fs-body);
 }
 
 .noticeButton:hover{
@@ -125,7 +125,7 @@
   display: grid;
   min-width: 128px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: 400;
   gap: 4px;
 }
@@ -141,7 +141,7 @@
 
   color: var(--text-muted);
   background: transparent;
-  font-size: 15px;
+  font-size: var(--fs-body);
   font-weight: 400;
 }
 
@@ -157,7 +157,7 @@
 
 .productOptions{ position: absolute; z-index: 15; top: calc(100% + 6px); left: 0; width: 100%; max-height: min(320px, 45vh); overflow-y: auto; margin: 0; padding: 4px;  border-radius: 8px; background: var(--surface);  list-style: none; }
 
-.productOptions li{ display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 8px; border-radius: 4px; color: var(--text-secondary); font-size: 15px; font-weight: 400; cursor: pointer; }
+.productOptions li{ display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 8px; border-radius: 4px; color: var(--text-secondary); font-size: var(--fs-body); font-weight: 400; cursor: pointer; }
 
 .productOptions li:hover, .productOptions li[data-active="true"], .productOptions li[aria-selected="true"]{ color: var(--text); background: var(--surface-soft); font-weight: 600; }
 
@@ -184,7 +184,7 @@
   min-height: 28px;
   margin-left: 2px;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--fs-body);
   gap: 7px;
   white-space: nowrap;
 }
@@ -211,12 +211,12 @@
 }
 
 .stateNotice strong{
-  font-size: 14px;
+  font-size: var(--fs-body);
 }
 
 .stateNotice span:not(.stateIcon){
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .stateIcon{
@@ -226,7 +226,7 @@
   place-items: center;
   border-radius: 50%;
   background: var(--surface-soft);
-  font-size: 15px;
+  font-size: var(--fs-body);
   font-weight: 600;
 }
 
@@ -260,7 +260,7 @@
   align-items: center;
   width: fit-content;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -292,13 +292,13 @@
   margin-left: 4px;
   color: var(--text-muted);
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--fs-body);
 }
 
 .metricNote{
   margin-top: 11px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .unavailableMark{
@@ -307,7 +307,7 @@
   right: 12px;
   padding: 2px 5px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .twoColumnGrid{
@@ -344,13 +344,13 @@
 .panelHeader p{
   margin-top: 3px;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--fs-body);
 }
 
 .panelBadge{
   padding: 4px 0;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .matrixTableWrap, .rankingScroll, .anomalyTableWrap, .validationTableWrap{
@@ -365,7 +365,7 @@
 .matrixTable th, .rankingTable th, .anomalyTable th, .validationTable th{
   padding: 9px 8px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -375,7 +375,7 @@
   height: 65px;
   padding: 10px 12px;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--fs-body);
   white-space: nowrap;
 }
 
@@ -386,9 +386,9 @@
 
 .matrixTableWrap{ max-height: clamp(640px, 72vh, 900px); overflow: auto; }
 
-.matrixSort{ flex-shrink: 0; padding: 8px 9px; border: 0; border-radius: 5px; color: var(--text-secondary); background: transparent; font-size: 15px;  font-weight: 400;}
+.matrixSort{ flex-shrink: 0; padding: 8px 9px; border: 0; border-radius: 5px; color: var(--text-secondary); background: transparent; font-size: var(--fs-body);  font-weight: 400;}
 
-.matrixTableTransposed .matrixSortMetric{ display: block; margin-top: 4px; color: var(--accent); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.matrixTableTransposed .matrixSortMetric{ display: block; margin-top: 4px; color: var(--accent); font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; }
 
 .matrixTableTransposed thead th{ position: sticky; top: 0; z-index: 2; background: var(--surface); }
 
@@ -423,7 +423,7 @@
 
 .matrixTableTransposed tbody th{
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   text-align: left;
   white-space: nowrap;
@@ -436,7 +436,7 @@
 
 .matrixColumnTitle{
   color: var(--text);
-  font-size: 15px;
+  font-size: var(--fs-body);
   font-weight: 600;
   line-height: 1.35;
 }
@@ -479,7 +479,7 @@
 .tableSecondary{
   margin-top: 2px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .panelFootnote{
@@ -488,7 +488,7 @@
   min-height: 28px;
   padding: 4px var(--panel-inset);
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   gap: 7px;
 }
 
@@ -496,7 +496,7 @@
   padding: 2px 0;
 }
 
-.netRow.netHeader, .termChangeRow.netHeader { min-height: 30px; color: var(--text-muted); font-size: 12px; }
+.netRow.netHeader, .termChangeRow.netHeader { min-height: 30px; color: var(--text-muted); font-size: var(--fs-xs); }
 .netHeader > :nth-child(4), .netHeader > :nth-child(5) { text-align: right; }
 
 .netRow, .termChangeRow{
@@ -510,7 +510,7 @@
 .rankNumber, .tableRank{
   color: var(--text-muted);
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--fs-body);
   font-variant-numeric: tabular-nums;
 }
 
@@ -524,7 +524,7 @@
 }
 
 .seatButton{
-  font-size: 15px;
+  font-size: var(--fs-body);
   font-weight: 600;
 }
 
@@ -535,13 +535,13 @@
 }
 
 .directionMark{
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
 .netValue{
   color: var(--text);
-  font-size: 15px;
+  font-size: var(--fs-body);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -552,7 +552,7 @@
 
 .changeValue{
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--fs-body);
   text-align: right;
 }
 
@@ -578,7 +578,7 @@
   border-radius: 5px;
   color: var(--text-secondary);
   background: transparent;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   line-height: 1.25;
   white-space: nowrap;
@@ -592,7 +592,7 @@
 
 .tagChipCompact{
   padding: 2px 5px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .signalRibbon{
@@ -611,7 +611,7 @@
   min-height: 34px;
   min-width: 0;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   gap: 7px;
 }
 
@@ -619,7 +619,7 @@
   margin-left: auto;
   color: var(--text);
   font-family: inherit;
-  font-size: 22px;
+  font-size: var(--fs-xl);
   font-weight: 500;
 }
 
@@ -641,7 +641,7 @@
   height: 42px;
   padding: 8px 10px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   overflow-wrap: anywhere;
 }
 
@@ -674,14 +674,14 @@
   min-height: 36px;
   line-height: normal;
   padding: 8px 9px;
-  font-size: 15px;
+  font-size: var(--fs-body);
 }
 
 .rangeLabel{
   padding: 5px 7px;
   color: var(--text-muted);
   background: var(--surface-soft);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: 500;
 }
 
@@ -698,7 +698,7 @@
   height: 59px;
   padding: 9px 10px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   overflow-wrap: anywhere;
 }
 
@@ -712,7 +712,7 @@
   align-items: center;
   padding: 3px 7px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   gap: 5px;
 }
@@ -781,7 +781,7 @@
 
 .treeTile strong{
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--fs-body);
   font-weight: 600;
   line-height: 1.4;
   overflow-wrap: anywhere;
@@ -789,12 +789,12 @@
 
 .treeTile > span{
   color: inherit;
-  font-size: 18px;
+  font-size: var(--fs-lg);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-.treeTile small{ color: color-mix(in srgb, var(--text) 85%, var(--surface)); font-size: 12px; }
+.treeTile small{ color: color-mix(in srgb, var(--text) 85%, var(--surface)); font-size: var(--fs-xs); }
 
 .treeLegend{
   display: flex;
@@ -803,7 +803,7 @@
   min-height: 42px;
   padding: 0 var(--panel-inset);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   gap: 15px;
 }
 
@@ -846,7 +846,7 @@
   justify-content: space-between;
   flex-direction: column;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .termColumns{
@@ -868,13 +868,13 @@
   align-items: center;
   justify-items: center;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   gap: 4px;
 }
 
 .termColumn strong{
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .termColumnActive strong{
@@ -882,7 +882,7 @@
 }
 
 .termColumn em{
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-style: normal;
 }
 
@@ -910,7 +910,7 @@
   position: absolute;
   top: -17px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   line-height: 18px;
   white-space: nowrap;
 }
@@ -934,7 +934,7 @@
 .oppositeSeatCell > span{
   overflow: hidden;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -945,7 +945,7 @@
   align-items: center;
   gap: 5px 6px;
   margin-right: 16px;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   white-space: nowrap;
 }
 
@@ -958,7 +958,7 @@
 .termChangeRow{
   padding: 0;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--fs-body);
 }
 
 .termChangeRow .seatButton, .termChangeRow > span:not(.rankNumber):not(.reversalLabel):not(.reversalPlaceholder){
@@ -1013,7 +1013,7 @@
 
 .validationSummary > div > span:not(.metricHint){
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-style: normal;
 }
 
@@ -1026,7 +1026,7 @@
 .validationSummary strong small{
   color: var(--text-muted);
   font-family: inherit;
-  font-size: 15px;
+  font-size: var(--fs-body);
 }
 
 .validationMethod strong{
@@ -1043,13 +1043,13 @@
   height: 54px;
   padding: 9px 6px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   overflow-wrap: anywhere;
 }
 
 .validationTable td:first-child strong{
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--fs-body);
 }
 
 .skeletonGrid{
@@ -1101,19 +1101,19 @@ to{ opacity: 0.9; }
   border: 1px solid var(--line-strong);
   border-radius: 50%;
   color: var(--text-muted);
-  font-size: 20px;
+  font-size: var(--fs-xl);
 }
 
 .emptyPageState h2{
   color: var(--text);
   font-family: inherit;
-  font-size: 22px;
+  font-size: var(--fs-xl);
   font-weight: 500;
 }
 
 .emptyPageState p{
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--fs-body);
 }
 
 .inspector{
@@ -1144,14 +1144,14 @@ to{ opacity: 0.9; }
 .inspector h2{
   margin-top: 14px;
   font-family: inherit;
-  font-size: 24px;
+  font-size: var(--fs-xl);
   font-weight: 500;
 }
 
 .inspector > p{
   margin-top: 8px;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--fs-body);
   line-height: 1.7;
 }
 
@@ -1161,7 +1161,7 @@ to{ opacity: 0.9; }
   height: 28px;
   place-items: center;
   border-radius: 5px;
-  font-size: 20px;
+  font-size: var(--fs-xl);
   line-height: 1;
 }
 
@@ -1184,13 +1184,13 @@ to{ opacity: 0.9; }
 
 .inspectorList dt{
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .inspectorList dd{
   margin: 0;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .inspectorNote{
@@ -1198,7 +1198,7 @@ to{ opacity: 0.9; }
   padding: 9px 10px;
   color: var(--text-muted);
   background: var(--surface-soft);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   line-height: 1.6;
 }
 
@@ -1223,7 +1223,7 @@ to{ opacity: 0.9; }
 .drawerHeader h2{
   margin-top: 5px;
   font-family: inherit;
-  font-size: 27px;
+  font-size: var(--fs-2xl);
   font-weight: 500;
 }
 
@@ -1233,7 +1233,7 @@ to{ opacity: 0.9; }
   flex-wrap: wrap;
   margin-top: 20px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   gap: 9px;
 }
 
@@ -1251,24 +1251,24 @@ to{ opacity: 0.9; }
   align-items: center;
   min-height: 160px;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: var(--fs-body);
   gap: 10px;
 }
 
 .loadingSpinner{
   color: var(--accent);
-  font-size: 22px;
+  font-size: var(--fs-xl);
 }
 
 .historyChart{
   margin-top: 24px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .historyChart svg{ display: block; width: 100%; }
 
-.historyChart text{ fill: var(--text-muted); font-size: 12px; }
+.historyChart text{ fill: var(--text-muted); font-size: var(--fs-xs); }
 
 .historyChart > div{ display: flex; justify-content: space-between; }
 
@@ -1284,7 +1284,7 @@ to{ opacity: 0.9; }
   min-height: 37px;
   align-items: center;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
   gap: 8px;
 }
@@ -1298,7 +1298,7 @@ to{ opacity: 0.9; }
   top: 0;
   background: var(--surface);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .toast{
@@ -1314,7 +1314,7 @@ to{ opacity: 0.9; }
   border-radius: 7px;
   color: var(--text);
   background: var(--surface-raised);
-  font-size: 14px;
+  font-size: var(--fs-body);
   gap: 8px;
 }
 
@@ -1347,13 +1347,13 @@ to{ opacity: 0.9; }
   align-items: center;
   grid-template-columns: 8px 1fr auto;
   color: var(--text-secondary);
-  font-size: 15px;
+  font-size: var(--fs-body);
   gap: 7px;
 }
 
 .divergenceSignalCard b{
   color: currentColor;
-  font-size: 18px;
+  font-size: var(--fs-lg);
 }
 
 .divergenceProducts{
@@ -1369,7 +1369,7 @@ to{ opacity: 0.9; }
   border-radius: 4px;
   color: var(--text-secondary);
   background: var(--surface-soft);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .matrixTableTransposed tbody th strong, .matrixTableTransposed tbody th span{
@@ -1378,12 +1378,12 @@ to{ opacity: 0.9; }
 
 .matrixTableTransposed tbody th strong{
   color: var(--text);
-  font-size: 15px;
+  font-size: var(--fs-body);
 }
 
 .matrixTableTransposed tbody th span{
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .matrixSignal{
@@ -1395,13 +1395,13 @@ to{ opacity: 0.9; }
   background: var(--surface-soft);
 }
 
-.matrixSignal strong{ font-size: 14px; white-space: nowrap; }
+.matrixSignal strong{ font-size: var(--fs-body); white-space: nowrap; }
 
 .matrixAmounts{ display: flex; justify-content: space-between; align-items: baseline; gap: 6px; white-space: nowrap; }
 
-.matrixAmounts b{ font-size: 12px; font-weight: 400; }
+.matrixAmounts b{ font-size: var(--fs-xs); font-weight: 400; }
 
-.matrixMembers{ display: flex; flex-wrap: wrap; gap: 4px 8px; color: var(--text-secondary); font-size: 12px; }
+.matrixMembers{ display: flex; flex-wrap: wrap; gap: 4px 8px; color: var(--text-secondary); font-size: var(--fs-xs); }
 
 .matrixMembers em{ color: inherit; font-style: normal; font-weight: 600; }
 
@@ -1416,12 +1416,12 @@ to{ opacity: 0.9; }
 
 .matrixAmounts{ gap: 4px; }
 
-.matrixAmounts strong{ font-size: 12px; }
+.matrixAmounts strong{ font-size: var(--fs-xs); }
 
 .matrixAmounts b{ font-size: 11px; }
 }
 
-.matrixEmpty{ display: block; color: var(--text-muted); font-size: 12px; text-align: center; }
+.matrixEmpty{ display: block; color: var(--text-muted); font-size: var(--fs-xs); text-align: center; }
 
 .researchSummary{
   scroll-margin-top: 90px;
@@ -1446,10 +1446,10 @@ to{ opacity: 0.9; }
   justify-content: space-between;
   padding-bottom: 6px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
-.marketGroupTitle strong{ color: var(--text-secondary); font-size: 15px; }
+.marketGroupTitle strong{ color: var(--text-secondary); font-size: var(--fs-body); }
 
 .termColumns{
   align-items: start;
@@ -1514,7 +1514,7 @@ to{ opacity: 0.9; }
   display: inline-flex;
   align-items: center;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   gap: 5px;
 }
 
@@ -1526,7 +1526,7 @@ to{ opacity: 0.9; }
 
 .oppositeTotal b{ font-weight: 600; font-variant-numeric: tabular-nums; }
 
-.termTotals{ display: flex; flex-wrap: wrap; gap: 8px 24px; padding: 14px var(--panel-inset);  color: var(--text-secondary); font-size: 13px; }
+.termTotals{ display: flex; flex-wrap: wrap; gap: 8px 24px; padding: 14px var(--panel-inset);  color: var(--text-secondary); font-size: var(--fs-sm); }
 
 .termTotals strong, .termTotals b{ color: var(--text); font-weight: 600; }
 
@@ -1600,7 +1600,7 @@ to{ opacity: 0.9; }
 
 .metricGrid{ grid-template-columns: 1fr 1fr; }
 
-.metricValue{ font-size: 23px; }
+.metricValue{ font-size: var(--fs-xl); }
 
 .netRow{ grid-template-columns: 25px minmax(0, 1fr) 22px 62px 58px; padding: 0 var(--panel-inset); }
 
@@ -1618,9 +1618,9 @@ to{ opacity: 0.9; }
 
 .termBar{ width: 60%; }
 
-.termBar span{ font-size: 12px; }
+.termBar span{ font-size: var(--fs-xs); }
 
-.termColumn strong{ font-size: 12px; }
+.termColumn strong{ font-size: var(--fs-xs); }
 
 .oppositeRow{ grid-template-columns: minmax(0, 1fr) max-content; column-gap: 12px; padding: 12px 0; }
 
@@ -1690,7 +1690,7 @@ to{ opacity: 0.9; }
 
 .rankingTable th:nth-child(2){ width: 20%; }
 
-.rankingTable .seatButton{ font-size: 13px; }
+.rankingTable .seatButton{ font-size: var(--fs-sm); }
 
 .rankingTable .tagChip{ white-space: normal; }
 }
@@ -1699,7 +1699,7 @@ to{ opacity: 0.9; }
 
 .rankingTable td:nth-child(3), .rankingTable td:nth-child(4), .rankingTable td:nth-child(5){ padding-left: 6px; padding-right: 6px; white-space: nowrap; }
 
-.metricHint{ position: relative; display: block; color: var(--text-muted); font-size: 16px; }
+.metricHint{ position: relative; display: block; color: var(--text-muted); font-size: var(--fs-md); }
 
 .metricHint button{ padding: 0; border: 0; color: inherit; background: transparent; font-size: inherit; text-align: left; }
 
@@ -1725,9 +1725,9 @@ to{ opacity: 0.9; }
 @media (max-width: 640px) {.filterBar{ padding-inline: 12px 108px; }
 .filterActions :global(.board-refresh){right:12px}
 
-.filterField input, .filterField select, .tableControls select, .matrixSort{ font-size: 14px; padding: 7px 6px; }
+.filterField input, .filterField select, .tableControls select, .matrixSort{ font-size: var(--fs-body); padding: 7px 6px; }
 
-.metricHint{ font-size: 14px; }
+.metricHint{ font-size: var(--fs-body); }
 
 .metricCard, .productOverview .panelHeader{ padding-inline: 12px; }
 
@@ -1742,13 +1742,13 @@ to{ opacity: 0.9; }
 .validationTable th:last-child, .validationTable td:last-child{ padding-right: 10px; }
 
 
-.validationSummary .metricHint{ position: static; font-size: 14px; }
+.validationSummary .metricHint{ position: static; font-size: var(--fs-body); }
 
-.validationSummary strong{ font-size: 22px; }
+.validationSummary strong{ font-size: var(--fs-xl); }
 
-.validationMethod strong{ font-size: 14px; white-space: nowrap; }
+.validationMethod strong{ font-size: var(--fs-body); white-space: nowrap; }
 
-.hoverHelp{ position: fixed; z-index: 1100; width: max-content; max-width: min(300px, calc(100vw - 24px)); padding: 10px 12px; border: 0; border-radius: 6px; background: var(--surface-soft); color: var(--text-secondary); font-family: inherit; font-size: 13px; font-weight: 400; line-height: 1.6; text-align: left; white-space: pre-line; overflow-wrap: anywhere; }
+.hoverHelp{ position: fixed; z-index: 1100; width: max-content; max-width: min(300px, calc(100vw - 24px)); padding: 10px 12px; border: 0; border-radius: 6px; background: var(--surface-soft); color: var(--text-secondary); font-family: inherit; font-size: var(--fs-sm); font-weight: 400; line-height: 1.6; text-align: left; white-space: pre-line; overflow-wrap: anywhere; }
 
 :is(.matrixTable, .rankingTable, .anomalyTable, .validationTable) :is(th, td):first-child{ padding-left: var(--panel-inset); }
 
