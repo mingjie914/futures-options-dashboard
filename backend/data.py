@@ -43,18 +43,6 @@ def close_forward(pairs, spot, t):
     return median(k + (p['C'] - p['P']) * math.exp(RATE * t) for k, p in nearest) if len(nearest) >= 3 else None
 
 
-def eod_history(raw, code):
-    catalog = raw['catalog']['metadata']
-    month = catalog[code]['series']
-    contracts = [dict(order_book_id=symbol.split('.')[0].replace('-', ''),
-                      maturity_date=meta['last_trade_date'], strike_price=meta['strike'], option_type=meta['cp'])
-                 for symbol, meta in catalog.items() if meta['series'] == month]
-    prices = [dict(order_book_id=symbol.replace('-', ''), date=day, close=close)
-              for day, symbol, close, volume, _ in raw['rows'] if symbol.startswith(month + '-') and volume and volume > 0]
-    prices.extend(dict(order_book_id='000852.XSHG', date=day, close=close) for day, close in raw['spot'].items())
-    return dict(contracts=contracts, prices=prices, calendar=raw['calendar'], source='RDS 日线')
-
-
 def eod_snapshot(raw, day):
     catalog = raw['catalog']['metadata']
     active = {code: meta for code, meta in catalog.items() if meta['first_trade_date'] <= day <= meta['last_trade_date']}

@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ConfigDict
 from typing import Literal, Optional
-from .data import ROOT, eod_history, normalize, historical_volatility
+from .data import ROOT, normalize, historical_volatility
 from .pricing import scenario, exit_analysis
 from futures.backend.transport import ByteCache, ResearchHTTP, fingerprint, memory_size
 
@@ -25,8 +25,7 @@ def _iv_history(path, modified, code, end, window):
     key=('iv',path,modified,code,end,window)
     result=cache.get(key)
     if result is None:
-        raw=json.loads(Path(path).read_text('utf-8'))
-        result=historical_volatility(eod_history(raw,code) if Path(path).stem=='eod' else raw,code,end,window)
+        result=historical_volatility(json.loads(Path(path).read_text('utf-8')),code,end,window)
         cache[key]=result
     return result
 
@@ -36,7 +35,7 @@ def iv_history(code:str, window:Literal['20','60']='60', snapshot_id:str=''):
     snapshot=current()
     if snapshot_id and snapshot_id!=snapshot['snapshot_id']:raise HTTPException(409,'截面已变化，请刷新页面')
     if not any(r['code']==code for r in snapshot['rows']):raise HTTPException(404,'当前截面无此合约')
-    path=_active_folder()/('eod.json' if snapshot.get('mode')=='eod' else 'history-raw.json')
+    path=_active_folder()/'history-raw.json'
     if not path.exists():return dict(code=code,points=[],n=0,reason='尚未保存该合约的日线 IV 历史')
     try:return _iv_history(str(path),fingerprint([path]),code,snapshot['trade_date'],int(window))
     except (ValueError,KeyError,OSError,TypeError) as exc:raise HTTPException(503,'历史数据不可用，请检查已保存的日线') from exc
