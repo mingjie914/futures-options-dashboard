@@ -14,7 +14,7 @@ const loadIntraday = import.meta.env.INTRADAY_PREVIEW ? () => import('./Intraday
 // Only confirmed destinations are visible; deployment can set these at build time.
 const HOME = import.meta.env.VITE_HOME_URL || 'https://mingjiec.com/';
 const BASE = import.meta.env.BASE_URL;
-const modules = [['seats', '席位', loadSeats], ['futures', '期货', loadFutures], ['options', '期权(Beta)', loadOptions]];
+const modules = [['seats', '席位', loadSeats], ['futures', '期货', loadFutures], ['options', '期权', loadOptions]];
 const previews = [...(loadObserve ? [['observe','观察',loadObserve]] : []), ...(loadIntraday ? [['intraday','日内',loadIntraday]] : [])];
 const currentModule = () => previews.find(([id]) => [BASE+id,BASE+id+'/'].includes(location.pathname))?.[0] || modules.find(([id]) => location.pathname.startsWith(`${BASE}${id}/`) || location.pathname === `${BASE}${id}`)?.[0] || 'futures';
 

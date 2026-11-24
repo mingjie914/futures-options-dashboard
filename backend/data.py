@@ -35,6 +35,72 @@ def number(v):
     except (TypeError,ValueError):return None
 
 
+def close_forward(pairs, spot, t):
+    if not spot or t <= 0:
+        return None
+    nearest = sorted(((k, p) for k, p in pairs.items() if 'C' in p and 'P' in p),
+                     key=lambda item: abs(item[0] - spot))[:5]
+    return median(k + (p['C'] - p['P']) * math.exp(RATE * t) for k, p in nearest) if len(nearest) >= 3 else None
+
+
+def eod_history(raw, code):
+    catalog = raw['catalog']['metadata']
+    month = catalog[code]['series']
+    contracts = [dict(order_book_id=symbol.split('.')[0].replace('-', ''),
+                      maturity_date=meta['last_trade_date'], strike_price=meta['strike'], option_type=meta['cp'])
+                 for symbol, meta in catalog.items() if meta['series'] == month]
+    prices = [dict(order_book_id=symbol.replace('-', ''), date=day, close=close)
+              for day, symbol, close, volume, _ in raw['rows'] if symbol.startswith(month + '-') and volume and volume > 0]
+    prices.extend(dict(order_book_id='000852.XSHG', date=day, close=close) for day, close in raw['spot'].items())
+    return dict(contracts=contracts, prices=prices, calendar=raw['calendar'], source='RDS 日线')
+
+
+def eod_snapshot(raw, day):
+    catalog = raw['catalog']['metadata']
+    active = {code: meta for code, meta in catalog.items() if meta['first_trade_date'] <= day <= meta['last_trade_date']}
+    previous_day = max((date for date in raw['calendar'] if date < day), default=None)
+    prices = {(date, symbol): (close, volume, position) for date, symbol, close, volume, position in raw['rows']
+              if date in (day, previous_day)}
+    if {symbol for date, symbol in prices if date == day} - {code.split('.')[0] for code in active}:
+        raise ValueError('期权日线含未匹配目录的合约')
+    spot = raw['spot'][day]
+    months, rows = [], []
+    groups = {}
+    for code, meta in sorted(active.items()):
+        groups.setdefault(meta['series'], []).append((code, meta))
+    for series, contracts in sorted(groups.items()):
+        group = []
+        expiry = raw['catalog']['series'][series]['last_trade_date']
+        month_id = '20' + series[2:]
+        days = (datetime.fromisoformat(expiry) - datetime.fromisoformat(day)).days
+        t = days / 365
+        pairs = {}
+        for code, meta in contracts:
+            symbol = code.split('.')[0]
+            close, volume, oi = map(number, prices.get((day, symbol), (None, None, None)))
+            oi_prev = number(prices.get((previous_day, symbol), (None, None, None))[2])
+            strike, cp = meta['strike'], meta['cp']
+            if close and volume:
+                pairs.setdefault(strike, {})[cp] = close
+            group.append(dict(code=code, month=month_id, strike=strike, cp=cp, expiry=expiry,
+                              t=t, multiplier=meta['multiplier'], close=close, volume=volume, oi=oi,
+                              oi_prev=oi_prev, oi_change=oi-oi_prev if oi is not None and oi_prev is not None else None))
+        forward = close_forward(pairs, spot, t)
+        for row in group:
+            iv = implied(row['close'], forward, row['strike'], t, row['cp']) if forward and row['close'] and row['volume'] else None
+            row.update(iv=iv, forward=forward, quality='close_iv' if iv else 'close_only')
+            if iv:
+                row.update(greeks(forward, row['strike'], t, iv, row['cp'], row['multiplier']))
+        rows.extend(group)
+        months.append(dict(id=month_id, code=series, expiry=expiry, calendar_days=days, forward=forward,
+                           trading_days=sum(day < date <= expiry for date in raw['calendar']),
+                           contracts=len(group), quoted=0, priced=sum(row['close'] is not None for row in group)))
+    return signed_snapshot(dict(mode='eod', asof=day+'T15:00:00+08:00', trade_date=day,
+                                spot=spot, source='RDS 日线', test_only=False, months=months, rows=rows,
+                                rates={'risk_free': RATE}, coverage={'contracts':len(rows), 'quoted':0},
+                                warnings=['仅使用有成交的收盘价反解 IV，无买卖盘口']))
+
+
 def historical_volatility(raw, code, end, window):
     """Fixed-contract close IV; calendar gaps remain null, never splice contracts."""
     from statistics import stdev
@@ -53,8 +119,7 @@ def historical_volatility(raw, code, end, window):
         for c in group:
             value=prices.get((c['order_book_id'],day))
             if value is not None and value>0:pairs.setdefault(c['strike_price'],{})[c['option_type']]=value
-        nearest=sorted([(k,p) for k,p in pairs.items() if 'C' in p and 'P' in p],key=lambda x:abs(x[0]-(spot or 0)))[:5]
-        forward=median([k+(p['C']-p['P'])*math.exp(RATE*t) for k,p in nearest]) if spot and t>0 and len(nearest)>=3 else None
+        forward=close_forward(pairs,spot,t)
         close=prices.get((provider_code,day))
         iv=implied(close,forward,contract['strike_price'],t,contract['option_type']) if forward and close else None
         closes=[prices.get(('000852.XSHG',d)) for d in dates[max(0,index-20):index+1]]
@@ -70,6 +135,20 @@ def historical_volatility(raw, code, end, window):
 
 
 def normalize(folder):
+    eod = load(folder, 'eod')
+    if eod is not None:
+        current = eod_snapshot(eod, eod['trade_date'])
+        previous_day = max((day for day in eod['calendar'] if day < current['trade_date']), default=None)
+        if previous_day in eod['spot'] and any(row[0] == previous_day for row in eod['rows']):
+            previous = eod_snapshot(eod, previous_day)
+            fields = ('month', 'strike', 'cp', 'iv', 'delta', 'quality', 't', 'close', 'volume')
+            current['previous_eod'] = dict(
+                trade_date=previous_day, spot=previous['spot'], months=previous['months'],
+                rows=[{field: row.get(field) for field in fields} for row in previous['rows']],
+            )
+            del current['snapshot_id']
+            return signed_snapshot(current)
+        return current
     meta=load(folder,'collection',{})
     trade_date=meta.get('trade_date','2026-09-09')
     asof=meta.get('asof',trade_date+'T15:00:00+08:00')
@@ -152,5 +231,9 @@ def normalize(folder):
                   *field_warnings,
                   'IV按有效买卖中价、临近平值配对隐含远期计算；利率假设1.5%',
                   '当前支持MO；IO/HO/AU尚未开放分析，缺失月份不补示例数据'])
+    return signed_snapshot(data)
+
+
+def signed_snapshot(data):
     data=clean(data);data['snapshot_id']=hashlib.sha256(json.dumps(data,sort_keys=True,ensure_ascii=False).encode()).hexdigest()[:24]
     return data

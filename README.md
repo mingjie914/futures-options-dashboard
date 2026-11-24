@@ -27,7 +27,7 @@ cd ..
 ./start.ps1 --module seats
 ```
 
-入口 http://127.0.0.1:8790/ ，顶部切换席位、期货、期权(Beta)。默认打开期货；支持 `/seats/`、`/futures/`、`/options/` 深链接。已运行时复用服务，Ctrl+C 只停止本次启动的进程。
+入口 http://127.0.0.1:8790/ ，顶部切换席位、期货、期权。默认打开期货；支持 `/seats/`、`/futures/`、`/options/` 深链接。已运行时复用服务，Ctrl+C 只停止本次启动的进程。
 
 页面只展示已有行情与统计，不采集数据，不提供模拟交易、CSV 下载或打印。无数据时明确显示缺口，不填模拟值。数据挂载见 [跨机器配置](docs/跨机器运行与数据依赖.md)；席位使用 `SEATS_RUNTIME` 指向含 `manifests/current.json` 和所引用 DuckDB 的目录，默认 `runtime/seats`。不要仅复制数据库而遗漏清单。
 

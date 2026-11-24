@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {applyLivePacket,basisComparison,basisRows,formatNumber,intradayRows,liveMatrix,liveOnline,mergeIntraday,openLive,optionRows,optionSeries,optionSmile} from '../src/intraday-live.js';
+import {applyLivePacket,basisComparison,basisRows,formatNumber,intradayRows,liveMatrix,liveOnline,mergeIntraday,openLive,optionRows,optionSeries} from '../src/intraday-live.js';
+import {optionSmile} from '../src/holdings.js';
 
 test('live snapshots replace; deltas merge absolute values and preserve null/removal semantics',()=>{
   const state={quotes:new Map([['OLD',{last:1}]]),epoch:null,version:-1};

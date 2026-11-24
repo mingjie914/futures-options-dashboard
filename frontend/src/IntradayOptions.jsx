@@ -1,6 +1,7 @@
 import {memo,useMemo,useRef} from 'react';
 import {ChartFrame,useChart,axisTooltip,formatPrice} from './charts.js';
-import {formatNumber as number,intradayRows,optionRows,optionSmile} from './intraday-live.js';
+import {formatNumber as number,intradayRows,optionRows} from './intraday-live.js';
+import {optionSmile,optionStrikeTooltip,OPTION_IV_CURVE,OPTION_SIDES,OPTION_STRIKE_TOOLTIP} from './holdings.js';
 
 const tooltip={trigger:'axis',confine:true,renderMode:'richText',borderWidth:0,shadowBlur:0};
 
@@ -38,13 +39,13 @@ export default memo(function IntradayOptions({catalog,quotes,series,intraday}) {
   const spot=quotes.get(meta?.underlying)?.last;
   useChart(ref,chart=>chart.setOption({animation:false,
     legend:{top:0,left:'center',type:'scroll',textStyle:{color:'#455161'}},grid:{left:58,right:62,top:48,bottom:48},
-    tooltip:{...tooltip,formatter:params=>axisTooltip(params,(v,p)=>(p.seriesName==='隐波'?formatPrice(v):number(v))+(p.seriesName==='隐波'?'%':''),'行权价 '+formatPrice(params[0]?.axisValue))},
-    xAxis:{type:'value',scale:true,axisLabel:{hideOverlap:true,color:'#455161',formatter:v=>formatPrice(v)}},
-    yAxis:[{type:'value',scale:true,axisLabel:{color:'#455161',formatter:v=>v+'%'},splitLine:{lineStyle:{color:'#eef0f3'}}},{type:'value',min:0,axisLabel:{color:'#455161'},splitLine:{show:false}}],
+    tooltip:{...OPTION_STRIKE_TOOLTIP,formatter:items=>optionStrikeTooltip(items,rows[items[0]?.dataIndex])},
+    xAxis:{type:'value',scale:true,axisPointer:{snap:true},splitLine:{show:false},axisLabel:{hideOverlap:true,color:'#455161',formatter:v=>formatPrice(v)}},
+    yAxis:[{type:'value',scale:true,axisLabel:{color:'#455161',formatter:v=>v+'%'}},{type:'value',min:0,axisLabel:{color:'#455161'}}].map(axis=>({...axis,axisLine:{show:false},axisTick:{show:false},splitLine:{show:false}})),
     dataZoom:[{type:'inside'},{type:'slider',height:18,bottom:4,showDataShadow:false,borderColor:'transparent',backgroundColor:'transparent',fillerColor:'#4e7fb918'}],
-    series:[{id:'iv',name:'隐波',type:'line',showSymbol:true,symbolSize:4,connectNulls:false,itemStyle:{color:'#3d70ad'},lineStyle:{width:2},z:4,data:optionSmile(rows,spot).map(([k,iv])=>[k,iv===null?null:iv*100]),markLine:{silent:true,symbol:'none',label:{formatter:'现货 '+formatPrice(spot)},lineStyle:{color:'#505c6b',type:'dashed'},data:Number.isFinite(spot)?[{xAxis:spot}]:[]}},
-      ...['C','P'].map((cp,i)=>({id:cp+'oi',name:(i?'认沽':'认购')+'持仓',type:'bar',yAxisIndex:1,barMaxWidth:8,itemStyle:{color:i?'#2b816780':'#b64d4980'},data:rows.map(r=>[r.strike,Number.isFinite(r[cp]?.oi)?r[cp].oi:null])}))]
+    series:[{id:'iv',name:'IV',type:'line',showSymbol:true,symbolSize:3,...OPTION_IV_CURVE,itemStyle:{color:'#3d70ad'},lineStyle:{width:2},z:4,data:optionSmile(rows,spot).map(([k,iv])=>[k,iv===null?null:iv*100]),markLine:{silent:true,symbol:'none',label:{formatter:'现货 '+formatPrice(spot)},lineStyle:{color:'#505c6b',type:'dashed'},data:Number.isFinite(spot)?[{xAxis:spot}]:[]}},
+      ...OPTION_SIDES.map(([cp,name,color])=>({id:cp+'oi',name,type:'bar',yAxisIndex:1,barMaxWidth:8,itemStyle:{color:color+'80'},data:rows.map(r=>[r.strike,Number.isFinite(r[cp]?.oi)?r[cp].oi:null])}))]
   },{replaceMerge:['series'],lazyUpdate:true}),[catalog,series,spot,...rows.flatMap(r=>[r.strike,r.C?.iv,r.C?.oi,r.P?.iv,r.P?.oi])]);
   const ready=rows.some(r=>['C','P'].some(cp=>Number.isFinite(r[cp]?.iv)||Number.isFinite(r[cp]?.oi)));
-  return <section className="intraday-option-group"><div className="intraday-product-heading"><h2>{series}</h2><span className="sub">{Number.isInteger(meta?.trading_dte)&&meta.trading_dte>=0?meta.trading_dte:'—'} DTE / {meta?.last_trade_date||'—'}</span></div><div className="intraday-options"><IntradayTime data={intraday} previousClose={quotes.get(intraday?.future_code)?.prev_close}/><section><div className="observation-section-heading"><h3>波动率与持仓</h3></div><ChartFrame>{ready?<div ref={ref} style={{height:320}} role="img" aria-label="期权隐含波动率与持仓量"/>:<p className="sub" style={{height:320,margin:0}}>等待报价</p>}</ChartFrame></section></div></section>;
+  return <section className="intraday-option-group"><div className="intraday-product-heading"><h2>{series}</h2><span className="sub">{Number.isInteger(meta?.trading_dte)&&meta.trading_dte>=0?meta.trading_dte:'—'} DTE / {meta?.last_trade_date||'—'}</span></div><div className="intraday-options"><IntradayTime data={intraday} previousClose={quotes.get(intraday?.future_code)?.prev_close}/><section><div className="observation-section-heading"><h3>波动率与持仓</h3></div><ChartFrame>{ready?<div ref={ref} style={{height:320,overflow:'hidden'}} role="img" aria-label="期权隐含波动率与持仓量"/>:<p className="sub" style={{height:320,margin:0}}>等待报价</p>}</ChartFrame></section></div></section>;
 });

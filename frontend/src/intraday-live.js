@@ -106,16 +106,6 @@ export function optionRows(catalog,quotes,series) {
   return [...rows.values()].sort((a,b)=>a.strike-b.strike);
 }
 
-export function optionSmile(rows,spot) {
-  let atm=null;
-  if(Number.isFinite(spot))for(const r of rows)if(r.C&&r.P&&(!atm||Math.abs(r.strike-spot)<Math.abs(atm.strike-spot)))atm=r;
-  const valid=v=>Number.isFinite(v)&&v>0;
-  return rows.map(r=>{
-    const c=r.C?.iv,p=r.P?.iv,iv=!Number.isFinite(spot)?null:r===atm?(valid(c)&&valid(p)?(c+p)/2:null):r.strike<spot?p:c;
-    return [r.strike,valid(iv)?iv:null];
-  });
-}
-
 export function basisRows(code,metadata,quotes) {
   const spot=quotes.get(code)?.last;
   return Object.entries(metadata).filter(([,m])=>m.kind==='future'&&m.underlying===code).sort(([a],[b])=>a.localeCompare(b)).map(([contract,m])=>{

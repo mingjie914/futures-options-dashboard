@@ -15,32 +15,94 @@ const module={exports:{}},chartDraws=[];
 new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('/SpreadMatrix.jsx')?matrixModule.exports:id.startsWith('react')?sharedRequire(id):id.endsWith('/charts.js')?{...createRequire(import.meta.url)(id),useChart:(_ref,draw)=>chartDraws.push(draw)}:createRequire(new URL('../src/MarketPanels.jsx',import.meta.url))(id));
 const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel,BasisPrices,BasisDistribution,basisHistory,basisDistribution,spreadMatrix,SpreadMatrix,SeasonalSpreadChart,RolloverProgress}=module.exports;
 
-test('option formats preserve rounding and smile/spot render in one update',async()=>{
+test('option chart aligns IV, holdings and volume on the same strikes',async()=>{
  const source=await readFile(new URL('../../../frontend/src/Options.jsx',import.meta.url),'utf8'),draws=[],module={exports:{}};
- const code=ts.transpileModule(source+'\nexport {formatNumber,formatPrice,VolatilityTab};',{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('.css')?{}:id==='./charts.js'?{...sharedRequire('./src/charts.js'),useChart:(_ref,draw)=>draws.push(draw),usePreference:()=>['single',()=>{}]}:id==='./SurfaceComparison.jsx'?{IvHistory:()=>null}:sharedRequire(id.startsWith('./')?'./src/'+id.slice(2):id));
+ const code=ts.transpileModule(source+'\nexport {formatNumber,formatPrice,MonthChart,MonthStrip};',{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('.css')?{}:id==='./charts.js'?{...sharedRequire('./src/charts.js'),useChart:(_ref,draw)=>draws.push(draw),usePreference:()=>['single',()=>{}]}:id==='./SurfaceComparison.jsx'?{TermOverview:()=>null,ColoredCode:({code})=>code,MONTH_COLORS:['#4e7fb9']}:sharedRequire(id.startsWith('./')?'./src/'+id.slice(2):id));
  for(const digits of [0,1,2,3])for(const value of [null,undefined,'',NaN,Infinity,0,-1234.5678,'1234.5678']){
   const n=value===null||value===undefined||value===''?NaN:Number(value);
   assert.equal(module.exports.formatNumber(value,digits),Number.isFinite(n)?n.toLocaleString('en-US',{minimumFractionDigits:digits,maximumFractionDigits:digits}):'—');
   assert.equal(module.exports.formatPrice(value,digits),Number.isFinite(n)?n.toLocaleString('zh-CN',{useGrouping:false,minimumFractionDigits:digits,maximumFractionDigits:digits}):'—');
   assert.equal(module.exports.formatNumber(value,digits,false),module.exports.formatPrice(value,digits));
  }
- const rows=['C','P'].map(cp=>({month:'202612',cp,strike:6000,iv:.3,code:'MO2612-'+cp+'-6000'})),month={id:'202612'};
- renderToStaticMarkup(React.createElement(module.exports.VolatilityTab,{rows,month,months:[month],spot:6010,snapshot:{}}));
- const options=[];for(const draw of draws)draw({setOption:option=>options.push(option)});
- assert.equal(options.length,1);assert.deepEqual(options[0].series[0].markLine.data,[{xAxis:6010}]);
- assert.deepEqual(options[0].series.map(s=>s.data),[[[6000,30]],[[6000,30]]]);
+ const row=(cp,strike,iv,oi_change)=>({month:'202612',cp,strike,iv,oi:20,oi_change,volume:50,code:'MO2612-'+cp+'-'+strike});
+ const rows=[row('C',6000,.25,0),row('P',6000,.35,-4),row('P',6500,1.58,12)];
+ const month={id:'202612',code:'MO2612',trading_days:0,forward:6010};
+ const props={rows,month,previousRows:[],spot:6010,snapshot:{mode:'eod',spot:6010}};
+ const renderChart=props=>{
+  renderToStaticMarkup(React.createElement(module.exports.MonthChart,props));
+  let option;draws.at(-1)({setOption:value=>option=value});
+  return option;
+ };
+ const months=renderToStaticMarkup(React.createElement(module.exports.MonthStrip,{months:[month],selectedMonthId:'202612'}));
+ assert.match(months,/0 DTE/);
+ const chart=renderChart(props);
+ assert.equal(chart.xAxis.type,'value');
+ assert.equal(chart.xAxis.splitLine.show,false);
+ assert.ok(chart.yAxis.every(axis=>[axis.splitLine,axis.axisLine,axis.axisTick].every(part=>part.show===false)));
+ assert.deepEqual(chart.series[0].markLine.data,[{xAxis:6010}]);
+ assert.deepEqual(chart.series[0].data,[[6000,30],[6500,null]]);
+ assert.equal(chart.series[0].itemStyle.opacity,0.35);
+ assert.equal(chart.series[0].smoothMonotone,'x');
+ assert.equal(chart.series[0].connectNulls,false);
+ const forwardWing=renderChart({...props,month:{...month,forward:6600}});
+ assert.deepEqual(forwardWing.series[0].data,[[6000,30],[6500,158]]);
+ assert.deepEqual(chart.legend.selected,{'认购成交':false,'认沽成交':false});
+ const bars=chart.series.filter(s=>s.type==='bar');
+ assert.ok(bars.every(s=>s.yAxisIndex===1));
+ assert.deepEqual(chart.legend.data,['IV','认沽','认购','认沽成交','认购成交']);
+ assert.deepEqual(bars.map(s=>s.id),['Padded','Premoved','Pbase','Cadded','Cremoved','Cbase']);
+ assert.deepEqual(bars.map(s=>s.data.map(([,v])=>v)),[[null,12],[-4,null],[20,8],[null,null],[null,null],[20,null]]);
+ assert.equal(bars[1].itemStyle.borderType,'dashed');
+ assert.deepEqual(bars[2].markLine.data,[{yAxis:0}]);
+ assert.deepEqual(chart.yAxis.map(axis=>axis.position),['left','right']);
+ assert.equal(chart.yAxis[1].axisLabel.formatter(0),'0 手');
+ assert.equal(chart.xAxis.axisLine.show,false);
+ assert.equal(chart.yAxis[1].min({min:-40,max:500}),-40);
+ assert.equal(chart.yAxis[1].min({min:-1000,max:500}),-100);
+ assert.equal(chart.yAxis[1].min({min:10,max:500}),0);
+ const hover=(plot, i, ...ids)=>plot.tooltip.formatter(ids.map(id=>{
+  const series=plot.series.find(s=>s.id===id);
+  return {dataIndex:i,axisValue:series.data[i][0],seriesId:id,value:series.data[i]};
+ }));
+ assert.equal(chart.tooltip.trigger,'axis');
+ assert.equal(chart.tooltip.borderColor,'#e1e5ea');
+ const full=hover(chart,0,'iv-current','Pbase','Premoved','Cbase');
+ assert.equal(full,'<div><span aria-hidden="true">▸</span> 6000 · IV 30.00%</div><div style="color:#b64d49">认购 20 (0)</div><div style="color:#2b8167">认沽 20 (-4)</div>');
+ assert.equal(hover(chart,0,'Pvolume'),'<div><span aria-hidden="true">▸</span> 6000</div><div style="color:#2b8167">认沽 成交 50</div>');
+ assert.equal(hover(chart,1,'iv-current'),'');
+ assert.deepEqual(chart.series.filter(s=>s.type==='line'&&s.id?.endsWith('volume')).map(s=>[s.data,s.lineStyle.type]),[[[[6000,50],[6500,50]],'dashed'],[[[6000,50],[6500,null]],'dashed']]);
+ assert.equal(renderChart({...props,rows:rows.map(row=>({...row,volume:null}))}).yAxis.length,2);
+ const noHolding=renderChart({...props,rows:rows.map(row=>({...row,oi:null,volume:null}))});
+ assert.equal(noHolding.yAxis[1].show,false);
+ const volumeOnly=renderChart({...props,rows:rows.map(row=>({...row,oi:null}))});
+ assert.deepEqual(volumeOnly.legend.selected,{});
+ assert.equal(noHolding.series.length,1);
+ const priorRows=[row('C',5800,.32,0),row('P',5800,.34,0),row('C',6000,.2779,0)];
+ const prior=renderChart({...props,previousRows:priorRows,snapshot:{...props.snapshot,trade_date:'2026-11-23',previous_eod:{spot:5800,trade_date:'2026-11-20',months:[{id:month.id,forward:5800}]}}});
+ assert.deepEqual(prior.series[0].data,[[5800,null],[6000,30],[6500,null]]);
+ assert.deepEqual(prior.series[1].data,[[5800,33],[6000,27.79],[6500,null]]);
+ assert.deepEqual(prior.legend.data.slice(0,2).map(prior.legend.formatter),['本日 IV','前日 IV']);
+ assert.equal(hover(prior,0,'iv-previous','iv-current'),'');
+ assert.equal(hover(prior,1,'iv-current','iv-previous'),'<div><span aria-hidden="true">▸</span> 6000 · IV 30.00% (+2.21%)</div>');
 });
 
 test('intraday chart keeps the trading session, real gaps and independent price/IV scales',async()=>{
  const draws=[],module={exports:{}};
  const code=ts.transpileModule(await readFile(new URL('../../../frontend/src/IntradayOptions.jsx',import.meta.url),'utf8'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
- new Function('module','exports','require',code)(module,module.exports,id=>id==='./charts.js'?{axisTooltip,formatPrice,ChartFrame:({children})=>children,useChart:(_ref,draw)=>draws.push(draw)}:id==='./intraday-live.js'?sharedRequire('./src/intraday-live.js'):sharedRequire(id));
+ new Function('module','exports','require',code)(module,module.exports,id=>id==='./charts.js'?{axisTooltip,formatPrice,ChartFrame:({children})=>children,useChart:(_ref,draw)=>draws.push(draw)}:id.startsWith('./')?sharedRequire('./src/'+id.slice(2)):sharedRequire(id));
  const data={series:'MO2611',trade_date:'2026-11-03',future_code:'IM2611.CFE',points:[{time:'09:31',future_last:6300,atm_iv:.30,strike:6300},{time:'09:33',future_last:6301,atm_iv:null}]};
  const draw=intraday=>{
   draws.length=0;
   renderToStaticMarkup(React.createElement(module.exports.default,{catalog:{codes:[],metadata:{}},quotes:new Map([['IM2611.CFE',{prev_close:6320}]]),series:'MO2611',intraday}));
   const options=[];for(const draw of draws)draw({setOption:option=>options.push(option)});
+  const strike=options.find(option=>option.xAxis.type==='value');
+  assert.deepEqual(strike.series.slice(1).map(s=>[s.name,s.itemStyle.color]),[['认沽','#2b816780'],['认购','#b64d4980']]);
+  assert.equal(strike.series[0].name,'IV');
+  assert.equal(strike.tooltip.trigger,'axis');
+  assert.equal(strike.tooltip.borderColor,'#e1e5ea');
+  assert.ok([strike.xAxis,...strike.yAxis].every(axis=>axis.splitLine.show===false));
+  assert.ok(strike.yAxis.every(axis=>!axis.axisLine.show&&!axis.axisTick.show));
   return options.find(option=>option.xAxis[0]?.type==='category');
  };
  const chart=draw(data);

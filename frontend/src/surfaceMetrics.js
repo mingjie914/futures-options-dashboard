@@ -22,6 +22,7 @@ function validQuote(row) {
   const ask = positiveFinite(row.ask);
   const iv = positiveFinite(row.iv);
   const t = positiveFinite(row.t);
+  if (row.quality === 'close_iv') return iv !== null && t !== null && positiveFinite(row.close) !== null && positiveFinite(row.volume) !== null;
   if (bid === null || ask === null || iv === null || t === null || ask < bid) return false;
   const mid = (bid + ask) / 2;
   return (ask - bid) / mid <= 0.2;
@@ -35,26 +36,20 @@ function monthForward(monthRows, month) {
 }
 
 function interpolate(points, target, valueKey) {
-  const exact = points.find((point) => finiteNumber(point?.value) === target);
-  if (exact) return finiteNumber(exact[valueKey]);
-  const usable = points
-    .filter((point) => finiteNumber(point?.[valueKey]) !== null && finiteNumber(point?.value) !== null)
-    .map((point) => ({ x: point.value, y: point[valueKey] }))
-    .sort((left, right) => left.x - right.x);
-  if (!usable.length) return null;
-
-  const lower = usable.filter((point) => point.x < target).at(-1);
-  const upper = usable.find((point) => point.x > target);
+  let lower, upper;
+  for (const point of points) {
+    const x = finiteNumber(point?.value);
+    if (x === target) return finiteNumber(point[valueKey]);
+    if (x === null || finiteNumber(point?.[valueKey]) === null) continue;
+    if (x < target && (!lower || x >= lower.value)) lower = point;
+    if (x > target && (!upper || x < upper.value)) upper = point;
+  }
   if (!lower || !upper) return null;
-  return lower.y + (upper.y - lower.y) * ((target - lower.x) / (upper.x - lower.x));
+  return lower[valueKey] + (upper[valueKey] - lower[valueKey]) * ((target - lower.value) / (upper.value - lower.value));
 }
 
 function interpolateDelta(rows, cp, target) {
-  const points = rows
-    .filter((row) => row.cp === cp && validQuote(row))
-    .map((row) => ({ value: finiteNumber(row.delta), iv: finiteNumber(row.iv) }))
-    .filter((point) => point.value !== null && point.iv !== null);
-  return interpolate(points, target, 'iv');
+  return interpolate(rows.filter(row => row.cp === cp && validQuote(row)).map(row => ({ value: row.delta, iv: row.iv })), target, 'iv');
 }
 
 function buildPoints(rows, forward) {
