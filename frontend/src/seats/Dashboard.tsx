@@ -647,7 +647,7 @@ function CombinationMatrix({ combinations, rows, onProduct }: { combinations: Co
           tableScroll.current?.scrollTo({ top: 0 });
         }}><option value="signals">全员同向组数：多 → 少</option><option value="change">净变化幅度：大 → 小</option><option value="original">数据源顺序</option></select>}
       />
-      <div ref={tableScroll} className={styles.matrixTableWrap} tabIndex={0} aria-label="席位分组表，可横向及纵向滚动">
+      <div ref={tableScroll} className={styles.matrixTableWrap} tabIndex={0} role="region" aria-label="席位分组表，可横向及纵向滚动">
         <table className={`${styles.matrixTable} ${styles.matrixTableTransposed}`}>
           <thead>
             <tr>

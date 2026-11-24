@@ -39,13 +39,13 @@ export function intradayRows(data) {
 
 export function openLive(base, publish,series='MO2611',bootstrapBase='',primaryBase='') {
   const routes=[...new Set([primaryBase,base].filter(Boolean).map(url=>url.replace(/\/$/,'')))];
-  let socket,retry,watchdog,wake,route=0,stopped=false,delay=1000,received=0;
+  let socket,retry,watchdog,wake,frame=null,route=0,stopped=false,delay=1000,received=0;
   const state={quotes:new Map(),catalog:null,intraday:null,series,health:null,epoch:null,version:-1,connection:'connecting'};
-  const emit=()=>publish({...state,received});
   const controller=new AbortController();
   const visible=()=>globalThis.document?.visibilityState!=='hidden';
-  const visibility=()=>{clearTimeout(watchdog);if(visible())wake?.();};
-  if(routes.length>1)globalThis.document?.addEventListener('visibilitychange',visibility);
+  const emit=()=>{if(!stopped&&visible()&&frame===null)frame=requestAnimationFrame(()=>{frame=null;if(!stopped&&visible())publish({...state,received});});};
+  const visibility=()=>{clearTimeout(watchdog);if(visible()){wake?.();emit();}else{cancelAnimationFrame(frame);frame=null;}};
+  globalThis.document?.addEventListener('visibilitychange',visibility);
   function connect() {
     state.connection='connecting';emit();
     const ws=socket=new WebSocket(routes[route].replace(/^http/,'ws')+'/api/realtime/v1/stream');
@@ -88,7 +88,7 @@ export function openLive(base, publish,series='MO2611',bootstrapBase='',primaryB
     if(stopped||state.epoch!==null||cached.type!=='snapshot'||!cached.catalog)return;
     applyLivePacket(state,cached);received=performance.now();state.connection=cached.connection;emit();
   }).catch(()=>{});
-  return {select(next){if(next===series)return;state.series=series=next;state.intraday=null;emit();subscribe();},close(){stopped=true;controller.abort();clearTimeout(retry);clearTimeout(watchdog);if(routes.length>1)globalThis.document?.removeEventListener('visibilitychange',visibility);socket?.close();}};
+  return {select(next){if(next===series)return;state.series=series=next;state.intraday=null;emit();subscribe();},close(){stopped=true;controller.abort();clearTimeout(retry);clearTimeout(watchdog);cancelAnimationFrame(frame);globalThis.document?.removeEventListener('visibilitychange',visibility);socket?.close();}};
 }
 
 export function optionSeries(catalog) {
