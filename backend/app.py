@@ -9,10 +9,13 @@ import hashlib
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Literal, Optional
-from .data import ROOT, normalize, historical_volatility
+from typing import Literal, Optional, get_args
+from .data import ROOT, load, normalize, normalize_eod, historical_volatility
 from .pricing import scenario, exit_analysis
 from futures.backend.transport import ByteCache, ResearchHTTP, fingerprint, memory_size
+
+EodProduct = Literal['HO', 'IO']
+SNAPSHOT_PATH = '/api/options/v1/snapshot'
 
 app=FastAPI(title='期权分析 · 本地截面',version='0.1.0')
 lock=Lock();state={'data':None,'revision':None}
@@ -203,6 +206,10 @@ def _previous_result(snapshot):
 
 def source_version(path):
     folder=_active_folder()
+    if path.startswith(SNAPSHOT_PATH + '/'):
+        return fingerprint([folder / (path.rsplit('/', 1)[-1].lower() + '.json')])
+    if path == SNAPSHOT_PATH and (eod := folder/'eod.json').is_file():
+        return fingerprint([eod])
     files=[folder, runtime/'options-active.json', *folder.glob('*.json')]
     if path.endswith(('/previous','/history')):
         files += list(_raw_root().rglob('*.json'))
@@ -213,7 +220,8 @@ code_version=hashlib.sha256(b''.join(p.read_bytes() for p in sorted(Path(__file_
     + Path(__file__).parents[1].joinpath('futures/backend/transport.py').read_bytes()).hexdigest()
 app.add_middleware(ResearchHTTP,version=source_version,cache=cache,code_version=code_version,
     concurrency=int(os.environ.get('OPTIONS_HTTP_CONCURRENCY','1')),
-    paths=['/api/options/v1/'+name for name in ('snapshot','iv-history','previous','history')])
+    paths=[SNAPSHOT_PATH, *(f'{SNAPSHOT_PATH}/{product}' for product in get_args(EodProduct)),
+           *('/api/options/v1/'+name for name in ('iv-history','previous','history'))])
 
 
 @app.middleware('http')
@@ -229,7 +237,7 @@ def version():
     try:
         if not any(_active_folder().glob('*.json')):
             raise HTTPException(503, '数据版本暂不可用')
-        value=hashlib.sha256((code_version+source_version('/snapshot')).encode()).hexdigest()
+        value=hashlib.sha256((code_version+source_version('/version')).encode()).hexdigest()
         return JSONResponse({'version':value},headers={'Cache-Control':'no-store'})
     except (OSError,ValueError,TypeError) as exc:
         raise HTTPException(503,'数据版本暂不可用') from exc
@@ -246,8 +254,21 @@ def status():
             'asof':s['asof'] if s else None,'snapshot_id':s['snapshot_id'] if s else None}
 
 
-@app.get('/api/options/v1/snapshot')
+@app.get(SNAPSHOT_PATH)
 def snapshot():return current()
+
+
+@app.get(SNAPSHOT_PATH + '/{product}')
+def product_snapshot(product:EodProduct):
+    try:
+        eod = load(_active_folder(), product.lower())
+        if eod is None:
+            raise HTTPException(503, '尚未接入该品种期权数据', headers={'X-Snapshot-State':'empty'})
+        if any(not series.startswith(product) for series in eod['catalog']['series']):
+            raise ValueError('期权快照品种与请求不符')
+        return normalize_eod(eod)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(503, '已保存期权快照不可用，请检查归档完整性与数据配置。') from exc
 
 
 @app.get('/api/options/v1/previous')

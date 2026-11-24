@@ -4,6 +4,7 @@ import {basisComparison,formatNumber as number,liveMatrix,liveOnline,openLive,op
 import {usePreference} from './preferences.js';
 import {formatPrice as price} from './charts.js';
 import {SpreadMatrix} from './SpreadMatrix.jsx';
+import {OPTION_PRODUCTS as products} from './holdings.js';
 
 const BASE=import.meta.env.VITE_INTRADAY_BASE?.replace(/\/$/,'');
 import OptionCurves from './IntradayOptions.jsx';
@@ -16,7 +17,6 @@ function Rate({value,limits,signed=false}) {
     {Number.isFinite(value)&&<span className="intraday-rate-bar" aria-hidden="true" style={{left:(Math.min(0,value)-limits[0])/limits[1]*100+'%',width:Math.abs(value)/limits[1]*100+'%',...(signed?{background:value<0?'#216c562d':'#a43d392d'}:{})}}/>}<span>{signed?signedPercent(value):percent(value)}</span>
   </span>;
 }
-const products={IO:'沪深300',HO:'上证50',MO:'中证1000'};
 const units={'CNY/g':'元/克','CNY/kg':'元/千克','CNY/t':'元/吨','CNY/bbl':'元/桶'};
 const sameQuotes=(a,b,codes)=>codes.every(code=>a.get(code)===b.get(code));
 const sameGroup=(a,b)=>a.group===b.group&&sameQuotes(a.quotes,b.quotes,a.group.codes);

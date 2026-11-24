@@ -21,7 +21,7 @@
 }
 
 .options-market-tools .options-note { margin: 0; }
-.options-quote-row strong { margin-left: 8px; font-size: var(--fs-xl); font-weight: 500; }
+.options-index-price { font-size: var(--fs-xl); font-weight: 500; font-variant-numeric: tabular-nums; }
 
 .options-months {
   max-width: 100%;

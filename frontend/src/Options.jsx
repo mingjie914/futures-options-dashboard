@@ -4,7 +4,7 @@ import { useChart, Metric, usePreference, formatPrice as price } from './charts.
 import './options.css';
 import SurfaceComparison, { ColoredCode, MONTH_COLORS, TermOverview } from './SurfaceComparison.jsx';
 import { surfaceMetrics } from './surfaceMetrics.js';
-import { holdingRows, putCallRatio, optionSmile, optionStrikeTooltip, OPTION_IV_CURVE, OPTION_SIDES, OPTION_STRIKE_TOOLTIP } from './holdings.js';
+import { holdingRows, putCallRatio, optionSmile, optionStrikeTooltip, OPTION_IV_CURVE, OPTION_PRODUCTS, OPTION_SIDES, OPTION_STRIKE_TOOLTIP } from './holdings.js';
 
 const SNAPSHOT_ENDPOINT = '/api/options/v1/snapshot';
 const MISSING = '—';
@@ -405,8 +405,14 @@ function ChainTab({ rows, month, months, spot, eod }) {
 }
 
 export default function Options() {
-  const [{snapshot, status, error}, setResource] = useState({status: 'loading'});
+  const [product, setProduct] = useState(() => {
+    const requested = new URLSearchParams(location.search).get('product');
+    return Object.hasOwn(OPTION_PRODUCTS, requested) ? requested : 'MO';
+  });
+  const [resource, setResource] = useState({});
   const [attempt, setAttempt] = useState(0);
+  const {snapshot, status = 'loading', error} =
+    resource.product === product && resource.attempt === attempt ? resource : {};
   const [selectedMonthId, setSelectedMonthId] = useState(() => new URLSearchParams(location.search).get('month'));
   const [activeTab, setActiveTab] = useState(() => {
     const tab = new URLSearchParams(location.search).get('tab');
@@ -416,35 +422,38 @@ export default function Options() {
   useEffect(() => {
     const controller = new AbortController();
     const {signal} = controller;
-    setResource({status: 'loading'});
+    const endpoint = product === 'MO' ? SNAPSHOT_ENDPOINT : SNAPSHOT_ENDPOINT + '/' + product;
+    const publish = result => { if (!signal.aborted) setResource({product, attempt, ...result}); };
     async function loadSnapshot() {
       try {
-        const response = await fetch(SNAPSHOT_ENDPOINT, {headers: {Accept: 'application/json'}, signal});
+        const response = await fetch(endpoint, {headers: {Accept: 'application/json'}, signal});
         if (!response.ok) {
           const empty = response.headers.get('X-Snapshot-State') === 'empty';
           const error = empty ? undefined : await responseError(response, '快照请求失败');
-          if (!signal.aborted) setResource({status: empty ? 'empty' : 'error', error});
+          publish({status: empty ? 'empty' : 'error', error});
           return;
         }
         const snapshot = normalizeSnapshot(await response.json());
         if (signal.aborted) return;
-        setResource({status: 'ready', snapshot});
+        publish({status: 'ready', snapshot});
         setSelectedMonthId(current => snapshot.months.some(month => month.id === current) ? current : (snapshot.months[0]?.id ?? null));
       } catch (error) {
-        if (!signal.aborted) setResource({status: 'error', error: error.message || '无法读取快照'});
+        publish({status: 'error', error: error.message || '无法读取快照'});
       }
     }
     loadSnapshot();
     return () => controller.abort();
-  }, [attempt]);
+  }, [product, attempt]);
 
   useEffect(() => {
     const url = new URL(location.href);
     url.searchParams.set('tab', activeTab);
+    if (product === 'MO') url.searchParams.delete('product');
+    else url.searchParams.set('product', product);
     if (selectedMonthId) url.searchParams.set('month', selectedMonthId);
     else url.searchParams.delete('month');
     history.replaceState(null, '', url);
-  }, [activeTab, selectedMonthId]);
+  }, [activeTab, product, selectedMonthId]);
 
   const months = snapshot?.months || [];
   const eod = snapshot?.mode === 'eod';
@@ -464,13 +473,10 @@ export default function Options() {
     <EmptyState title="快照没有月份" />
   ) : (
     <>
-      <div className="options-market-tools">
-        <div className="options-quote-row"><span>中证1000 <strong>{formatPrice(snapshot.spot)}</strong></span></div>
-        {activeTab === 'chain' && <>
-          <MonthStrip months={months} onSelect={setSelectedMonthId} selectedMonthId={selectedMonth?.id} />
-          <p className="options-note">{formatDte(selectedMonth)} / <time dateTime={selectedMonth?.expiry}>{formatDate(selectedMonth?.expiry)}</time></p>
-        </>}
-      </div>
+      {activeTab === 'chain' && <div className="options-market-tools">
+        <MonthStrip months={months} onSelect={setSelectedMonthId} selectedMonthId={selectedMonth?.id} />
+        <p className="options-note">{formatDte(selectedMonth)} / <time dateTime={selectedMonth?.expiry}>{formatDate(selectedMonth?.expiry)}</time></p>
+      </div>}
       {activeTab === 'chain' ? <ChainTab months={months} rows={snapshot.rows} month={selectedMonth} spot={snapshot.spot} eod={eod} /> :
         <OptionsAnalysis snapshot={snapshot} onOpenChain={id => { setSelectedMonthId(id); selectTab('chain'); }} />}
     </>
@@ -481,7 +487,19 @@ export default function Options() {
       <div className="board-tabs" role="tablist" aria-label="期权分析页签">
         {TAB_ITEMS.map((tab) => <button aria-selected={activeTab === tab.id} key={tab.id} onClick={() => selectTab(tab.id)} role="tab" type="button">{tab.label}</button>)}
       </div>
-      <main className="options-main" aria-busy={status === 'loading'}>{content}</main>
+      <main className="options-main">
+        <div className="options-market-tools">
+          <div className="options-months" role="group" aria-label="股指期权品种">
+            {Object.entries(OPTION_PRODUCTS).map(([code, name]) => (
+              <button key={code} type="button" aria-pressed={code === product}
+                className={'options-month' + (code === product ? ' options-month-selected' : '')}
+                onClick={() => setProduct(code)}>{name}</button>
+            ))}
+          </div>
+          <strong className="options-index-price">{snapshot ? formatPrice(snapshot.spot) : '—'}</strong>
+        </div>
+        <div aria-busy={status === 'loading'}>{content}</div>
+      </main>
     </div>
   );
 }

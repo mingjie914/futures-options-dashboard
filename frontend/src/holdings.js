@@ -27,6 +27,7 @@ export function putCallRatio(rows, field, expectedCount = rows.length) {
 
 const formatQuantity = new Intl.NumberFormat('zh-CN', {maximumFractionDigits: 0});
 
+export const OPTION_PRODUCTS = {IO: '沪深300', HO: '上证50', MO: '中证1000'};
 export const OPTION_SIDES = [['P', '认沽', '#2b8167'], ['C', '认购', '#b64d49']];
 const TOOLTIP_SIDES = [...OPTION_SIDES].reverse();
 

@@ -127,3 +127,53 @@ def test_missing_intraday_volume_is_kept_empty(tmp_path):
     assert row['oi'] is None
     assert row['oi_change'] is None
     assert '保留为空' in snapshot['warnings'][1]
+
+
+def test_product_snapshots_are_isolated_and_revalidated(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+    import backend.app as api
+
+    monkeypatch.setattr(api, '_active_folder', lambda: tmp_path)
+    previous, day, expiry = '2026-11-23', '2026-11-24', '2026-12-18'
+
+    def save(product, spot):
+        series = product + '2612'
+        symbol = series + '-C-3000'
+        payload = dict(trade_date=day, spot={day: spot, previous: spot - 1},
+                       calendar=[previous, day, expiry],
+                       rows=[[previous, symbol, 55, 10, 21], [day, symbol, 60, 15, 33]],
+                       catalog=dict(metadata={symbol + '.CFE': dict(
+                           first_trade_date=previous, last_trade_date=expiry,
+                           series=series, cp='C', strike=3000, multiplier=100)},
+                           series={series: dict(last_trade_date=expiry)}))
+        filename = product.lower() if product != 'MO' else 'eod'
+        (tmp_path / (filename + '.json')).write_text(json.dumps(payload), encoding='utf-8')
+
+    save('MO', 5799)
+    save('HO', 2800)
+    with TestClient(api.app) as client:
+        base = api.SNAPSHOT_PATH
+        ho = client.get(base + '/HO')
+        assert ho.status_code == 200
+        assert ho.json()['spot'] == 2800
+        assert ho.json()['rows'][0]['oi_change'] == 12
+        assert ho.json()['previous_eod']['trade_date'] == previous
+        mo = client.get(base)
+        assert mo.json()['months'][0]['code'] == 'MO2612'
+        old_version = client.get('/api/options/v1/version').json()['version']
+        missing = client.get(base + '/IO')
+        assert missing.status_code == 503 and missing.headers['X-Snapshot-State'] == 'empty'
+
+        save('IO', 4500)
+        io = client.get(base + '/IO')
+        assert io.json()['months'][0]['code'] == 'IO2612'
+        assert io.json()['spot'] == 4500
+        assert io.headers['etag'] != ho.headers['etag']
+        unchanged = client.get(base + '/HO', headers={'If-None-Match': ho.headers['etag']})
+        assert unchanged.status_code == 304 and unchanged.content == b''
+        assert client.get(base, headers={'If-None-Match': mo.headers['etag']}).status_code == 304
+        assert client.get('/api/options/v1/version').json()['version'] != old_version
+        assert client.get(base + '/IF').status_code == 422
+
+        (tmp_path / 'io.json').write_bytes((tmp_path / 'ho.json').read_bytes())
+        assert client.get(base + '/IO').status_code == 503

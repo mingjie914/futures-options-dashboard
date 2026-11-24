@@ -122,21 +122,25 @@ def historical_volatility(raw, code, end, window):
                 range_min=min(values) if values else None,range_max=max(values) if values else None)
 
 
+def normalize_eod(eod):
+    current = eod_snapshot(eod, eod['trade_date'])
+    previous_day = max((day for day in eod['calendar'] if day < current['trade_date']), default=None)
+    if previous_day in eod['spot'] and any(row[0] == previous_day for row in eod['rows']):
+        previous = eod_snapshot(eod, previous_day)
+        fields = ('month', 'strike', 'cp', 'iv', 'delta', 'quality', 't', 'close', 'volume')
+        current['previous_eod'] = dict(
+            trade_date=previous_day, spot=previous['spot'], months=previous['months'],
+            rows=[{field: row.get(field) for field in fields} for row in previous['rows']],
+        )
+        del current['snapshot_id']
+        return signed_snapshot(current)
+    return current
+
+
 def normalize(folder):
     eod = load(folder, 'eod')
     if eod is not None:
-        current = eod_snapshot(eod, eod['trade_date'])
-        previous_day = max((day for day in eod['calendar'] if day < current['trade_date']), default=None)
-        if previous_day in eod['spot'] and any(row[0] == previous_day for row in eod['rows']):
-            previous = eod_snapshot(eod, previous_day)
-            fields = ('month', 'strike', 'cp', 'iv', 'delta', 'quality', 't', 'close', 'volume')
-            current['previous_eod'] = dict(
-                trade_date=previous_day, spot=previous['spot'], months=previous['months'],
-                rows=[{field: row.get(field) for field in fields} for row in previous['rows']],
-            )
-            del current['snapshot_id']
-            return signed_snapshot(current)
-        return current
+        return normalize_eod(eod)
     meta=load(folder,'collection',{})
     trade_date=meta.get('trade_date','2026-09-09')
     asof=meta.get('asof',trade_date+'T15:00:00+08:00')
