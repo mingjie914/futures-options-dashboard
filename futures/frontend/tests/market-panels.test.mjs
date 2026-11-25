@@ -102,7 +102,8 @@ test('intraday chart keeps the trading session, real gaps and independent price/
   assert.equal(strike.tooltip.trigger,'axis');
   assert.equal(strike.tooltip.borderColor,'#e1e5ea');
   assert.ok([strike.xAxis,...strike.yAxis].every(axis=>axis.splitLine.show===false));
-  assert.ok(strike.yAxis.every(axis=>!axis.axisLine.show&&!axis.axisTick.show));
+  assert.ok([strike.xAxis,...strike.yAxis].every(axis=>!axis.axisLine.show&&!axis.axisTick.show));
+  assert.deepEqual(strike.dataZoom.map(zoom=>zoom.type),['inside']);
   return options.find(option=>option.xAxis[0]?.type==='category');
  };
  const chart=draw(data);

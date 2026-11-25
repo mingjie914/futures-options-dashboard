@@ -38,11 +38,11 @@ export default memo(function IntradayOptions({catalog,quotes,series,intraday}) {
   const ref=useRef(),rows=optionRows(selected,quotes),meta=catalog?.metadata?.[rows[0]?.C?.code||rows[0]?.P?.code];
   const spot=quotes.get(meta?.underlying)?.last;
   useChart(ref,chart=>chart.setOption({animation:false,
-    legend:{top:0,left:'center',type:'scroll',textStyle:{color:'#455161'}},grid:{left:58,right:62,top:48,bottom:48},
+    legend:{top:0,left:'center',type:'scroll',textStyle:{color:'#455161'}},grid:{left:58,right:62,top:48,bottom:28},
     tooltip:{...OPTION_STRIKE_TOOLTIP,formatter:items=>optionStrikeTooltip(items,rows[items[0]?.dataIndex])},
-    xAxis:{type:'value',scale:true,axisPointer:{snap:true},splitLine:{show:false},axisLabel:{hideOverlap:true,color:'#455161',formatter:v=>formatPrice(v)}},
+    xAxis:{type:'value',scale:true,axisLine:{show:false},axisTick:{show:false},axisPointer:{snap:true},splitLine:{show:false},axisLabel:{hideOverlap:true,color:'#455161',formatter:v=>formatPrice(v)}},
     yAxis:[{type:'value',scale:true,axisLabel:{color:'#455161',formatter:v=>v+'%'}},{type:'value',min:0,axisLabel:{color:'#455161'}}].map(axis=>({...axis,axisLine:{show:false},axisTick:{show:false},splitLine:{show:false}})),
-    dataZoom:[{type:'inside'},{type:'slider',height:18,bottom:4,showDataShadow:false,borderColor:'transparent',backgroundColor:'transparent',fillerColor:'#4e7fb918'}],
+    dataZoom:[{type:'inside'}],
     series:[{id:'iv',name:'IV',type:'line',showSymbol:true,symbolSize:3,...OPTION_IV_CURVE,itemStyle:{color:'#3d70ad'},lineStyle:{width:2},z:4,data:optionSmile(rows,spot).map(([k,iv])=>[k,iv===null?null:iv*100]),markLine:{silent:true,symbol:'none',label:{formatter:'现货 '+formatPrice(spot)},lineStyle:{color:'#505c6b',type:'dashed'},data:Number.isFinite(spot)?[{xAxis:spot}]:[]}},
       ...OPTION_SIDES.map(([cp,name,color])=>({id:cp+'oi',name,type:'bar',yAxisIndex:1,barMaxWidth:8,itemStyle:{color:color+'80'},data:rows.map(r=>[r.strike,Number.isFinite(r[cp]?.oi)?r[cp].oi:null])}))]
   },{replaceMerge:['series'],lazyUpdate:true}),[catalog,series,spot,...rows.flatMap(r=>[r.strike,r.C?.iv,r.C?.oi,r.P?.iv,r.P?.oi])]);
