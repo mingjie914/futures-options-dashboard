@@ -8,10 +8,6 @@ import { holdingRows, putCallRatio, optionSmile, optionStrikeTooltip, OPTION_IV_
 
 const SNAPSHOT_ENDPOINT = '/api/options/v1/snapshot';
 const MISSING = '—';
-const TAB_ITEMS = [
-  { id: 'analysis', label: '期权分析' },
-  { id: 'chain', label: '期权链' },
-];
 function toNumber(value) {
   if (value === null || value === undefined || value === '') return null;
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -36,10 +32,6 @@ function formatIv(value) {
   return number === null ? MISSING : `${formatNumber(number * 100, 1, false)}%`;
 }
 
-function formatDelta(value) {
-  return formatNumber(value, 2, false);
-}
-
 function formatDate(value) {
   if (value === null || value === undefined || value === '') return MISSING;
   return String(value).slice(0, 10);
@@ -47,11 +39,6 @@ function formatDate(value) {
 
 function formatDte(month) {
   return `${formatNumber(month?.trading_days, 0, false)} DTE`;
-}
-
-function monthColor(months, monthId) {
-  const index = months.findIndex((month) => String(month.id) === String(monthId));
-  return MONTH_COLORS[(index < 0 ? 0 : index) % MONTH_COLORS.length];
 }
 
 function normalizeSnapshot(value) {
@@ -93,16 +80,7 @@ async function responseError(response, fallback) {
   return `${fallback}${detail ? `：${detail}` : `（HTTP ${response.status}）`}`;
 }
 
-function getMonthRows(rows, monthId) {
-  return (Array.isArray(rows) ? rows : []).filter((row) => String(row.month) === String(monthId));
-}
-
-function hasQuote(row) {
-  if (!row) return false;
-  return ['bid', 'ask', 'last', 'close'].some((field) => toNumber(row[field]) !== null);
-}
-
-function nearestStrikes(strikes, spot, count = 3) {
+function nearestStrikes(strikes, spot, count) {
   const value = toNumber(spot);
   if (value === null) return new Set();
   return new Set([...strikes].sort((left, right) => Math.abs(left - value) - Math.abs(right - value)).slice(0, count));
@@ -123,28 +101,6 @@ function EmptyState({ title }) {
   return <div className="options-empty"><h2>{title}</h2></div>;
 }
 
-function MonthStrip({ months, selectedMonthId, onSelect }) {
-  return (
-    <div className="options-months" aria-label="到期月份">
-      {months.map((month, index) => {
-        const color = MONTH_COLORS[index % MONTH_COLORS.length];
-        return (
-          <button
-            className={`options-month ${String(month.id) === String(selectedMonthId) ? 'options-month-selected' : ''}`}
-            key={month.id || index}
-            onClick={() => onSelect(month.id)}
-            aria-pressed={String(month.id) === String(selectedMonthId)}
-            type="button"
-          >
-            <strong><ColoredCode code={month.code || `MO${String(month.id).slice(-4)}`} color={color} /></strong>
-            <em>{formatDte(month)}</em>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 function rowsByMonth(rows) {
   const index = new Map();
   for (const row of rows) {
@@ -163,7 +119,7 @@ function smilePoints(groups, spot) {
 const NO_ROWS = [];
 const SURFACE_VIEWS = [['months','到期月分布'],['smiles','跨月微笑'],['term','ATM 期限结构'],['skew','25Δ 偏度']];
 
-function MonthChart({ snapshot, rows, previousRows, month, color, basis, comparable, onOpenChain }) {
+function MonthChart({ snapshot, rows, previousRows, month, color, basis, comparable, open, onDetailsChange }) {
   const chartRef = useRef(null);
   const monthRows = useMemo(() => holdingRows(rows, comparable, basis), [rows, comparable, basis]);
   const previousGroups = useMemo(() => [...groupRowsByStrike(previousRows)].sort(([a], [b]) => a - b), [previousRows]);
@@ -263,21 +219,27 @@ function MonthChart({ snapshot, rows, previousRows, month, color, basis, compara
     <div className="options-month-heading">
       <h2><ColoredCode code={month.code} color={color} /></h2>
       <span className="options-muted">{formatDte(month)} / <time dateTime={month.expiry}>{formatDate(month.expiry)}</time></span>
-      <button className="options-plain-button" type="button" onClick={() => onOpenChain(month.id)}>期权链</button>
+      <button className="options-plain-button" type="button" aria-expanded={open}
+        aria-controls={`options-details-${month.id}`} onClick={() => onDetailsChange(open ? null : month.id)}>
+        {eod ? '收盘明细' : '截面明细'}
+      </button>
     </div>
     <div className="options-pcr">{pcr.map((value, index) => <Metric key={index} label={(index ? '成交' : '持仓') + ' PCR' + (snapshot.test_only ? ' · 样本' : '')}
       value={formatNumber(value.ratio, 2, false)} hint={value.reason || undefined}/>)}</div>
     {hasIv || hasHolding ? <div className="options-month-chart" ref={chartRef}
       role="img" aria-label={`${month.code} 隐波、持仓与成交`} /> : <EmptyState title="暂无数据" />}
+    <div id={`options-details-${month.id}`} className="options-strike-details" hidden={!open}>
+      {open && <StrikeDetails rows={rows} reference={reference ?? spot} code={month.code} />}
+    </div>
   </section>;
 }
 
-function OptionsAnalysis({ snapshot, onOpenChain }) {
+function OptionsAnalysis({ snapshot, detailsMonth, onDetailsChange }) {
   const {rows, months} = snapshot;
   const [preferredView, setView] = usePreference('options.analysis.view', 'months');
   const eod = snapshot.mode === 'eod';
   const views = eod ? SURFACE_VIEWS.slice(0, 2) : SURFACE_VIEWS;
-  const view = views.some(([id]) => id === preferredView) ? preferredView : 'months';
+  const view = !detailsMonth && views.some(([id]) => id === preferredView) ? preferredView : 'months';
   const needsSurface = eod || view !== 'months';
   const surface = useMemo(() => needsSurface ? surfaceMetrics(rows, months) : NO_ROWS, [needsSurface, rows, months]);
   const [preferredBasis, setBasis] = usePreference('options.holding.basis','daily');
@@ -312,7 +274,10 @@ function OptionsAnalysis({ snapshot, onOpenChain }) {
       date={snapshot.trade_date} onSelect={scrollToMonth} />}
     <div className="options-segment options-analysis-tools">
       {views.map(([id, label]) =>
-        <button key={id} type="button" aria-pressed={view === id} onClick={() => setView(id)}>{label}</button>)}
+        <button key={id} type="button" aria-pressed={view === id} onClick={() => {
+          if (id !== 'months') onDetailsChange(null);
+          setView(id);
+        }}>{label}</button>)}
     </div>
     {view === 'months' ? <>
       {!eod && <div className="options-analysis-tools"><label>变化基准<select value={basis} onChange={event => setBasis(event.target.value)}>
@@ -321,87 +286,75 @@ function OptionsAnalysis({ snapshot, onOpenChain }) {
       <div className="options-month-grid">
         {months.map((month, index) => <MonthChart key={month.id} snapshot={snapshot} rows={monthRows.get(month.id) ?? NO_ROWS}
           previousRows={previousRows.get(month.id) ?? NO_ROWS} month={month} color={MONTH_COLORS[index % MONTH_COLORS.length]}
-          basis={basis} comparable={comparableSnapshot} onOpenChain={onOpenChain} />)}
+          basis={basis} comparable={comparableSnapshot} open={detailsMonth === month.id} onDetailsChange={id => { setView('months'); onDetailsChange(id); }} />)}
       </div>
     </> : <SurfaceComparison data={surface} metric={view} />}
   </div>;
 }
 
-function ChainCell({ value, formatter }) {
-  return <td>{formatter ? formatter(value) : formatNumber(value)}</td>;
+function PositionChange({ value }) {
+  return <td className={value > 0 ? 'options-up' : value < 0 ? 'options-down' : undefined}>
+    {value > 0 ? '+' : ''}{formatNumber(value)}
+  </td>;
 }
 
-function ChainTab({ rows, month, months, spot, eod }) {
-  const [search, setSearch] = usePreference('options.chain.search','');
-  const [filter, setFilter] = usePreference('options.chain.filter','all');
-  const monthRows = useMemo(() => getMonthRows(rows, month?.id), [rows, month?.id]);
-  const groups = useMemo(() => groupRowsByStrike(monthRows), [monthRows]);
-  const strikes = useMemo(() => [...groups.keys()].sort((a, b) => b - a), [groups]);
-  const nearSet = useMemo(() => nearestStrikes(strikes, spot, 3), [strikes, spot]);
-  const query = search.trim();
-  const visibleStrikes = strikes.filter((strike) => {
-    const group = groups.get(strike) || {};
-    if (query && !String(strike).includes(query) && ![group.C?.code, group.P?.code].some(code => String(code || '').includes(query))) return false;
-    return filter === 'all' || (filter === 'quoted' && (hasQuote(group.C) || hasQuote(group.P))) ||
-      (filter === 'near' && nearSet.has(strike));
-  });
-  const code = month?.code || (month?.id ? `MO${String(month.id).slice(-4)}` : MISSING);
-  const color = monthColor(months, month?.id);
-  return (
-    <>
-      <div className="options-heading">
-        <div>
-          <h2>期权链</h2>
-          <p className="options-muted"><ColoredCode code={code} color={color} /></p>
-        </div>
+function StrikeDetails({ rows, reference, code }) {
+  const [search, setSearch] = useState('');
+  const [showAll, setAll] = useState(false);
+  const groups = useMemo(() => groupRowsByStrike(rows), [rows]);
+  const strikes = useMemo(() => [...groups.keys()].sort((a, b) => a - b), [groups]);
+  const near = useMemo(() => nearestStrikes(strikes, reference, 7), [strikes, reference]);
+  const query = search.trim().toUpperCase();
+  const visible = strikes.filter(strike => {
+    if (!query) return showAll || !near.size || near.has(strike);
+    const { C, P } = groups.get(strike);
+    return String(strike).includes(query) || C?.code?.toUpperCase().includes(query) || P?.code?.toUpperCase().includes(query);
+  }).reverse();
+
+  return <>
+    <div className="options-detail-tools">
+      <input aria-label="搜索行权价或合约" placeholder="搜索行权价或合约" type="search"
+        value={search} onChange={event => setSearch(event.target.value)} />
+      <div className="options-segment" role="group" aria-label="行权价范围">
+        {[[false, '平值附近'], [true, '全部']].map(([all, label]) =>
+          <button key={label} type="button" aria-pressed={!query && showAll === all}
+            onClick={() => { setSearch(''); setAll(all); }}>{label}</button>)}
       </div>
-      <div className="options-chain-tools">
-        <input aria-label="搜索执行价或合约" onChange={(event) => setSearch(event.target.value)} placeholder="搜索执行价，如 7700" type="search" value={search} />
-        <div className="options-segment" aria-label="期权链筛选">
-          {[['all', '全部'], ['quoted', eod ? '有收盘价' : '有报价'], ['near', '现货附近']].map(([value, label]) => <button aria-pressed={filter === value} key={value} onClick={() => setFilter(value)} type="button">{label}</button>)}
-        </div>
-        <span className="options-tool-note">{eod ? '价格' : '报价'}：点 · 持仓：手 · IV：%</span>
-      </div>
-      <section className="options-chain-wrap" tabIndex={0} aria-label="期权链明细">
-        <table className="options-chain-table">
-          <colgroup><col span={11} style={{ width: `${100 / 11}%` }} /></colgroup>
-          <thead>
-            <tr className="options-chain-group-head">
-              <th colSpan="5"><span className="options-call-label">CALL · 看涨期权</span> <ColoredCode code={code} color={color} /></th>
-              <th className="options-strike-head">执行价</th>
-              <th colSpan="5"><span className="options-put-label">PUT · 看跌期权</span> <ColoredCode code={code} color={color} /></th>
-            </tr>
-            <tr>
-              <th>OI</th><th>IV</th><th>Delta</th><th>{eod ? '成交量' : '卖价'}</th><th>{eod ? '收盘价' : '买价'}</th>
-              <th className="options-strike-head">高 → 低</th>
-              <th>{eod ? '收盘价' : '买价'}</th><th>{eod ? '成交量' : '卖价'}</th><th>Delta</th><th>IV</th><th>OI</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleStrikes.map((strike) => {
-              const group = groups.get(strike) || {};
-              return (
-                <tr key={strike}>
-                  <ChainCell value={group.C?.oi} />
-                  <ChainCell formatter={formatIv} value={group.C?.iv} />
-                  <ChainCell formatter={formatDelta} value={group.C?.delta} />
-                  <ChainCell formatter={eod ? formatNumber : formatPrice} value={eod ? group.C?.volume : group.C?.ask} />
-                  <ChainCell formatter={formatPrice} value={eod ? group.C?.close : group.C?.bid} />
-                  <td className="options-strike-cell">{formatPrice(strike,0)}</td>
-                  <ChainCell formatter={formatPrice} value={eod ? group.P?.close : group.P?.bid} />
-                  <ChainCell formatter={eod ? formatNumber : formatPrice} value={eod ? group.P?.volume : group.P?.ask} />
-                  <ChainCell formatter={formatDelta} value={group.P?.delta} />
-                  <ChainCell formatter={formatIv} value={group.P?.iv} />
-                  <ChainCell value={group.P?.oi} />
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {!visibleStrikes.length ? <EmptyState title="没有匹配的执行价" /> : null}
-      </section>
-    </>
-  );
+    </div>
+    <div className="options-detail-scroll" role="region" tabIndex={0} aria-label={`${code} 行权价明细`}>
+      <table className="options-detail-table">
+        <colgroup span={4} /><colgroup span={1} /><colgroup span={4} />
+        <thead>
+          <tr>
+            <th scope="colgroup" colSpan={4}>认购</th>
+            <th scope="col" rowSpan={2} aria-sort="descending" className="options-strike-cell">行权价</th>
+            <th scope="colgroup" colSpan={4}>认沽</th>
+          </tr>
+          <tr>
+            <th scope="col">持仓</th><th scope="col">日增减</th><th scope="col">IV</th><th scope="col" aria-label="Delta">Δ</th>
+            <th scope="col" aria-label="Delta">Δ</th><th scope="col">IV</th><th scope="col">日增减</th><th scope="col">持仓</th>
+          </tr>
+        </thead>
+        <tbody>
+          {visible.map(strike => {
+            const { C, P } = groups.get(strike);
+            return <tr key={strike}>
+              <td>{formatNumber(C?.oi)}</td>
+              <PositionChange value={C?.oi_change} />
+              <td>{formatIv(C?.iv)}</td>
+              <td>{formatNumber(C?.delta, 2, false)}</td>
+              <th scope="row" className="options-strike-cell">{formatPrice(strike, 0)}</th>
+              <td>{formatNumber(P?.delta, 2, false)}</td>
+              <td>{formatIv(P?.iv)}</td>
+              <PositionChange value={P?.oi_change} />
+              <td>{formatNumber(P?.oi)}</td>
+            </tr>;
+          })}
+        </tbody>
+      </table>
+      {!visible.length && <p className="options-detail-empty">没有匹配的行权价</p>}
+    </div>
+  </>;
 }
 
 export default function Options() {
@@ -413,11 +366,11 @@ export default function Options() {
   const [attempt, setAttempt] = useState(0);
   const {snapshot, status = 'loading', error} =
     resource.product === product && resource.attempt === attempt ? resource : {};
-  const [selectedMonthId, setSelectedMonthId] = useState(() => new URLSearchParams(location.search).get('month'));
-  const [activeTab, setActiveTab] = useState(() => {
-    const tab = new URLSearchParams(location.search).get('tab');
-    return tab === 'chain' ? 'chain' : 'analysis';
+  const [detailsMonth, setDetailsMonth] = useState(() => {
+    const params = new URLSearchParams(location.search);
+    return params.get('details') ?? (params.get('tab') === 'chain' ? params.get('month') ?? '' : null);
   });
+  const jumpToDetails = useRef(detailsMonth !== null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -436,7 +389,8 @@ export default function Options() {
         const snapshot = normalizeSnapshot(await response.json());
         if (signal.aborted) return;
         publish({status: 'ready', snapshot});
-        setSelectedMonthId(current => snapshot.months.some(month => month.id === current) ? current : (snapshot.months[0]?.id ?? null));
+        setDetailsMonth(current => current === null || snapshot.months.some(month => month.id === current)
+          ? current : snapshot.months[0]?.id ?? null);
       } catch (error) {
         publish({status: 'error', error: error.message || '无法读取快照'});
       }
@@ -447,21 +401,29 @@ export default function Options() {
 
   useEffect(() => {
     const url = new URL(location.href);
-    url.searchParams.set('tab', activeTab);
+    url.searchParams.delete('tab');
+    url.searchParams.delete('month');
     if (product === 'MO') url.searchParams.delete('product');
     else url.searchParams.set('product', product);
-    if (selectedMonthId) url.searchParams.set('month', selectedMonthId);
-    else url.searchParams.delete('month');
-    history.replaceState(null, '', url);
-  }, [activeTab, product, selectedMonthId]);
+    if (detailsMonth === null) url.searchParams.delete('details');
+    else url.searchParams.set('details', detailsMonth);
+    history.replaceState(history.state, '', url);
+  }, [product, detailsMonth]);
 
-  const months = snapshot?.months || [];
-  const eod = snapshot?.mode === 'eod';
-  const selectedMonth = months.find((month) => String(month.id) === String(selectedMonthId)) || months[0] || null;
-  function selectTab(tab) {
-    if (tab === activeTab) return;
-    setActiveTab(tab);
-    window.scrollTo(0, 0);
+  useEffect(() => {
+    if (!jumpToDetails.current || !snapshot || !detailsMonth) return;
+    const frame = requestAnimationFrame(() => {
+      jumpToDetails.current = false;
+      document.getElementById(`options-details-${detailsMonth}`)?.scrollIntoView({block: 'nearest'});
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [snapshot, detailsMonth]);
+
+  function selectProduct(code) {
+    if (code === product) return;
+    jumpToDetails.current = false;
+    setDetailsMonth(null);
+    setProduct(code);
   }
   const content = status === 'loading' ? (
     <div className="options-loading"><span className="options-spinner" />正在读取期权快照…</div>
@@ -469,31 +431,21 @@ export default function Options() {
     <EmptyState title="期权数据尚未接入" />
   ) : status === 'error' ? (
     <div className="options-error-state"><h2>快照读取失败</h2><p>{error}</p><button className="options-primary-button" onClick={() => setAttempt(value => value + 1)} type="button">重试</button></div>
-  ) : !months.length ? (
+  ) : !snapshot.months.length ? (
     <EmptyState title="快照没有月份" />
   ) : (
-    <>
-      {activeTab === 'chain' && <div className="options-market-tools">
-        <MonthStrip months={months} onSelect={setSelectedMonthId} selectedMonthId={selectedMonth?.id} />
-        <p className="options-note">{formatDte(selectedMonth)} / <time dateTime={selectedMonth?.expiry}>{formatDate(selectedMonth?.expiry)}</time></p>
-      </div>}
-      {activeTab === 'chain' ? <ChainTab months={months} rows={snapshot.rows} month={selectedMonth} spot={snapshot.spot} eod={eod} /> :
-        <OptionsAnalysis snapshot={snapshot} onOpenChain={id => { setSelectedMonthId(id); selectTab('chain'); }} />}
-    </>
+    <OptionsAnalysis snapshot={snapshot} detailsMonth={detailsMonth} onDetailsChange={setDetailsMonth} />
   );
 
   return (
     <div className="options-module board-content">
-      <div className="board-tabs" role="tablist" aria-label="期权分析页签">
-        {TAB_ITEMS.map((tab) => <button aria-selected={activeTab === tab.id} key={tab.id} onClick={() => selectTab(tab.id)} role="tab" type="button">{tab.label}</button>)}
-      </div>
       <main className="options-main">
         <div className="options-market-tools">
           <div className="options-months" role="group" aria-label="股指期权品种">
             {Object.entries(OPTION_PRODUCTS).map(([code, name]) => (
               <button key={code} type="button" aria-pressed={code === product}
                 className={'options-month' + (code === product ? ' options-month-selected' : '')}
-                onClick={() => setProduct(code)}>{name}</button>
+                onClick={() => selectProduct(code)}>{name}</button>
             ))}
           </div>
           <strong className="options-index-price">{snapshot ? formatPrice(snapshot.spot) : '—'}</strong>

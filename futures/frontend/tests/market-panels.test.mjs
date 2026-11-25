@@ -17,7 +17,7 @@ const {ScanPanel,CurvePanel,Trend,passesScan,RadarPanel,radarRows,BasisPanel,Bas
 
 test('option chart aligns IV, holdings and volume on the same strikes',async()=>{
  const source=await readFile(new URL('../../../frontend/src/Options.jsx',import.meta.url),'utf8'),draws=[],module={exports:{}};
- const code=ts.transpileModule(source+'\nexport {formatNumber,formatPrice,MonthChart,MonthStrip};',{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+ const code=ts.transpileModule(source+'\nexport {formatNumber,formatPrice,MonthChart};',{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  new Function('module','exports','require',code)(module,module.exports,id=>id.endsWith('.css')?{}:id==='./charts.js'?{...sharedRequire('./src/charts.js'),useChart:(_ref,draw)=>draws.push(draw),usePreference:()=>['single',()=>{}]}:id==='./SurfaceComparison.jsx'?{TermOverview:()=>null,ColoredCode:({code})=>code,MONTH_COLORS:['#4e7fb9']}:sharedRequire(id.startsWith('./')?'./src/'+id.slice(2):id));
  for(const digits of [0,1,2,3])for(const value of [null,undefined,'',NaN,Infinity,0,-1234.5678,'1234.5678']){
   const n=value===null||value===undefined||value===''?NaN:Number(value);
@@ -34,8 +34,20 @@ test('option chart aligns IV, holdings and volume on the same strikes',async()=>
   let option;draws.at(-1)({setOption:value=>option=value});
   return option;
  };
- const months=renderToStaticMarkup(React.createElement(module.exports.MonthStrip,{months:[month],selectedMonthId:'202612'}));
- assert.match(months,/0 DTE/);
+ const closed=renderToStaticMarkup(React.createElement(module.exports.MonthChart,{...props,open:false}));
+ assert.match(closed,/0 DTE/);
+ assert.match(closed,/aria-expanded="false"/);
+ assert.doesNotMatch(closed,/options-detail-table/);
+ const detailRows=[{...rows[0],delta:.47},{...rows[1],delta:-.53},rows[2]];
+ const open=renderToStaticMarkup(React.createElement(module.exports.MonthChart,{...props,rows:detailRows,open:true}));
+ assert.match(open,/aria-expanded="true"/);
+ assert.match(open,/options-detail-table/);
+ assert.match(open,/class="options-down">-4<\/td>/);
+ assert.match(open,/class="options-up">\+12<\/td>/);
+ const detailRow=[...open.matchAll(/<(?:td|th\s+scope="row")[^>]*>([^<]*)<\/(?:td|th)>/g)].map(match=>match[1]);
+ assert.match(open,/aria-sort="descending"[^>]*>行权价/);
+ assert.deepEqual(detailRow.slice(4,6),['6500','—']);
+ assert.deepEqual(detailRow.slice(9,18),['20','0','25.0%','0.47','6000','-0.53','35.0%','-4','20']);
  const chart=renderChart(props);
  assert.equal(chart.xAxis.type,'value');
  assert.equal(chart.xAxis.splitLine.show,false);
