@@ -40,6 +40,21 @@ export const OPTION_STRIKE_TOOLTIP = {
   extraCssText: 'white-space:normal;line-height:1.35;max-width:min(210px,calc(100% - 12px));',
 };
 
+export function optionStrikeExtent(series) {
+  let min = Infinity, max = -Infinity;
+  for (const {data} of series) {
+    for (const [strike, value] of data) {
+      if (!Number.isFinite(strike) || !Number.isFinite(value)) continue;
+      min = Math.min(min, strike);
+      max = Math.max(max, strike);
+    }
+  }
+  if (min === Infinity) return {min: null, max: null};
+  // Leave room for the outer bars while keeping empty catalogue strikes out of the axis.
+  const padding = Math.max(1, (max - min) * 0.035);
+  return {min: min - padding, max: max + padding};
+}
+
 export function optionStrikeTooltip(items, legs) {
   const strike = items[0]?.axisValue;
   if (!Number.isFinite(strike)) return '';

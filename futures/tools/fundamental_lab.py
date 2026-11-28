@@ -565,7 +565,7 @@ def index_update(runs, metadata, start, end, fetch=False):
             for code, requests in by_code.items():
                 current = None
                 for request in sorted(requests, key=lambda item:(item['start'], item['end'])):
-                    begin, finish = date.fromisoformat(request['start']), date.fromisoformat(request['end'])
+                    begin, _ = date.fromisoformat(request['start']), date.fromisoformat(request['end'])
                     if current is None or begin > date.fromisoformat(current['end']) + timedelta(days=1):
                         if current is not None:
                             merged.append(current)

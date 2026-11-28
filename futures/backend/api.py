@@ -379,7 +379,6 @@ def create_app(store=None):
     def spread_history(product: str, near: str, far: str, price_type: str = 'close',
                        end: date = Query(...), start: Optional[date] = None,
                        span: str = Query('3m', pattern='^(1m|3m|1y|all|custom)$')):
-        from datetime import timedelta
         validate_product(product)
         if any(not CONTRACT.fullmatch(s) or s[:-4] != product for s in (near,far)) or near >= far:
             raise ValueError('须为当前品种的不同真实近远月合约，且近月早于远月')

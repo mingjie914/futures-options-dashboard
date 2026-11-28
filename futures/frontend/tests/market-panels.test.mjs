@@ -50,6 +50,10 @@ test('option chart aligns IV, holdings and volume on the same strikes',async()=>
  assert.deepEqual(detailRow.slice(9,18),['20','0','25.0%','0.47','6000','-0.53','35.0%','-4','20']);
  const chart=renderChart(props);
  assert.equal(chart.xAxis.type,'value');
+ assert.deepEqual([chart.xAxis.min,chart.xAxis.max],[5982.5,6517.5]);
+ const emptyWing={...row('P',4000,null,null),oi:null,volume:null};
+ const sparse=renderChart({...props,rows:[emptyWing,...rows]});
+ assert.deepEqual([sparse.xAxis.min,sparse.xAxis.max],[5982.5,6517.5]);
  assert.equal(chart.xAxis.splitLine.show,false);
  assert.ok(chart.yAxis.every(axis=>[axis.splitLine,axis.axisLine,axis.axisTick].every(part=>part.show===false)));
  assert.deepEqual(chart.series[0].markLine.data,[{xAxis:6010}]);
@@ -94,6 +98,7 @@ test('option chart aligns IV, holdings and volume on the same strikes',async()=>
  const prior=renderChart({...props,previousRows:priorRows,snapshot:{...props.snapshot,trade_date:'2026-11-23',previous_eod:{spot:5800,trade_date:'2026-11-20',months:[{id:month.id,forward:5800}]}}});
  assert.deepEqual(prior.series[0].data,[[5800,null],[6000,30],[6500,null]]);
  assert.deepEqual(prior.series[1].data,[[5800,33],[6000,27.79],[6500,null]]);
+ assert.deepEqual([prior.xAxis.min,prior.xAxis.max],[5775.5,6524.5]);
  assert.deepEqual(prior.legend.data.slice(0,2).map(prior.legend.formatter),['本日 IV','前日 IV']);
  assert.equal(hover(prior,0,'iv-previous','iv-current'),'');
  assert.equal(hover(prior,1,'iv-current','iv-previous'),'<div><span aria-hidden="true">▸</span> 6000 · IV 30.00% (+2.21%)</div>');
@@ -104,13 +109,19 @@ test('intraday chart keeps the trading session, real gaps and independent price/
  const code=ts.transpileModule(await readFile(new URL('../../../frontend/src/IntradayOptions.jsx',import.meta.url),'utf8'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  new Function('module','exports','require',code)(module,module.exports,id=>id==='./charts.js'?{axisTooltip,formatPrice,ChartFrame:({children})=>children,useChart:(_ref,draw)=>draws.push(draw)}:id.startsWith('./')?sharedRequire('./src/'+id.slice(2)):sharedRequire(id));
  const data={series:'MO2611',trade_date:'2026-11-03',future_code:'IM2611.CFE',points:[{time:'09:31',future_last:6300,atm_iv:.30,strike:6300},{time:'09:33',future_last:6301,atm_iv:null}]};
+ const catalog={codes:['MO2611-C-4900','MO2611-C-6300'],metadata:{
+  'MO2611-C-4900':{kind:'option',cp:'C',strike:4900,underlying:'000852.SH'},
+  'MO2611-C-6300':{kind:'option',cp:'C',strike:6300,underlying:'000852.SH'},
+ }};
+ const quotes=new Map([['IM2611.CFE',{prev_close:6320}],['000852.SH',{last:6298}],['MO2611-C-6300',{oi:0,iv:.3}]]);
  const draw=intraday=>{
   draws.length=0;
-  renderToStaticMarkup(React.createElement(module.exports.default,{catalog:{codes:[],metadata:{}},quotes:new Map([['IM2611.CFE',{prev_close:6320}]]),series:'MO2611',intraday}));
+  renderToStaticMarkup(React.createElement(module.exports.default,{catalog,quotes,series:'MO2611',intraday}));
   const options=[];for(const draw of draws)draw({setOption:option=>options.push(option)});
   const strike=options.find(option=>option.xAxis.type==='value');
   assert.deepEqual(strike.series.slice(1).map(s=>[s.name,s.itemStyle.color]),[['认沽','#2b816780'],['认购','#b64d4980']]);
   assert.equal(strike.series[0].name,'IV');
+  assert.deepEqual([strike.xAxis.min,strike.xAxis.max],[6299,6301]);
   assert.equal(strike.tooltip.trigger,'axis');
   assert.equal(strike.tooltip.borderColor,'#e1e5ea');
   assert.ok([strike.xAxis,...strike.yAxis].every(axis=>axis.splitLine.show===false));

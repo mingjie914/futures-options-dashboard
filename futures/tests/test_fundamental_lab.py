@@ -1476,7 +1476,7 @@ class SnapshotTests(unittest.TestCase):
                 'pending_requests':[],'rejected':[{'code':'S0049493','date':'2026-01-01','raw_value':1,
                                                   'reason':'outside_requested_range'}]}
         with tempfile.TemporaryDirectory() as folder, patch.object(lab,'ROOT',Path(folder)), \
-             patch.object(lab,'prepare_runs',return_value=review), patch.object(lab,'stage') as stage, \
+             patch.object(lab,'prepare_runs',return_value=review), patch.object(lab,'stage'), \
              patch.object(lab.subprocess,'run') as fetch:
             root=Path(folder)/'runtime/fundamental_lab'
             root.mkdir(parents=True)

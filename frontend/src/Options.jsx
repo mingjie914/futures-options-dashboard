@@ -4,7 +4,7 @@ import { useChart, Metric, usePreference, formatPrice as price } from './charts.
 import './options.css';
 import SurfaceComparison, { ColoredCode, MONTH_COLORS, TermOverview } from './SurfaceComparison.jsx';
 import { surfaceMetrics } from './surfaceMetrics.js';
-import { holdingRows, putCallRatio, optionSmile, optionStrikeTooltip, OPTION_IV_CURVE, OPTION_PRODUCTS, OPTION_SIDES, OPTION_STRIKE_TOOLTIP } from './holdings.js';
+import { holdingRows, putCallRatio, optionSmile, optionStrikeExtent, optionStrikeTooltip, OPTION_IV_CURVE, OPTION_PRODUCTS, OPTION_SIDES, OPTION_STRIKE_TOOLTIP } from './holdings.js';
 
 const SNAPSHOT_ENDPOINT = '/api/options/v1/snapshot';
 const MISSING = '—';
@@ -185,6 +185,7 @@ function MonthChart({ snapshot, rows, previousRows, month, color, basis, compara
           itemStyle: {color}, lineStyle: {color, width: 1.1, opacity: 0.7, type: 'dashed'}}] : []),
       ];
     });
+    const series = [...(hasIv ? iv : []), ...holding];
     const verticalAxis = {type: 'value', axisLine: {show: false}, axisTick: {show: false}, splitLine: {show: false}};
     chart.setOption({
       animation: false,
@@ -201,8 +202,8 @@ function MonthChart({ snapshot, rows, previousRows, month, color, basis, compara
           hasPrevious && name === prior.trade_date ? '前日 IV' : name},
       tooltip: {...OPTION_STRIKE_TOOLTIP,
         formatter: items => optionStrikeTooltip(items, groups[items[0]?.dataIndex]?.[1])},
-      xAxis: {type: 'value', scale: true, axisPointer: {snap: true}, splitLine: {show: false}, splitNumber: 5,
-        axisLabel: {hideOverlap: true, color: '#455161', fontSize: 11, formatter: value => price(value)},
+      xAxis: {type: 'value', ...optionStrikeExtent(series), axisPointer: {snap: true}, splitLine: {show: false}, splitNumber: 5,
+        axisLabel: {hideOverlap: true, showMinLabel: false, showMaxLabel: false, color: '#455161', fontSize: 11, formatter: value => price(value)},
         axisLine: {show: false, onZero: false}, axisTick: {show: false}},
       yAxis: [
         {...verticalAxis, position: 'left', show: hasIv, scale: true, splitNumber: 4,
@@ -211,7 +212,7 @@ function MonthChart({ snapshot, rows, previousRows, month, color, basis, compara
           min: ({min, max}) => Math.max(Math.min(min, 0), -0.2 * Math.max(max, 1)),
           axisLabel: {color: '#455161', fontSize: 11, showMinLabel: !reduced, formatter: value => value === 0 ? '0 手' : formatNumber(value)}},
       ],
-      series: [...(hasIv ? iv : []), ...holding],
+      series,
     }, true);
   }, [groups, points, previousPoints, hasPrevious, hasIv, hasHolding, hasOi, showVolume, date, prior, spot]);
 

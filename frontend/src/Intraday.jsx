@@ -1,5 +1,5 @@
 import './intraday.css';
-import {memo,useEffect,useMemo,useRef,useState} from 'react';
+import {memo,useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import {basisComparison,formatNumber as number,liveMatrix,liveOnline,openLive,optionSeries} from './intraday-live.js';
 import {usePreference} from './preferences.js';
 import {formatPrice as price} from './charts.js';
@@ -20,34 +20,58 @@ function Rate({value,limits,signed=false}) {
 const units={'CNY/g':'元/克','CNY/kg':'元/千克','CNY/t':'元/吨','CNY/bbl':'元/桶'};
 const sameQuotes=(a,b,codes)=>codes.every(code=>a.get(code)===b.get(code));
 const sameGroup=(a,b)=>a.group===b.group&&sameQuotes(a.quotes,b.quotes,a.group.codes);
+const compactBasis=globalThis.matchMedia?.('(max-width:1100px)');
+const subscribeCompactBasis=notify=>{
+  compactBasis?.addEventListener('change',notify);
+  return ()=>compactBasis?.removeEventListener('change',notify);
+};
+const comparisonHeaders=<><th scope="col">年化差</th><th scope="col">基差差 / 价差</th></>;
+function DifferenceCells({row,limits}) {
+  return <><td className="intraday-annual-difference"><Rate value={row?.difference} limits={limits} signed/></td><td>{signedPrice(row?.basisDifference)} / {signedPrice(row?.priceDifference)}</td></>;
+}
 
 const CommodityMatrix=memo(function CommodityMatrix({group:{code,metadata,codes},quotes}) {
   const meta=metadata[codes[0]];
   return <section className="intraday-product intraday-commodity"><div className="intraday-product-heading"><h2>{code}/{meta.product_name}</h2><span className="sub">{units[meta.unit]||meta.unit}</span></div><SpreadMatrix data={liveMatrix(metadata,quotes)} title={null}/></section>;
 },sameGroup);
 
-const IndexBasis=memo(function IndexBasis({group:{code,metadata},quotes,rows,strength}) {
+const IndexBasis=memo(function IndexBasis({group:{code,metadata},quotes,rows,strength,comparisons,difference}) {
   const meta=metadata[code],spot=quotes.get(code),limits=bounds(rows.map(r=>r.annual));
   const matrix=liveMatrix(metadata,quotes,code);
   return <section className="intraday-product"><div className="intraday-product-heading"><h2>{meta.name||code}</h2><strong>{price(spot?.last)}</strong>{strength&&<span className="intraday-strength" title="涨跌点数 / 涨跌幅 / 较中证1000（百分点）"><span className={strength.change>0?'direction-long':strength.change<0?'direction-short':undefined}>{signedPrice(Number.isFinite(strength.change)?spot.last-spot.prev_close:null)} / {signedPercent(strength.change)}</span><span className="sub"> / </span><span>{signedPercent(strength.difference)}</span></span>}</div><div className="intraday-pair"><SpreadMatrix data={matrix} title={null}/><div>
-    {rows.length?<div className="intraday-basis-wrap" tabIndex={0} role="region" aria-label={(meta.name||code)+'基差表，可横向滚动'}><table className="intraday-basis"><colgroup><col className="intraday-contract"/><col/><col/><col/><col/></colgroup><thead><tr><th className="intraday-contract">合约</th><th>年化基差</th><th title="现货 − 期货">基差</th><th title="绝对收益（万元/手）/ 日均（元/手/日）">绝对 / 日均收益</th><th title="持仓手数 / 剩余自然日">持仓量 / 天数</th></tr></thead><tbody>{rows.map(r=><tr key={r.contract}><th scope="row" className="intraday-contract">{r.contract.split('.')[0]}</th><td><Rate value={r.annual} limits={limits}/></td><td>{price(r.basis)}</td><td>{price(r.absolute,1,1)} / {price(r.daily,1,1)}</td><td>{number(r.oi,0)} / {price(r.days,0)}</td></tr>)}</tbody></table></div>:<p className="sub">股指期货待接入</p>}
+    {rows.length?<div className="intraday-basis-wrap" tabIndex={0} role="region" aria-label={(meta.name||code)+'基差表，可横向滚动'}><table className={'intraday-basis'+(comparisons?' intraday-basis-differences':'')}><colgroup><col className="intraday-contract"/><col/><col/><col/><col/>{comparisons&&<><col/><col/></>}</colgroup><thead><tr><th scope="col" className="intraday-contract">合约</th><th>年化基差</th><th title="现货 − 期货">基差</th><th title="绝对收益（万元/手）/ 日均（元/手/日）">绝对 / 日均收益</th><th title="持仓手数 / 剩余自然日">持仓量 / 天数</th>{comparisons&&comparisonHeaders}</tr></thead><tbody>{rows.map((r,i)=><tr key={r.contract}><th scope="row" className="intraday-contract">{r.contract.split('.')[0]}</th><td><Rate value={r.annual} limits={limits}/></td><td>{price(r.basis)}</td><td>{price(r.absolute,1,1)} / {price(r.daily,1,1)}</td><td>{number(r.oi,0)} / {price(r.days,0)}</td>{comparisons&&<DifferenceCells row={comparisons[i]} limits={difference}/>}</tr>)}</tbody></table></div>:<p className="sub">股指期货待接入</p>}
   </div></div></section>;
-},(a,b)=>sameGroup(a,b)&&a.strength?.change===b.strength?.change&&a.strength?.difference===b.strength?.difference);
+},(a,b)=>sameGroup(a,b)&&a.strength?.change===b.strength?.change&&a.strength?.difference===b.strength?.difference
+  && a.comparisons?.length===b.comparisons?.length
+  && (!a.comparisons || (a.difference[0]===b.difference[0]&&a.difference[1]===b.difference[1]
+    && a.comparisons.every((row,i)=>{
+      const next=b.comparisons[i];
+      return row?.difference===next?.difference&&row?.basisDifference===next?.basisDifference&&row?.priceDifference===next?.priceDifference;
+    }))));
 
 const IndexMarket=memo(function IndexMarket({groups,quotes}) {
-  const data=basisComparison(groups,quotes),difference=bounds(data.months.flatMap(m=>m.rows.map(r=>r.difference)),true);
-  return <div className="intraday-indexes"><div>{groups.map((group,i)=><IndexBasis key={group.code} group={group} quotes={quotes} rows={data.books[i].rows} strength={data.strength[i]}/>)}</div><section className="intraday-compare" aria-label="同月基差对照">
+  const compact=useSyncExternalStore(subscribeCompactBasis,()=>compactBasis?.matches??false,()=>false);
+  const data=basisComparison(groups,quotes),monthRows=data.months.flatMap(m=>m.rows),difference=bounds(monthRows.map(r=>r.difference),true);
+  const byContract=compact&&monthRows.length?new Map(monthRows.map(row=>[row.contract,row])):null;
+  return <div className="intraday-indexes"><div>{data.books.map(({group,rows},i)=><IndexBasis key={group.code} group={group} quotes={quotes}
+    rows={rows} strength={data.strength[i]} comparisons={byContract?rows.map(row=>byContract.get(row.contract)):null} difference={difference}/>)}</div>{!compact&&<section className="intraday-compare" aria-label="同月基差对照">
     {data.months.map(({month,rows})=><section key={month} className="intraday-comparison-month" aria-label={month+'同月基差'}><div className="intraday-product-heading"><h2>{month}</h2></div>
-      <table className="intraday-basis"><colgroup><col/><col/><col/></colgroup><thead><tr><th>品种</th><th>年化差</th><th>基差差 / 价差</th></tr></thead><tbody>{rows.map(r=><tr key={r.product}><th scope="row">{r.product}</th><td><Rate value={r.difference} limits={difference} signed/></td><td>{signedPrice(r.basisDifference)} / {signedPrice(r.priceDifference)}</td></tr>)}</tbody></table>
+      <table className="intraday-basis"><colgroup><col/><col/><col/></colgroup><thead><tr><th scope="col">品种</th>{comparisonHeaders}</tr></thead><tbody>{rows.map(r=><tr key={r.product}><th scope="row">{r.product}</th><DifferenceCells row={r} limits={difference}/></tr>)}</tbody></table>
     </section>)}
-  </section></div>;
+  </section>}</div>;
 },(a,b)=>a.groups===b.groups&&a.groups.every(group=>sameQuotes(a.quotes,b.quotes,group.codes)));
 
 function LiveStatus({feed}) {
   const [now,setNow]=useState(()=>performance.now());
-  useEffect(()=>{if(!BASE)return;const timer=setInterval(()=>setNow(performance.now()),1000);return()=>clearInterval(timer);},[]);
-  const online=liveOnline(feed,now),status=!BASE?'等待实时行情接入':['waiting','connecting'].includes(feed.connection)?'连接中':feed.connection==='unauthorized'?'订阅未授权':online?'订阅在线':feed.connection==='connected'?'等待行情':'连接中断，自动重连';
-  return online||(feed.connection==='connected'&&feed.quotes.size>0)?null:<p className="sub" role="status">{status}{feed.quotes.size>0?' · 保留最近值':''}</p>;
+  const watching=Boolean(BASE&&feed.connection==='connected'&&!feed.quotes.size);
+  useEffect(()=>{
+    if(!watching)return;
+    const timer=setInterval(()=>setNow(performance.now()),1000);
+    return()=>clearInterval(timer);
+  },[watching]);
+  if(feed.connection==='connected'&&(feed.quotes.size>0||liveOnline(feed,now)))return null;
+  const status=!BASE?'等待实时行情接入':['waiting','connecting'].includes(feed.connection)?'连接中':feed.connection==='unauthorized'?'订阅未授权':feed.connection==='connected'?'等待行情':'连接中断，自动重连';
+  return <p className="sub" role="status">{status}{feed.quotes.size>0?' · 保留最近值':''}</p>;
 }
 
 export default function Intraday() {
